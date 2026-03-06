@@ -43,11 +43,7 @@ These two programs do the actual ripping and transcoding. ADR controls them auto
 
 1. Click the green **Code** button at the top of this page, then **Download ZIP**
 2. Extract the ZIP to a folder, e.g. `C:\ADR`
-3. Open a terminal in that folder and run:
-
-```powershell
-install.bat
-```
+3. Run `install.bat`
 
 **Option B — Clone with Git:**
 
