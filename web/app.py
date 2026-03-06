@@ -18,7 +18,7 @@ from adr.models import (
     Job, JobStatus, get_session,
     ACTIVE_STATUSES, RIP_PHASE_STATUSES, ENCODE_PHASE_STATUSES, TERMINAL_STATUSES,
 )
-from adr.utils import get_lan_ip, utcnow, format_duration, normalize_drive, BYTES_PER_MB, extract_tmdb_year
+from adr.utils import get_lan_ip, utcnow, format_duration, normalize_drive, BYTES_PER_MB, extract_tmdb_year, get_bundle_root
 
 logger = logging.getLogger(__name__)
 
@@ -48,10 +48,11 @@ def create_app(config: Config, pipeline_manager=None) -> Flask:
         logger.warning("Could not query drive models at startup", exc_info=True)
         _drive_models = {}
 
+    _bundle = get_bundle_root()
     app = Flask(
         __name__,
-        template_folder="../web/templates",
-        static_folder="../web/static",
+        template_folder=str(_bundle / "web" / "templates"),
+        static_folder=str(_bundle / "web" / "static"),
     )
     # Template filter for time formatting
     app.jinja_env.filters["duration"] = lambda s: format_duration(s) if s else "–"

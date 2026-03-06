@@ -35,7 +35,7 @@ def main() -> None:
     setup_logging(config.log_level)
 
     logger.info("=" * 60)
-    logger.info("Automatic Disc Ripper for Windows v0.1.0 starting")
+    logger.info("Automatic Disc Ripper for Windows v1.0.0 starting")
     logger.info("=" * 60)
     logger.info("Config: %s", config)
     logger.info("MakeMKV: %s", config.makemkv_path)

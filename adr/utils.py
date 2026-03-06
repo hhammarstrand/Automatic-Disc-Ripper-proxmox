@@ -3,11 +3,37 @@
 import logging
 import re
 import socket
+import sys
 import unicodedata
 from pathlib import Path
 
 
 logger = logging.getLogger(__name__)
+
+
+def get_project_root() -> Path:
+    """Return the project root directory.
+
+    Works both in normal Python execution and when bundled with PyInstaller.
+    When frozen, bundled data files live in sys._MEIPASS but user files
+    (config, database) should live next to the .exe.
+    """
+    if getattr(sys, "frozen", False):
+        # Running as PyInstaller bundle — exe directory
+        return Path(sys.executable).resolve().parent
+    # Normal Python execution — two levels up from this file (adr/ -> root)
+    return Path(__file__).resolve().parent.parent
+
+
+def get_bundle_root() -> Path:
+    """Return the root for bundled read-only data (templates, presets, static).
+
+    When frozen, PyInstaller extracts data files to a temp dir (sys._MEIPASS).
+    In normal execution this is the same as the project root.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys._MEIPASS)
+    return Path(__file__).resolve().parent.parent
 
 
 def setup_logging(level: str = "INFO") -> None:

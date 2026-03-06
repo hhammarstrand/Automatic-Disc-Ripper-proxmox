@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable
 
 from adr.config import Config
-from adr.utils import BYTES_PER_MB
+from adr.utils import BYTES_PER_MB, get_bundle_root
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class HandBrakeEncoder:
         If exactly one file matches the configured preset name it is
         preferred; otherwise the first .json file found is used.
         """
-        presets_dir = Path(__file__).resolve().parent.parent / "presets"
+        presets_dir = get_bundle_root() / "presets"
         if not presets_dir.is_dir():
             return ""
         json_files = sorted(presets_dir.glob("*.json"))
@@ -357,7 +357,7 @@ class HandBrakeEncoder:
             files_to_scan.append(Path(self._preset_file))
 
         # All .json files in the presets/ directory
-        presets_dir = Path(os.path.dirname(os.path.dirname(__file__))) / "presets"
+        presets_dir = get_bundle_root() / "presets"
         if presets_dir.is_dir():
             for f in sorted(presets_dir.glob("*.json")):
                 if f not in files_to_scan:

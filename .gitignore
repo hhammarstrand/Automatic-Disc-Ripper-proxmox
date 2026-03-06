@@ -37,8 +37,10 @@ desktop.ini
 config/adr.yaml
 config.yaml
 
-# Distribution
+# Distribution / Build
 dist/
 build/
 *.egg-info/
+*.spec
 HandBrakeCLI.exe
+config/arm.yaml

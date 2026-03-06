@@ -11,12 +11,12 @@ from typing import Any
 
 import yaml
 
-from adr.utils import normalize_drive
+from adr.utils import normalize_drive, get_project_root
 
 logger = logging.getLogger(__name__)
 
-# Project root: two levels up from this file (adr/ -> project root)
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
+# Project root: works both as normal Python and PyInstaller bundle.
+PROJECT_ROOT = get_project_root()
 DEFAULT_CONFIG_PATH = PROJECT_ROOT / "config" / "adr.yaml"
 DATABASE_PATH = PROJECT_ROOT / "adr.db"
 
