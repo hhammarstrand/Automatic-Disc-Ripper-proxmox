@@ -1,0 +1,44 @@
+# Byte-compiled / optimized
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Database
+*.db
+*.db-shm
+*.db-wal
+*.db-journal
+*.db.corrupt
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+desktop.ini
+.DS_Store
+
+# Pytest
+.pytest_cache/
+
+# ADR temp files
+*.mkv
+*.mp4
+
+# User config (may contain API keys)
+config/adr.yaml
+config.yaml
+
+# Distribution
+dist/
+build/
+*.egg-info/
+HandBrakeCLI.exe

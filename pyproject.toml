@@ -1,0 +1,23 @@
+[project]
+name = "automatic-disc-ripper"
+version = "0.1.0"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-v --tb=short"
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "UP007",  # X | Y union syntax (already used extensively)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["adr", "web"]
