@@ -28,20 +28,28 @@ Insert a DVD. ADR automatically rips it with MakeMKV, ejects the disc so the nex
 
 Everything below is done on **the machine with the DVD drive**.
 
-### 1. Install prerequisites
+### 1. Install MakeMKV and HandBrakeCLI
 
-| Software | Link | Purpose |
-|----------|------|---------|
-| **Git** | https://git-scm.com/download/win | Clone the repo |
-| **Python 3.11+** | https://www.python.org/downloads/ | Run the app |
-| **MakeMKV** | https://www.makemkv.com/download/ | Rip DVDs to MKV |
-| **HandBrakeCLI** | https://handbrake.fr/downloads2.php | Transcode MKV to MP4 |
+These two programs do the actual ripping and transcoding. ADR controls them automatically, but they must be installed first.
 
-> **Python installation:** Check **"Add python.exe to PATH"**.
->
-> **HandBrake:** Download the **CLI version** (not the GUI app). Extract `HandBrakeCLI.exe` to e.g. `C:\Program Files\HandBrake\`.
+| Software | Link | Notes |
+|----------|------|-------|
+| **MakeMKV** | https://www.makemkv.com/download/ | Install normally. The default path works. |
+| **HandBrakeCLI** | https://handbrake.fr/downloads2.php | Download the **CLI version** (not the GUI). Extract `HandBrakeCLI.exe` to `C:\Program Files\HandBrake\`. |
 
-### 2. Clone and install
+### 2. Download and install ADR
+
+**Option A — Download ZIP (no Git required):**
+
+1. Click the green **Code** button at the top of this page, then **Download ZIP**
+2. Extract the ZIP to a folder, e.g. `C:\ADR`
+3. Open a terminal in that folder and run:
+
+```powershell
+install.bat
+```
+
+**Option B — Clone with Git:**
 
 ```powershell
 git clone https://github.com/hhammarstrand/Automatic-Disc-Ripper-for-Windows.git
@@ -49,15 +57,24 @@ cd Automatic-Disc-Ripper-for-Windows
 install.bat
 ```
 
-The installation script creates a Python virtual environment, installs dependencies, and checks that MakeMKV and HandBrakeCLI are found.
+The installation script handles everything else automatically:
+- Installs **Python** if not already present (downloads and runs the installer)
+- Creates a virtual environment and installs all Python dependencies
+- Creates `config\adr.yaml` from the example configuration
+- Creates output directories (`C:\ADR\raw`, `C:\ADR\completed`)
+- Checks that MakeMKV and HandBrakeCLI are found
+- Optionally launches a setup GUI for easy configuration
 
 <details>
 <summary>Manual installation (without install.bat)</summary>
+
+Install Python 3.11+ from https://www.python.org/downloads/ (check **"Add python.exe to PATH"**), then:
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
+copy config\adr.yaml.example config\adr.yaml
 ```
 
 If `Activate.ps1` is blocked by Execution Policy:
@@ -68,19 +85,9 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ### 3. Configure
 
-Copy the example configuration and customize:
-
-```powershell
-copy config\adr.yaml.example config\adr.yaml
-```
-
-Open `config\adr.yaml` in a text editor and adjust the paths:
+If you skipped the setup GUI during installation, edit `config\adr.yaml` to adjust paths and add your TMDb API key:
 
 ```yaml
-# Paths
-makemkv_path: "C:\\Program Files (x86)\\MakeMKV\\makemkvcon64.exe"
-handbrake_path: "C:\\Program Files\\HandBrake\\HandBrakeCLI.exe"
-
 # Directories (make sure there is plenty of disk space)
 raw_path: "C:\\ADR\\raw"
 completed_path: "C:\\ADR\\completed"
@@ -88,17 +95,14 @@ completed_path: "C:\\ADR\\completed"
 # HandBrake preset (run HandBrakeCLI --preset-list for all options)
 handbrake_preset: "Fast 1080p30"
 
-# Drives ("auto" detects all DVD drives, or specify e.g. ["D:"])
-drives: "auto"
-
-# TMDb API key (optional, for automatic title identification + movie posters)
+# TMDb API key (optional — enables automatic title identification + movie posters)
 # Get one for free: https://www.themoviedb.org/settings/api
 tmdb_api_key: ""
 ```
 
 You can also set the TMDb key as the environment variable `ADR_TMDB_API_KEY` instead of putting it in the config file.
 
-> All settings can also be changed via the web interface afterwards (Settings page).
+> All settings can also be changed later via the web interface (Settings page).
 
 ### 4. Start
 
