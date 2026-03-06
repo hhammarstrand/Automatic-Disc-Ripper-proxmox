@@ -122,7 +122,7 @@ Waiting for disc insertion...
 ### 5. Open the web interface
 
 - **On the ripping machine:** http://localhost:8080
-- **From another device on LAN:** Use the LAN address shown in the terminal.
+- **From another device on LAN:** Use the LAN address shown in the terminal, e.g. `http://192.168.1.111:8080`
 
 > **If you cannot reach it from the network:** Open port 8080 in the Windows firewall:
 > ```powershell
