@@ -6,6 +6,8 @@ Insert a DVD. ADR automatically rips it with MakeMKV, ejects the disc so the nex
 
 > Inspired by [Automatic Disc Ripper](https://github.com/automatic-ripping-machine/automatic-ripping-machine) for Linux, but written from scratch for Windows.
 
+![ADR Dashboard](docs/adr_dashboard_screenshot.png)
+
 ---
 
 ## Features
