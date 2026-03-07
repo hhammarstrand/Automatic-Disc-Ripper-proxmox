@@ -4,7 +4,7 @@
 
 Insert a DVD. ADR automatically rips it with MakeMKV, ejects the disc so the next one can be inserted, and transcodes to MP4 with HandBrake in the background. The entire workflow is monitored and controlled from a web interface accessible from any device on the network.
 
-> Inspired by [Automatic Disc Ripper](https://github.com/automatic-ripping-machine/automatic-ripping-machine) for Linux, but written from scratch for Windows.
+> Inspired by [Automatic Ripping Machine](https://github.com/automatic-ripping-machine/automatic-ripping-machine) for Linux, but written from scratch for Windows.
 
 ![ADR Dashboard](docs/adr_dashboard_screenshot.png)
 
