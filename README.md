@@ -1,305 +1,154 @@
-# Automatic Disc Ripper for Windows
+# Automatic Disc Ripper for Proxmox
 
-**Automatic Disc Ripper for Windows** — automated DVD ripping with MakeMKV, transcoding with HandBrake, and a web UI for monitoring and control.
+**Automatic Disc Ripper for Proxmox** — headless DVD/Blu-ray ripping and
+transcoding, designed to run inside a Proxmox LXC container with an optical
+drive passed through from the host.
 
-Insert a DVD. ADR automatically rips it with MakeMKV, ejects the disc so the next one can be inserted, and transcodes to MP4 with HandBrake in the background. The entire workflow is monitored and controlled from a web interface accessible from any device on the network.
+Insert a disc. ADR rips it with MakeMKV, ejects the tray so the next disc can
+go in, and transcodes to MP4 with HandBrake in the background. Everything is
+monitored from a web UI on port 8080.
 
-> Inspired by [Automatic Ripping Machine](https://github.com/automatic-ripping-machine/automatic-ripping-machine) for Linux, but written from scratch for Windows.
+This is a Linux port of
+[hhammarstrand/Automatic-Disc-Ripper-for-Windows](https://github.com/hhammarstrand/Automatic-Disc-Ripper-for-Windows).
+The web UI, TMDb metadata lookups, job database, HandBrake preset discovery,
+and watch-folder feature are unchanged. The Windows-specific WMI and pywin32
+bits have been replaced with Linux equivalents (`/dev/sr*`, the
+`CDROM_DRIVE_STATUS` / `CDROMEJECT` ioctls, `blkid` for volume labels).
 
-![ADR Dashboard](docs/adr_dashboard_screenshot.png)
+> **Credits.** Design borrows from
+> [Automatic Ripping Machine](https://github.com/automatic-ripping-machine/automatic-ripping-machine):
+> the cdrom-group + service-user pattern, the decoupled rip/encode queue,
+> the optional udev rule in `packaging/99-adr.rules`, and the general
+> "insert disc → MP4 on Plex" flow are all prior art from ARM.
+>
+> ARM is the mature project in this space — if you need audio CDs
+> (abcde), data-disc ISO backups, multi-episode TV support, or a Docker
+> deployment, use ARM instead. This fork is a lighter-weight option for
+> users who already run Proxmox and want a small single-purpose LXC.
 
 ---
 
-## Features
+## Quick install on Proxmox (recommended)
 
-- **Automatic disc detection** — WMI-based monitoring of optical drives. Insert a DVD and ripping starts automatically.
-- **MakeMKV ripping** — Rips titles from DVD to MKV using `makemkvcon` in robot mode.
-- **HandBrake transcoding** — Transcodes ripped MKV files to MP4 with a configurable preset.
-- **Automatic eject** — The disc is ejected when ripping completes so the next disc can be inserted while transcoding continues.
-- **TMDb identification** — Looks up movie title, year, and poster via The Movie Database API.
-- **Plex-compatible folder structure** — Finished files are saved as `Movie (Year)/Movie (Year).mp4`.
-- **LAN web interface** — Dashboard with real-time progress, history, and settings. Accessible from any device on the network.
-- **Multiple drives** — Support for parallel ripping from multiple DVD drives.
-- **Encode queue** — Encoding jobs are queued and run independently of ripping.
-- **Watch folder** — Monitor a folder and automatically transcode any video files that appear.
-- **Custom HandBrake presets** — Place JSON preset files in `presets/` and they are discovered automatically.
+From the **Proxmox host shell**, run:
+
+```bash
+bash -c "$(wget -qLO - https://raw.githubusercontent.com/hhammarstrand/Automatic-Disc-Ripper-proxmox/main/proxmox/ct/adr.sh)"
+```
+
+The helper script creates a Debian 12 LXC container, installs HandBrakeCLI,
+MakeMKV, and the app, sets up a systemd service, and patches the CT's config
+to pass through `/dev/sr0`. See [`proxmox/README.md`](proxmox/README.md) for
+details.
 
 ---
 
-## Quick Start
+## Manual install (any Linux host)
 
-Everything below is done on **the machine with the DVD drive**.
+If you already have a Linux box or LXC and just want to run the app:
 
 ### 1. Install MakeMKV and HandBrakeCLI
 
-These two programs do the actual ripping and transcoding. ADR controls them automatically, but they must be installed first.
+| Tool | How |
+|---|---|
+| **HandBrakeCLI** | `apt install handbrake-cli` on Debian 12 |
+| **MakeMKV** | No Debian package. Build from source: see `proxmox/install/makemkv.sh` or the [MakeMKV forum guide](https://forum.makemkv.com/forum/viewtopic.php?f=3&t=224). The `makemkvcon` binary must land in `/usr/bin/` (or point `makemkv_path` in the config at it). |
 
-| Software | Link | Notes |
-|----------|------|-------|
-| **MakeMKV** | https://www.makemkv.com/download/ | Install normally. The default path works. |
-| **HandBrakeCLI** | https://handbrake.fr/downloads2.php | Download the **CLI version** (not the GUI). Extract `HandBrakeCLI.exe` to `C:\Program Files\HandBrake\`. |
+Also install helpers used for disc detection:
 
-### 2. Download and install ADR
-
-**Option A — Download ZIP (no Git required):**
-
-1. Click the green **Code** button at the top of this page, then **Download ZIP**
-2. Extract the ZIP to a folder, e.g. `C:\ADR`
-3. Run `install.bat`
-
-**Option B — Clone with Git:**
-
-```powershell
-git clone https://github.com/hhammarstrand/Automatic-Disc-Ripper-for-Windows.git
-cd Automatic-Disc-Ripper-for-Windows
-install.bat
+```bash
+apt install -y eject util-linux python3-venv
 ```
 
-The installation script handles everything else automatically:
-- Installs **Python** if not already present (downloads and runs the installer)
-- Creates a virtual environment and installs all Python dependencies
-- Creates `config\adr.yaml` from the example configuration
-- Creates output directories (`C:\ADR\raw`, `C:\ADR\completed`)
-- Checks that MakeMKV and HandBrakeCLI are found
-- Optionally launches a setup GUI for easy configuration
+### 2. Install ADR
 
-<details>
-<summary>Manual installation (without install.bat)</summary>
-
-Install Python 3.11+ from https://www.python.org/downloads/ (check **"Add python.exe to PATH"**), then:
-
-```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-copy config\adr.yaml.example config\adr.yaml
+```bash
+git clone https://github.com/hhammarstrand/Automatic-Disc-Ripper-proxmox.git /opt/adr
+cd /opt/adr
+sudo ./install.sh
 ```
 
-If `Activate.ps1` is blocked by Execution Policy:
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-```
-</details>
+`install.sh` creates a venv, installs Python dependencies, seeds
+`config/adr.yaml` from the example, creates `/var/lib/adr/{raw,completed}`,
+and installs + enables a systemd unit that runs the app as the `adr` user.
 
-### 3. Configure
+The app listens on `http://0.0.0.0:8080` by default. Visit it from any
+browser on the LAN.
 
-If you skipped the setup GUI during installation, edit `config\adr.yaml` to adjust paths and add your TMDb API key:
+To run without systemd (e.g. for development), pass `--no-service`:
 
-```yaml
-# Directories (make sure there is plenty of disk space)
-raw_path: "C:\\ADR\\raw"
-completed_path: "C:\\ADR\\completed"
-
-# HandBrake preset (run HandBrakeCLI --preset-list for all options)
-handbrake_preset: "Fast 1080p30"
-
-# TMDb API key (optional — enables automatic title identification + movie posters)
-# Get one for free: https://www.themoviedb.org/settings/api
-tmdb_api_key: ""
-```
-
-You can also set the TMDb key as the environment variable `ADR_TMDB_API_KEY` instead of putting it in the config file.
-
-> All settings can also be changed later via the web interface (Settings page).
-
-### 4. Start
-
-```powershell
-start.bat
-```
-
-Or manually:
-```powershell
-.venv\Scripts\Activate.ps1
-python run.py
-```
-
-On startup you will see:
-```
-Web UI (local):  http://localhost:8080
-Web UI (LAN):    http://192.168.1.42:8080
-Waiting for disc insertion...
-```
-
-### 5. Open the web interface
-
-- **On the ripping machine:** http://localhost:8080
-- **From another device on LAN:** Use the LAN address shown in the terminal, e.g. `http://192.168.1.111:8080`
-
-> **If you cannot reach it from the network:** Open port 8080 in the Windows firewall:
-> ```powershell
-> New-NetFirewallRule -DisplayName "Automatic Disc Ripper for Windows" -Direction Inbound -LocalPort 8080 -Protocol TCP -Action Allow
-> ```
-
----
-
-## Usage
-
-### DVD Ripping
-
-1. Insert a DVD into any monitored drive
-2. ADR detects the disc and creates a job automatically
-3. The movie title is identified via TMDb (if an API key is configured)
-4. MakeMKV rips titles to MKV
-5. The disc is ejected — **insert the next disc right away!**
-6. HandBrake transcodes MKV to MP4 in the background
-7. The finished file is saved in `completed_path` under `Movie (Year)/Movie (Year).mp4`
-
-### Watch Folder
-
-Configure `watch_path` in `config/adr.yaml` (or via the web Settings page):
-
-```yaml
-watch_path: "C:\\ADR\\watch"
-watch_output_path: "C:\\ADR\\encoded"
-```
-
-- Copy any video file (`.mkv`, `.avi`, `.mp4`, `.mov`, `.ts`, etc.) to the watch folder
-- ADR picks up the file, transcodes it with HandBrake, and saves it to the output folder
-- Files that are still being copied are left alone until they stop growing
-
-### Custom HandBrake Presets
-
-Place one or more `.json` preset files in the `presets/` folder in the project root. ADR discovers them automatically.
-
-To export a preset from HandBrake:
-1. Open HandBrake GUI
-2. Go to Presets
-3. Right-click your preset and choose *Export to file*
-4. Save the `.json` file in `presets/`
-
-Then set the preset name in the configuration:
-```yaml
-handbrake_preset: "My Preset Name"
-```
-
-> The preset name must match the `PresetName` inside the JSON file exactly.
-
-### Command-line Arguments
-
-```powershell
-python run.py                  # Default start
-python run.py --port 9090      # Different port
-python run.py --host 127.0.0.1 # Local access only (no LAN)
-python run.py --config C:\my\config.yaml  # Custom config file
+```bash
+./install.sh --no-service
+.venv/bin/python run.py
 ```
 
 ---
 
-## Web Interface
+## How disc detection works on Linux
 
-| Page | Description |
-|------|-------------|
-| **Dashboard** (`/`) | Drive overview, active jobs with progress bars, watch folder status, recent completed jobs |
-| **History** (`/history`) | All jobs with status filter |
-| **Settings** (`/settings`) | Edit all settings via a web form |
+ADR polls each `/dev/sr*` device every 3 s using the `CDROM_DRIVE_STATUS`
+ioctl. When a drive reports `CDS_DISC_OK`, a job is queued. The volume label
+is read via `blkid`. Ejection is done with the `CDROMEJECT` ioctl, falling
+back to the `eject(1)` command.
 
-The web UI auto-refreshes every 3 seconds.
+Polling is simple and requires no root. Event-driven detection via udev is
+not used by the app itself; the 3-second latency is negligible next to a
+20–40 minute rip. An **optional** udev rule
+(`packaging/99-adr.rules`, modeled on ARM's rules) is shipped for
+observability — install it if you want disc-insert events logged to syslog
+for troubleshooting.
 
-### REST API
+### Running as a non-root user
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/jobs` | GET | List all jobs (filterable with `?status=...`) |
-| `/api/jobs/<id>` | GET | Details for a single job |
-| `/api/jobs/<id>/cancel` | POST | Cancel a job |
-| `/api/jobs/<id>/rematch` | POST | Re-run TMDb search for a job |
-| `/api/drives` | GET | Status of all monitored drives |
-| `/api/status` | GET | System status (queue, workers, watch folder) |
-| `/api/settings` | GET/POST | Read/write configuration |
-| `/api/presets` | GET | List available HandBrake presets |
-| `/api/preset-check` | GET | Verify configured preset |
+The `adr` user needs to be in the `cdrom` group so it can open `/dev/sr*`.
+`install.sh` adds the user to that group automatically. Ejection requires
+write access to the device, which the `cdrom` group grants on Debian.
 
 ---
 
-## Run Automatically at Startup
+## Configuration
 
-### Option A — Scheduled Task (recommended)
+All settings live in `config/adr.yaml`. Defaults:
 
-```powershell
-$action = New-ScheduledTaskAction `
-    -Execute "$PWD\.venv\Scripts\python.exe" `
-    -Argument "$PWD\run.py" `
-    -WorkingDirectory "$PWD"
+| Key | Default | Notes |
+|---|---|---|
+| `makemkv_path` | `/usr/bin/makemkvcon` | |
+| `handbrake_path` | `/usr/bin/HandBrakeCLI` | |
+| `raw_path` | `/var/lib/adr/raw` | MKV staging |
+| `completed_path` | `/var/lib/adr/completed` | final MP4s |
+| `drives` | `auto` | or list: `["/dev/sr0", "/dev/sr1"]` |
+| `disabled_drives` | `[]` | list of `/dev/sr*` paths to ignore |
+| `no_eject_drives` | `[]` | list of `/dev/sr*` paths where auto-eject is off |
+| `drive_labels` | `{}` | friendly names, e.g. `/dev/sr0: "LG External"` |
+| `web_host` | `0.0.0.0` | |
+| `web_port` | `8080` | |
+| `tmdb_api_key` | `''` | or set `ADR_TMDB_API_KEY` env var |
 
-$trigger = New-ScheduledTaskTrigger -AtLogOn
-
-Register-ScheduledTask -TaskName "Automatic Disc Ripper for Windows" -Action $action -Trigger $trigger `
-    -Description "Automatic Disc Ripper" -RunLevel Highest
-```
-
-### Option B — Shortcut in the Startup folder
-
-1. Press `Win+R`, type `shell:startup`, press Enter
-2. Create a shortcut with target: `.venv\Scripts\python.exe run.py`
-3. Set "Start in" to the project folder
+The settings page in the web UI edits the same file.
 
 ---
 
-## Troubleshooting
+## Logs and troubleshooting
 
-| Problem | Solution |
-|---------|----------|
-| **"No optical drives detected"** | Make sure the DVD drive is visible in File Explorer. Try unplugging and re-plugging USB drives. |
-| **"MakeMKV not found"** | Check that `makemkv_path` points to the correct file. Default: `C:\Program Files (x86)\MakeMKV\makemkvcon64.exe` |
-| **"HandBrakeCLI not found"** | Download the CLI version from handbrake.fr and update `handbrake_path`. |
-| **Web UI not reachable from LAN** | Open port 8080 in the firewall (see above). Check that `web_host` is `0.0.0.0`. |
-| **File not picked up from watch folder** | Check that the file has a video file extension. Wait at least 10 seconds after copying. |
-| **Execution Policy blocks scripts** | Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
+If running under systemd:
 
----
-
-## Development
-
-### Project Structure
-
-```
-automatic-disc-ripper/
-├── adr/                    # Application logic
-│   ├── config.py           # YAML configuration with fallbacks
-│   ├── models.py           # SQLAlchemy models (Job, Track)
-│   ├── disc.py             # WMI-based disc detection + eject
-│   ├── ripper.py           # MakeMKV subprocess wrapper
-│   ├── encoder.py          # HandBrakeCLI subprocess wrapper
-│   ├── identify.py         # TMDb API lookup
-│   ├── pipeline.py         # Orchestrator: detect -> rip -> eject -> encode
-│   ├── watcher.py          # Watch folder: file monitoring + auto-encode
-│   └── utils.py            # Shared helper functions and constants
-├── web/
-│   ├── app.py              # Flask app, routes, and REST API
-│   ├── templates/          # Jinja2 HTML templates
-│   └── static/             # CSS, JS, favicon
-├── config/
-│   ├── adr.yaml.example    # Example configuration
-│   └── adr.yaml            # Local configuration (gitignored)
-├── presets/                # Custom HandBrake preset files (.json)
-├── tests/                  # Unit tests (pytest)
-├── install.bat             # Installation script
-├── start.bat               # Start script
-├── run.py                  # Entry point
-├── requirements.txt        # Python dependencies
-└── pyproject.toml          # Project metadata, pytest/ruff configuration
+```bash
+journalctl -u adr.service -f
 ```
 
-### Running Tests
+Common issues:
 
-```powershell
-pip install pytest
-python -m pytest tests/ -v
-```
-
-### Tech Stack
-
-- **Python 3.11+** with Flask, SQLAlchemy, PyYAML
-- **SQLite** (WAL mode) for the job database
-- **WMI + pywin32** for disc detection and eject (Windows-specific)
-- **MakeMKV** (`makemkvcon64.exe`) for ripping
-- **HandBrakeCLI** for transcoding
-- **TMDb API** for movie identification
-- **Vanilla JS + CSS** in the web interface (no heavy frameworks)
+- **No drives detected** — confirm `/dev/sr0` exists inside the container and
+  the service user is in the `cdrom` group (`id adr`). On Proxmox, the host
+  must pass the device into the LXC via a `lxc.mount.entry` (see
+  `proxmox/README.md`).
+- **MakeMKV "no disc" on a valid disc** — usually a libdvdcss / region /
+  scanner quirk. Test `makemkvcon -r info dev:/dev/sr0` manually.
+- **Eject fails** — another process may hold the device open. Check with
+  `lsof /dev/sr0`.
 
 ---
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT, same as upstream.
