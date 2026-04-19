@@ -1,4 +1,4 @@
-"""Watch folder scanner for Automatic Disc Ripper for Windows.
+"""Watch folder scanner for Automatic Disc Ripper for Proxmox.
 
 Monitors a directory for new video files and queues them for
 HandBrake encoding using the standard preset. This works

@@ -1,6 +1,6 @@
 """MakeMKV CLI wrapper for ripping DVDs/Blu-rays.
 
-Drives makemkvcon64.exe in robot mode, parsing real-time progress
+Drives makemkvcon in robot mode, parsing real-time progress
 and title information from stdout.
 """
 
@@ -42,7 +42,7 @@ class RipResult:
 
 
 class MakeMKVRipper:
-    """Wrapper around makemkvcon64.exe for ripping optical media."""
+    """Wrapper around makemkvcon for ripping optical media."""
 
     def __init__(self, config: Config, process_registry=None):
         self._exe = config.makemkv_path
@@ -64,16 +64,13 @@ class MakeMKVRipper:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _make_dev_source(drive_letter: str) -> str:
-        """Build the MakeMKV device source string for a Windows drive letter.
+    def _make_dev_source(device: str) -> str:
+        """Build the MakeMKV device source string for a Linux device path.
 
-        MakeMKV accepts `dev:DRIVE_LETTER` on Windows, e.g. `dev:G:`.
+        MakeMKV accepts `dev:<path>` on Linux, e.g. `dev:/dev/sr0`.
         This avoids the unreliable disc-index lookup entirely.
         """
-        dl = drive_letter.rstrip("\\")
-        if not dl.endswith(":"):
-            dl += ":"
-        return f"dev:{dl}"
+        return f"dev:{device.rstrip('/')}"
 
     def scan_disc(self, drive_letter: str) -> dict[int, dict]:
         """Scan a disc and return title information without ripping.
@@ -116,10 +113,10 @@ class MakeMKVRipper:
         """Rip all qualifying titles from a disc.
 
         Uses MakeMKV's dev: source syntax to address the drive directly
-        by its Windows drive letter, avoiding disc-index lookup issues.
+        by its device path, avoiding disc-index lookup issues.
 
         Args:
-            drive_letter: e.g. "G:"
+            drive_letter: device path, e.g. "/dev/sr0"
             job_id: Used to create unique output subdirectory.
             progress_callback: Called with a dict containing:
                 overall (float 0-1), title_progress (float 0-1),
@@ -147,7 +144,7 @@ class MakeMKVRipper:
             "--messages=-stdout",
         ]
 
-        # Write progress to a temp file to bypass Windows pipe buffering.
+        # Write progress to a temp file to bypass pipe buffering.
         # MakeMKV's C runtime full-buffers stdout when piped (~4KB),
         # meaning short PRGV lines never reach Python until the buffer
         # fills.  Writing progress to a file avoids pipes entirely —

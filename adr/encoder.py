@@ -31,7 +31,7 @@ class EncodeResult:
 
 
 class HandBrakeEncoder:
-    """Wrapper around HandBrakeCLI.exe for video transcoding."""
+    """Wrapper around HandBrakeCLI for video transcoding."""
 
     def __init__(self, config: Config):
         self._exe = config.handbrake_path
@@ -164,8 +164,8 @@ class HandBrakeEncoder:
                 self._process_registry.register(job_id, proc)
 
             # HandBrake 1.10.x writes JSON progress blocks to stdout.
-            # We read the raw fd with os.read() so Windows pipe buffering
-            # does not delay updates. stderr is drained separately for logs.
+            # We read the raw fd with os.read() so pipe buffering does not
+            # delay updates. stderr is drained separately for logs.
             json_buf: list[str] = []
             brace_depth = 0
             in_progress_block = False

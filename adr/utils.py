@@ -1,4 +1,4 @@
-"""Utility helpers for Automatic Disc Ripper for Windows."""
+"""Utility helpers for Automatic Disc Ripper for Proxmox."""
 
 import logging
 import re
@@ -59,16 +59,14 @@ def utcnow():
 def sanitize_filename(name: str) -> str:
     """Convert a string into a safe filename.
 
-    Removes characters that are illegal in Windows filenames and
-    collapses whitespace.  Preserves Unicode letters (å, ä, ö, etc.).
+    Removes characters that could collide with filesystem or path separators
+    on any OS and collapses whitespace.  Preserves Unicode letters (å, ä, ö).
+    The Windows-illegal set is kept so files remain portable across
+    SMB/NFS shares that may be browsed from a Windows client.
     """
-    # Normalise unicode (NFC keeps composed characters like ä intact)
     name = unicodedata.normalize("NFC", name)
-    # Remove Windows-illegal characters and control codes
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", name)
-    # Collapse whitespace
     name = re.sub(r"\s+", " ", name).strip()
-    # Limit length (Windows MAX_PATH safety)
     if len(name) > 200:
         name = name[:200]
     return name
@@ -197,15 +195,17 @@ BYTES_PER_MB = 1_048_576
 # Drive helpers
 # ------------------------------------------------------------------ #
 
-def normalize_drive(letter: str) -> str:
-    """Normalize a drive letter to uppercase without trailing backslash.
+def normalize_drive(device: str) -> str:
+    """Normalize an optical device path.
+
+    Strips trailing slashes but preserves case — Linux device paths are
+    case-sensitive and conventionally lowercase.
 
     Examples:
-        "d:\\"  -> "D:"
-        "D:"   -> "D:"
-        "d:"   -> "D:"
+        "/dev/sr0/"  -> "/dev/sr0"
+        "/dev/sr0"   -> "/dev/sr0"
     """
-    return letter.upper().rstrip("\\")
+    return device.rstrip("/")
 
 
 # ------------------------------------------------------------------ #

@@ -1,109 +1,144 @@
-"""Disc detection and ejection for Windows.
+"""Disc detection and ejection for Linux.
 
-Uses WMI (Windows Management Instrumentation) to:
-  - Enumerate optical drives
+Uses the Linux kernel's SCSI/CD-ROM interfaces to:
+  - Enumerate optical drives via /dev/sr* and /sys/block
   - Watch for disc insertion / removal events
-  - Eject discs after ripping
+  - Eject discs after ripping via CDROMEJECT ioctl
 """
 
+import fcntl
+import glob
 import logging
+import os
+import subprocess
 import threading
 import time
+from pathlib import Path
 from typing import Callable
 
 logger = logging.getLogger(__name__)
 
-
-def _import_wmi():
-    """Lazy-import wmi so the rest of the app can load on non-Windows for testing."""
-    try:
-        import pythoncom
-        import wmi
-        return wmi, pythoncom
-    except ImportError:
-        logger.error("wmi / pywin32 packages are required. Install with: pip install wmi pywin32")
-        raise
+# Linux ioctl codes from <linux/cdrom.h>
+_CDROM_DRIVE_STATUS = 0x5326
+_CDROM_EJECT = 0x5309
+_CDS_NO_INFO = 0
+_CDS_NO_DISC = 1
+_CDS_TRAY_OPEN = 2
+_CDS_DRIVE_NOT_READY = 3
+_CDS_DISC_OK = 4
 
 
 # ------------------------------------------------------------------ #
 # Drive discovery
 # ------------------------------------------------------------------ #
 
-def list_optical_drives() -> list[dict]:
-    """Return info about all optical (CD/DVD) drives on the system.
+def _sysfs_name(device: str) -> str:
+    """Return the /sys/block basename for a device path (e.g. '/dev/sr0' -> 'sr0')."""
+    return os.path.basename(device)
 
-    Each entry: {"drive": "D:", "volume_name": "MOVIE_TITLE" | None, "has_disc": bool}
-    """
-    wmi_mod, pythoncom = _import_wmi()
-    pythoncom.CoInitialize()
+
+def _read_volume_label(device: str) -> str | None:
+    """Return the filesystem label of the disc in ``device`` or None."""
     try:
-        c = wmi_mod.WMI()
-        drives = []
-        for disk in c.Win32_LogicalDisk(DriveType=5):  # 5 = Compact disc
-            drives.append({
-                "drive": disk.DeviceID,
-                "volume_name": disk.VolumeName or None,
-                "has_disc": bool(disk.Size),
-            })
-        return drives
+        result = subprocess.run(
+            ["blkid", "-o", "value", "-s", "LABEL", device],
+            capture_output=True, text=True, timeout=5,
+        )
+        label = result.stdout.strip()
+        return label or None
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        return None
+
+
+def _has_disc(device: str) -> bool:
+    """Return True if a readable disc is present in ``device``.
+
+    Uses the CDROM_DRIVE_STATUS ioctl so we don't need a mounted filesystem.
+    """
+    try:
+        fd = os.open(device, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError:
+        return False
+    try:
+        status = fcntl.ioctl(fd, _CDROM_DRIVE_STATUS, 0)
+    except OSError:
+        return False
     finally:
-        pythoncom.CoUninitialize()
+        os.close(fd)
+    return status == _CDS_DISC_OK
+
+
+# ------------------------------------------------------------------ #
+# Public API
+# ------------------------------------------------------------------ #
+
+def list_optical_drives() -> list[dict]:
+    """Return info about all optical (CD/DVD/BD) drives on the system.
+
+    Each entry: {"drive": "/dev/sr0", "volume_name": "MOVIE_TITLE" | None, "has_disc": bool}
+    """
+    drives = []
+    for device in sorted(glob.glob("/dev/sr*")):
+        has_disc = _has_disc(device)
+        volume_name = _read_volume_label(device) if has_disc else None
+        drives.append({
+            "drive": device,
+            "volume_name": volume_name,
+            "has_disc": has_disc,
+        })
+    return drives
 
 
 def get_drive_models() -> dict[str, str]:
-    """Return a mapping of drive letter -> model name for optical drives.
+    """Return a mapping of device path -> model string for optical drives.
 
-    Uses Win32_CDROMDrive to get the hardware model string.
-    Returns e.g. {"D:": "HL-DT-ST BD-RE WH16NS40"}.
+    Reads /sys/block/<name>/device/{vendor,model}.
+    Returns e.g. {"/dev/sr0": "HL-DT-ST BD-RE WH16NS40"}.
     """
-    wmi_mod, pythoncom = _import_wmi()
-    pythoncom.CoInitialize()
-    try:
-        c = wmi_mod.WMI()
-        models = {}
-        for cdrom in c.Win32_CDROMDrive():
-            letter = (cdrom.Drive or "").rstrip("\\")
-            if letter:
-                models[letter] = cdrom.Caption or cdrom.Name or "Unknown"
-        return models
-    except Exception:
-        # WMI / COM errors come in many forms (pywintypes.com_error,
-        # wmi.x_wmi, x_wmi_uninitialised, etc.) — keep broad.
-        logger.warning("Could not query drive models", exc_info=True)
-        return {}
-    finally:
-        pythoncom.CoUninitialize()
+    models: dict[str, str] = {}
+    for device in sorted(glob.glob("/dev/sr*")):
+        name = _sysfs_name(device)
+        sysfs = Path("/sys/block") / name / "device"
+        try:
+            vendor = (sysfs / "vendor").read_text().strip()
+        except OSError:
+            vendor = ""
+        try:
+            model = (sysfs / "model").read_text().strip()
+        except OSError:
+            model = ""
+        caption = " ".join(p for p in (vendor, model) if p) or "Unknown"
+        models[device] = caption
+    return models
 
 
 # ------------------------------------------------------------------ #
 # Disc ejection
 # ------------------------------------------------------------------ #
 
-def eject_drive(drive_letter: str) -> bool:
-    """Eject a disc from the given drive (e.g. 'D:').
+def eject_drive(device: str) -> bool:
+    """Eject a disc from the given device (e.g. '/dev/sr0').
 
-    Uses the Windows Shell COM object to invoke the Eject verb.
+    Tries the CDROMEJECT ioctl first, then falls back to the ``eject`` command.
     Returns True on success.
     """
-    import pythoncom
     try:
-        pythoncom.CoInitialize()
+        fd = os.open(device, os.O_RDONLY | os.O_NONBLOCK)
         try:
-            import win32com.client
-            shell = win32com.client.Dispatch("Shell.Application")
-            my_computer = shell.Namespace(17)  # ssfDRIVES
-            drive_item = my_computer.ParseName(drive_letter + "\\")
-            if drive_item is None:
-                logger.error("Could not find drive %s for ejection", drive_letter)
-                return False
-            drive_item.InvokeVerb("Eject")
-            logger.info("Ejected disc from drive %s", drive_letter)
+            fcntl.ioctl(fd, _CDROM_EJECT, 0)
+            logger.info("Ejected disc from %s via ioctl", device)
             return True
         finally:
-            pythoncom.CoUninitialize()
-    except Exception:
-        # COM / pywin32 errors come in many forms — keep broad.
-        logger.exception("Failed to eject drive %s", drive_letter)
+            os.close(fd)
+    except OSError as exc:
+        logger.warning("CDROMEJECT ioctl failed for %s: %s; falling back to eject(1)", device, exc)
+
+    try:
+        subprocess.run(["eject", device], check=True, timeout=30, capture_output=True)
+        logger.info("Ejected disc from %s via eject(1)", device)
+        return True
+    except (FileNotFoundError, subprocess.SubprocessError, OSError):
+        logger.exception("Failed to eject drive %s", device)
         return False
 
 
@@ -111,20 +146,19 @@ def eject_drive(drive_letter: str) -> bool:
 # Disc watcher (event-driven)
 # ------------------------------------------------------------------ #
 
-# Callback signature: callback(drive_letter: str, volume_name: str | None)
+# Callback signature: callback(device: str, volume_name: str | None)
 DiscInsertedCallback = Callable[[str, str | None], None]
-# Callback for newly discovered drives: callback(drive_letter: str)
+# Callback for newly discovered drives: callback(device: str)
 NewDriveCallback = Callable[[str], None]
 
 
 class DiscWatcher:
     """Watches for disc insertion events across all monitored optical drives.
 
-    Runs a background thread that polls WMI for optical drives and disc
-    insertions.  When *new* drive letters appear at runtime (e.g. a USB
-    DVD drive is plugged in, or Windows mounts an extra letter when a
-    disc is inserted) the ``on_new_drive`` callbacks are fired so that
-    the pipeline manager can hot-add a DrivePipeline.
+    Runs a background thread that polls the kernel's CD-ROM status for each
+    drive.  When *new* device nodes appear at runtime (e.g. a USB DVD drive
+    is plugged in) the ``on_new_drive`` callbacks are fired so that the
+    pipeline manager can hot-add a DrivePipeline.
     """
 
     def __init__(
@@ -134,8 +168,8 @@ class DiscWatcher:
     ):
         """
         Args:
-            drives: List of drive letters to monitor (e.g. ["D:", "E:"]) or "auto".
-            poll_interval: Seconds between polling cycles (fallback if events fail).
+            drives: List of device paths to monitor (e.g. ["/dev/sr0", "/dev/sr1"]) or "auto".
+            poll_interval: Seconds between polling cycles.
         """
         self._drives_config = drives
         self._poll_interval = poll_interval
@@ -145,9 +179,9 @@ class DiscWatcher:
         self._stop_event = threading.Event()
         # Track which drives currently have a disc to avoid duplicate events
         self._disc_present: dict[str, bool] = {}
-        # All drive letters we have ever seen (so we can detect new ones)
+        # All devices we have ever seen (so we can detect new ones)
         self._known_drives: set[str] = set()
-        # Cached drive list for auto mode (avoids WMI query every poll)
+        # Cached drive list for auto mode (avoids re-globbing every poll)
         self._cached_drives: list[str] = []
         self._drives_cache_time: float = 0.0
 
@@ -156,13 +190,13 @@ class DiscWatcher:
         self._callbacks.append(callback)
 
     def on_new_drive(self, callback: NewDriveCallback) -> None:
-        """Register a callback that fires when a *new* optical drive letter appears."""
+        """Register a callback that fires when a *new* optical drive appears."""
         self._new_drive_callbacks.append(callback)
 
-    def register_drive(self, drive_letter: str) -> None:
-        """Mark a drive letter as known (e.g. added from outside)."""
+    def register_drive(self, device: str) -> None:
+        """Mark a device as known (e.g. added from outside)."""
         from adr.utils import normalize_drive
-        self._known_drives.add(normalize_drive(drive_letter))
+        self._known_drives.add(normalize_drive(device))
 
     def start(self) -> None:
         """Start watching for disc events in a background thread."""
@@ -186,10 +220,10 @@ class DiscWatcher:
     # -------------------------------------------------------------- #
 
     def _resolve_drives(self) -> list[str]:
-        """Determine which drive letters to monitor (cached 30s in auto mode)."""
+        """Determine which devices to monitor (cached 30s in auto mode)."""
         if isinstance(self._drives_config, list):
-            return [d.rstrip("\\") for d in self._drives_config]
-        # "auto" – discover all optical drives (cache to reduce WMI overhead)
+            return [d.rstrip("/") for d in self._drives_config]
+        # "auto" – discover all optical drives (cache to reduce overhead)
         now = time.monotonic()
         if now - self._drives_cache_time > 30.0:
             self._cached_drives = [d["drive"] for d in list_optical_drives()]
@@ -197,63 +231,47 @@ class DiscWatcher:
         return self._cached_drives
 
     def _watch_loop(self) -> None:
-        """Polling-based disc detection loop.
+        """Polling-based disc detection loop using the CDROM_DRIVE_STATUS ioctl."""
+        # Initial state snapshot — check for discs already inserted
+        for drive in self._resolve_drives():
+            self._known_drives.add(drive)
+            has_disc = _has_disc(drive)
+            volume_name = _read_volume_label(drive) if has_disc else None
+            self._disc_present[drive] = has_disc
 
-        We use polling (checking Win32_LogicalDisk periodically) rather than
-        WMI event subscriptions because the event approach requires a
-        persistent COM apartment and is less reliable across Windows versions.
-        """
-        wmi_mod, pythoncom = _import_wmi()
-        pythoncom.CoInitialize()
-        try:
-            c = wmi_mod.WMI()
+            if has_disc:
+                logger.info("Disc already present in %s at startup: %s", drive, volume_name)
+                self._fire_callbacks(drive, volume_name)
 
-            # Initial state snapshot — check for discs already inserted
-            for drive in self._resolve_drives():
-                self._known_drives.add(drive)
-                disks = c.Win32_LogicalDisk(DeviceID=drive)
-                has_disc = bool(disks and disks[0].Size)
-                volume_name = disks[0].VolumeName if disks else None
-                self._disc_present[drive] = has_disc
+        logger.info(
+            "DiscWatcher initial state: %s",
+            {d: ("disc" if v else "empty") for d, v in self._disc_present.items()},
+        )
 
-                # Fire callbacks for discs already present at startup
-                if has_disc:
-                    logger.info("Disc already present in %s at startup: %s", drive, volume_name)
-                    self._fire_callbacks(drive, volume_name)
+        while not self._stop_event.is_set():
+            time.sleep(self._poll_interval)
+            try:
+                drives = self._resolve_drives()
 
-            logger.info(
-                "DiscWatcher initial state: %s",
-                {d: ("disc" if v else "empty") for d, v in self._disc_present.items()},
-            )
+                # Detect newly appeared devices
+                for drive in drives:
+                    if drive not in self._known_drives:
+                        logger.info("New optical drive detected: %s", drive)
+                        self._known_drives.add(drive)
+                        self._fire_new_drive_callbacks(drive)
 
-            while not self._stop_event.is_set():
-                time.sleep(self._poll_interval)
-                try:
-                    drives = self._resolve_drives()
+                for drive in drives:
+                    has_disc = _has_disc(drive)
+                    was_present = self._disc_present.get(drive, False)
 
-                    # Detect newly appeared drive letters
-                    for drive in drives:
-                        if drive not in self._known_drives:
-                            logger.info("New optical drive detected: %s", drive)
-                            self._known_drives.add(drive)
-                            self._fire_new_drive_callbacks(drive)
+                    if has_disc and not was_present:
+                        volume_name = _read_volume_label(drive)
+                        logger.info("Disc inserted in %s: %s", drive, volume_name)
+                        self._fire_callbacks(drive, volume_name)
 
-                    for drive in drives:
-                        disks = c.Win32_LogicalDisk(DeviceID=drive)
-                        has_disc = bool(disks and disks[0].Size)
-                        volume_name = disks[0].VolumeName if disks else None
-
-                        was_present = self._disc_present.get(drive, False)
-
-                        if has_disc and not was_present:
-                            logger.info("Disc inserted in %s: %s", drive, volume_name)
-                            self._fire_callbacks(drive, volume_name)
-
-                        self._disc_present[drive] = has_disc
-                except Exception:
-                    logger.exception("Error in DiscWatcher poll cycle")
-        finally:
-            pythoncom.CoUninitialize()
+                    self._disc_present[drive] = has_disc
+            except Exception:
+                logger.exception("Error in DiscWatcher poll cycle")
 
     def _fire_callbacks(self, drive: str, volume_name: str | None) -> None:
         for cb in self._callbacks:

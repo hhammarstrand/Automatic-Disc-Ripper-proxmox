@@ -1,4 +1,4 @@
-"""SQLAlchemy database models for Automatic Disc Ripper for Windows.
+"""SQLAlchemy database models for Automatic Disc Ripper for Proxmox.
 
 Tracks ripping/encoding jobs and individual tracks (titles) per disc.
 """

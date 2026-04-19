@@ -1,4 +1,4 @@
-"""Configuration management for Automatic Disc Ripper for Windows.
+"""Configuration management for Automatic Disc Ripper for Proxmox.
 
 Loads settings from config/adr.yaml, validates them, and provides
 a singleton Config object used throughout the application.
@@ -22,10 +22,10 @@ DATABASE_PATH = PROJECT_ROOT / "adr.db"
 
 # Defaults used if keys are missing from YAML
 _DEFAULTS: dict[str, Any] = {
-    "makemkv_path": r"C:\Program Files (x86)\MakeMKV\makemkvcon64.exe",
-    "handbrake_path": r"C:\Program Files\HandBrake\HandBrakeCLI.exe",
-    "raw_path": r"C:\ADR\raw",
-    "completed_path": r"C:\ADR\completed",
+    "makemkv_path": "/usr/bin/makemkvcon",
+    "handbrake_path": "/usr/bin/HandBrakeCLI",
+    "raw_path": "/var/lib/adr/raw",
+    "completed_path": "/var/lib/adr/completed",
     "min_title_length": 120,
     "handbrake_preset": "Fast 1080p30",
     "handbrake_preset_file": "",
@@ -74,18 +74,6 @@ class Config:
         # Merge defaults for any missing keys
         for key, default in _DEFAULTS.items():
             self._data.setdefault(key, default)
-
-        # Normalize path separators to native Windows backslashes so the
-        # UI displays consistent paths regardless of how they were entered.
-        _PATH_KEYS = (
-            "makemkv_path", "handbrake_path", "handbrake_preset_file",
-            "raw_path", "completed_path", "plex_path",
-            "watch_path", "watch_output_path",
-        )
-        for key in _PATH_KEYS:
-            val = self._data.get(key, "")
-            if isinstance(val, str) and val:
-                self._data[key] = val.replace("/", "\\")
 
         # Ensure output directories exist (warn instead of crash if
         # the target drive is not available, e.g. network share offline)
@@ -206,7 +194,7 @@ class Config:
 
     @property
     def disabled_drives(self) -> list[str]:
-        """Drive letters that are hidden/disabled (not monitored)."""
+        """Devices that are hidden/disabled (not monitored), e.g. ['/dev/sr1']."""
         val = self._data.get("disabled_drives", [])
         if isinstance(val, list):
             return [normalize_drive(d) for d in val]
@@ -219,7 +207,7 @@ class Config:
 
     @property
     def no_eject_drives(self) -> list[str]:
-        """Drive letters where auto-eject is disabled."""
+        """Devices where auto-eject is disabled, e.g. ['/dev/sr1']."""
         val = self._data.get("no_eject_drives", [])
         if isinstance(val, list):
             return [normalize_drive(d) for d in val]
@@ -242,7 +230,7 @@ class Config:
 
     @property
     def drive_labels(self) -> dict[str, str]:
-        """Custom labels for drives, e.g. {"D:": "Samsung", "E:": "LG External"}."""
+        """Custom labels for drives, e.g. {"/dev/sr0": "Samsung", "/dev/sr1": "LG External"}."""
         val = self._data.get("drive_labels", {})
         return val if isinstance(val, dict) else {}
 

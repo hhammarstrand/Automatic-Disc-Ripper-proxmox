@@ -1,1 +1,1 @@
-"""Automatic Disc Ripper for Windows Web UI."""
+"""Automatic Disc Ripper for Proxmox Web UI."""

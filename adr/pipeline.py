@@ -1,4 +1,4 @@
-"""Pipeline orchestrator for Automatic Disc Ripper for Windows.
+"""Pipeline orchestrator for Automatic Disc Ripper for Proxmox.
 
 Coordinates the full workflow per drive: detect → identify → rip → eject → encode.
 Each optical drive gets its own DrivePipeline thread. Encoding jobs are dispatched
@@ -801,9 +801,8 @@ class PipelineManager:
     def _handle_new_drive(self, drive_letter: str) -> None:
         """Hot-add a newly discovered optical drive.
 
-        Called by DiscWatcher when a drive letter appears that wasn't
-        present at startup (e.g. USB DVD drive plugged in, or Windows
-        mounting a new letter when a disc is inserted).
+        Called by DiscWatcher when a device appears that wasn't present at
+        startup (e.g. a USB DVD drive was plugged in).
         """
         if drive_letter in self.drive_pipelines:
             return  # already known

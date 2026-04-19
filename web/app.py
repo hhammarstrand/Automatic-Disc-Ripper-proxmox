@@ -1,4 +1,4 @@
-"""Flask web application and REST API for Automatic Disc Ripper for Windows.
+"""Flask web application and REST API for Automatic Disc Ripper for Proxmox.
 
 Provides a dashboard UI and JSON API for monitoring/controlling
 the ripping pipeline.
@@ -101,11 +101,11 @@ def _register_ui_routes(app: Flask) -> None:
 
             # Drive info — only show active (non-disabled) drives on dashboard
             drives = []
-            disabled_set = set(d.upper() for d in (_config.disabled_drives if _config else []))
+            disabled_set = set(_config.disabled_drives if _config else [])
             if _pipeline_manager:
                 drive_list = getattr(_pipeline_manager, 'all_drives', list(_pipeline_manager.drive_pipelines.keys()))
                 for drive_letter in drive_list:
-                    is_disabled = drive_letter.upper() in disabled_set
+                    is_disabled = drive_letter in disabled_set
                     if is_disabled:
                         continue  # completely hidden on dashboard
                     rip_job = next(
@@ -621,7 +621,7 @@ def _register_api_routes(app: Flask) -> None:
         mem = psutil.virtual_memory()
         # Disk usage for completed_path drive
         try:
-            disk_path = str(_config.completed_path) if _config else "C:\\"
+            disk_path = str(_config.completed_path) if _config else "/"
             disk = psutil.disk_usage(disk_path)
             disk_info = {
                 "total_gb": round(disk.total / (1024**3), 1),
