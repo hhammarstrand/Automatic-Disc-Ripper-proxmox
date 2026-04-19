@@ -1,0 +1,33 @@
+# Automatic Disc Ripper for Proxmox configuration
+# Copy this file to adr.yaml and edit to match your setup.
+#
+# TMDb API key: get a free key at https://www.themoviedb.org/settings/api
+# You can also set the ADR_TMDB_API_KEY environment variable instead.
+#
+# drives: "auto" probes /dev/sr* at startup. Use an explicit list when
+# you want to monitor a subset, e.g. drives: ["/dev/sr0", "/dev/sr1"].
+
+auto_move_to_plex: true
+completed_path: /var/lib/adr/completed
+disabled_drives: []
+drive_labels: {}
+drives: auto
+eject_after_rip: true
+handbrake_extra_args: ''
+handbrake_path: /usr/bin/HandBrakeCLI
+handbrake_preset: Fast 1080p30
+handbrake_preset_file: ''
+log_level: INFO
+main_feature_only: true
+makemkv_path: /usr/bin/makemkvcon
+max_encode_jobs: 1
+min_title_length: 120
+no_eject_drives: []
+plex_path: ''
+raw_path: /var/lib/adr/raw
+tmdb_api_key: ''
+watch_interval: 5
+watch_output_path: ''
+watch_path: ''
+web_host: 0.0.0.0
+web_port: 8080
