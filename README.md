@@ -15,6 +15,10 @@ and watch-folder feature are unchanged. The Windows-specific WMI and pywin32
 bits have been replaced with Linux equivalents (`/dev/sr*`, the
 `CDROM_DRIVE_STATUS` / `CDROMEJECT` ioctls, `blkid` for volume labels).
 
+> **Project status — beta.** The port compiles and the unit tests pass, but
+> this fork has not yet been exercised end-to-end against real Proxmox
+> hardware with an optical drive. Issues and PRs welcome.
+
 > **Credits.** Design borrows from
 > [Automatic Ripping Machine](https://github.com/automatic-ripping-machine/automatic-ripping-machine):
 > the cdrom-group + service-user pattern, the decoupled rip/encode queue,
