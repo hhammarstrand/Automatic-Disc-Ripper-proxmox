@@ -56,6 +56,13 @@ if [[ "$INSTALL_SERVICE" -eq 1 ]]; then
         echo "systemd install requires root; re-run with sudo or pass --no-service" >&2
         exit 1
     fi
+    if ! command -v systemctl >/dev/null; then
+        echo "systemctl not found; re-run with --no-service to skip the unit" >&2
+        exit 1
+    fi
+    if ! getent group cdrom >/dev/null; then
+        echo "WARNING: 'cdrom' group does not exist; the service user will not be able to open /dev/sr*" >&2
+    fi
 
     if ! id "$SERVICE_USER" >/dev/null 2>&1; then
         echo ">> Creating system user $SERVICE_USER"

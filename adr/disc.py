@@ -219,13 +219,16 @@ class DiscWatcher:
     # Internal
     # -------------------------------------------------------------- #
 
+    # How long the auto-mode drive list is cached. Lower = faster hot-plug
+    # detection (USB DVD drives) at the cost of a few extra glob() calls.
+    _AUTO_CACHE_TTL = 10.0
+
     def _resolve_drives(self) -> list[str]:
-        """Determine which devices to monitor (cached 30s in auto mode)."""
+        """Determine which devices to monitor."""
         if isinstance(self._drives_config, list):
             return [d.rstrip("/") for d in self._drives_config]
-        # "auto" – discover all optical drives (cache to reduce overhead)
         now = time.monotonic()
-        if now - self._drives_cache_time > 30.0:
+        if now - self._drives_cache_time > self._AUTO_CACHE_TTL:
             self._cached_drives = [d["drive"] for d in list_optical_drives()]
             self._drives_cache_time = now
         return self._cached_drives
