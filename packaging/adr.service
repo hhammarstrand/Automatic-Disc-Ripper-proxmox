@@ -1,0 +1,26 @@
+[Unit]
+Description=Automatic Disc Ripper for Proxmox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=@SERVICE_USER@
+Group=@SERVICE_USER@
+WorkingDirectory=@INSTALL_DIR@
+ExecStart=@INSTALL_DIR@/.venv/bin/python @INSTALL_DIR@/run.py
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Hardening — the service only needs read access to the source tree and
+# read/write access to its state dir plus /dev/sr* via the cdrom group.
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/adr @INSTALL_DIR@/config
+ProtectHome=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
