@@ -5,14 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Automatic Disc Ripper for Proxmox{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <!-- Bootstrap 5 CDN -->
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
     <link href="/static/css/style.css" rel="stylesheet">
 </head>
 <body>
-
-    <!-- Navbar -->
     <nav class="navbar navbar-expand-lg navbar-dark">
         <div class="container-fluid">
             <a class="navbar-brand fw-bold" href="/">
@@ -23,45 +20,16 @@
             </button>
             <div class="collapse navbar-collapse" id="navContent">
                 <ul class="navbar-nav me-auto">
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.path == '/' %}active{% endif %}" href="/">
-                            <i class="bi bi-speedometer2 me-1"></i>Dashboard
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.path == '/history' %}active{% endif %}" href="/history">
-                            <i class="bi bi-clock-history me-1"></i>History
-                        </a>
-                    </li>
-                    <li class="nav-item">
-                        <a class="nav-link {% if request.path == '/settings' %}active{% endif %}" href="/settings">
-                            <i class="bi bi-gear me-1"></i>Settings
-                        </a>
-                    </li>
+                    <li class="nav-item"><a class="nav-link {% if request.path == '/' %}active{% endif %}" href="/"><i class="bi bi-speedometer2 me-1"></i>Dashboard</a></li>
+                    <li class="nav-item"><a class="nav-link {% if request.path == '/history' %}active{% endif %}" href="/history"><i class="bi bi-clock-history me-1"></i>History</a></li>
+                    <li class="nav-item"><a class="nav-link {% if request.path == '/settings' %}active{% endif %}" href="/settings"><i class="bi bi-gear me-1"></i>Settings</a></li>
                 </ul>
                 <span class="navbar-text small d-flex align-items-center gap-3" id="systemStatus">
-                    <!-- System stats mini-bars -->
                     <span class="d-none d-lg-flex align-items-center gap-2" id="sysStats">
-                        <span class="sys-stat" title="CPU">
-                            <i class="bi bi-cpu me-1"></i>
-                            <span class="sys-bar"><span class="sys-bar-fill" id="cpuBar" style="width:0%"></span></span>
-                            <span class="sys-val" id="cpuVal">–</span>
-                        </span>
-                        <span class="sys-stat" title="RAM">
-                            <i class="bi bi-memory me-1"></i>
-                            <span class="sys-bar"><span class="sys-bar-fill" id="ramBar" style="width:0%"></span></span>
-                            <span class="sys-val" id="ramVal">–</span>
-                        </span>
-                        <span class="sys-stat" title="Disk" id="diskStat">
-                            <i class="bi bi-device-hdd me-1"></i>
-                            <span class="sys-bar"><span class="sys-bar-fill" id="diskBar" style="width:0%"></span></span>
-                            <span class="sys-val" id="diskVal">–</span>
-                        </span>
-                        <span class="sys-stat d-none" title="GPU" id="gpuStat">
-                            <i class="bi bi-gpu-card me-1"></i>
-                            <span class="sys-bar"><span class="sys-bar-fill" id="gpuBar" style="width:0%"></span></span>
-                            <span class="sys-val" id="gpuVal">–</span>
-                        </span>
+                        <span class="sys-stat" title="CPU"><i class="bi bi-cpu me-1"></i><span class="sys-bar"><span class="sys-bar-fill" id="cpuBar" style="width:0%"></span></span><span class="sys-val" id="cpuVal">–</span></span>
+                        <span class="sys-stat" title="RAM"><i class="bi bi-memory me-1"></i><span class="sys-bar"><span class="sys-bar-fill" id="ramBar" style="width:0%"></span></span><span class="sys-val" id="ramVal">–</span></span>
+                        <span class="sys-stat" title="Disk" id="diskStat"><i class="bi bi-device-hdd me-1"></i><span class="sys-bar"><span class="sys-bar-fill" id="diskBar" style="width:0%"></span></span><span class="sys-val" id="diskVal">–</span></span>
+                        <span class="sys-stat d-none" title="GPU" id="gpuStat"><i class="bi bi-gpu-card me-1"></i><span class="sys-bar"><span class="sys-bar-fill" id="gpuBar" style="width:0%"></span></span><span class="sys-val" id="gpuVal">–</span></span>
                     </span>
                     <span class="badge bg-success">Online</span>
                     <span class="badge bg-secondary ms-1" title="LAN address"><i class="bi bi-wifi me-1"></i>{{ lan_ip }}:{{ lan_port }}</span>
@@ -69,26 +37,14 @@
             </div>
         </div>
     </nav>
-
-    <!-- Main content -->
-    <main class="container-fluid py-4">
-        {% block content %}{% endblock %}
-    </main>
-
-    <!-- Footer -->
-    <footer class="text-center small py-3">
-        ADR v1.0.0 &middot; Powered by <a href="https://www.makemkv.com/" style="color: var(--adr-accent);">MakeMKV</a> and <a href="https://handbrake.fr/" style="color: var(--adr-accent);">HandBrake</a>
-    </footer>
-
-    <!-- Error Detail Modal -->
-    <div class="modal fade" id="errorModal" tabindex="-1" aria-labelledby="errorModalLabel" aria-hidden="true">
+    <main class="container-fluid py-4">{% block content %}{% endblock %}</main>
+    <footer class="text-center small py-3">ADR v1.0.0 &middot; Powered by <a href="https://www.makemkv.com/" style="color: var(--adr-accent);">MakeMKV</a> and <a href="https://handbrake.fr/" style="color: var(--adr-accent);">HandBrake</a></footer>
+    <div class="modal fade" id="errorModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content" style="background-color: var(--adr-card); color: var(--adr-text); border: 1px solid var(--adr-border);">
                 <div class="modal-header" style="border-bottom-color: var(--adr-border);">
-                    <h5 class="modal-title" id="errorModalLabel">
-                        <i class="bi bi-exclamation-triangle text-danger me-2"></i>Error Details
-                    </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <h5 class="modal-title"><i class="bi bi-exclamation-triangle text-danger me-2"></i>Error Details</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <p class="mb-1"><strong>Job:</strong> <span id="errorModalJob"></span></p>
@@ -102,52 +58,36 @@
             </div>
         </div>
     </div>
-
-    <!-- Video Player Modal -->
-    <div class="modal fade" id="playerModal" tabindex="-1" aria-labelledby="playerModalLabel" aria-hidden="true">
+    <div class="modal fade" id="playerModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-xl modal-dialog-centered">
             <div class="modal-content" style="background-color: #000; color: var(--adr-text); border: 1px solid var(--adr-border);">
                 <div class="modal-header" style="border-bottom-color: var(--adr-border); background: var(--adr-card);">
-                    <h5 class="modal-title" id="playerModalLabel">
-                        <i class="bi bi-play-circle text-success me-2"></i><span id="playerTitle">Video Player</span>
-                    </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <h5 class="modal-title"><i class="bi bi-play-circle text-success me-2"></i><span id="playerTitle">Video Player</span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body p-0">
-                    <div id="playerFileList" class="p-2 d-none" style="background: var(--adr-card);">
-                        <!-- Populated dynamically when multiple files -->
-                    </div>
-                    <video id="videoPlayer" controls class="w-100" style="max-height: 75vh; background: #000;">
-                        Your browser does not support HTML5 video.
-                    </video>
+                    <div id="playerFileList" class="p-2 d-none" style="background: var(--adr-card);"></div>
+                    <video id="videoPlayer" controls class="w-100" style="max-height: 75vh; background: #000;">Your browser does not support HTML5 video.</video>
                 </div>
             </div>
         </div>
     </div>
-
-    <!-- Re-match TMDb Modal -->
-    <div class="modal fade" id="rematchModal" tabindex="-1" aria-labelledby="rematchModalLabel" aria-hidden="true">
+    <div class="modal fade" id="rematchModal" tabindex="-1" aria-hidden="true">
         <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content" style="background-color: var(--adr-card); color: var(--adr-text); border: 1px solid var(--adr-border);">
                 <div class="modal-header" style="border-bottom-color: var(--adr-border);">
-                    <h5 class="modal-title" id="rematchModalLabel">
-                        <i class="bi bi-search text-info me-2"></i>Re-match – <span id="rematchJobTitle"></span>
-                    </h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+                    <h5 class="modal-title"><i class="bi bi-search text-info me-2"></i>Re-match – <span id="rematchJobTitle"></span></h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
                 </div>
                 <div class="modal-body">
                     <input type="hidden" id="rematchJobId">
                     <div class="input-group mb-3">
-                        <input type="text" id="rematchQuery" class="form-control" placeholder="Search movie title..."
-                            style="background: #0d1117; color: var(--adr-text); border-color: var(--adr-border);"
-                            onkeydown="if(event.key==='Enter') searchTmdb()">
+                        <input type="text" id="rematchQuery" class="form-control" placeholder="Search movie title..." style="background: #0d1117; color: var(--adr-text); border-color: var(--adr-border);" onkeydown="if(event.key==='Enter') searchTmdb()">
                         <input type="number" id="rematchYear" class="form-control" placeholder="Year" style="max-width:90px; background: #0d1117; color: var(--adr-text); border-color: var(--adr-border);">
                         <button class="btn btn-info" onclick="searchTmdb()"><i class="bi bi-search"></i></button>
                     </div>
                     <div id="rematchResults" class="row g-2"></div>
-                    <div id="rematchSpinner" class="text-center py-3 d-none">
-                        <div class="spinner-border text-info" role="status"><span class="visually-hidden">Searching...</span></div>
-                    </div>
+                    <div id="rematchSpinner" class="text-center py-3 d-none"><div class="spinner-border text-info" role="status"></div></div>
                     <div id="rematchEmpty" class="text-center text-secondary py-3 d-none">No results found.</div>
                 </div>
                 <div class="modal-footer" style="border-top-color: var(--adr-border);">
@@ -156,7 +96,6 @@
             </div>
         </div>
     </div>
-
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
     <script src="/static/js/app.js"></script>
     {% block scripts %}{% endblock %}

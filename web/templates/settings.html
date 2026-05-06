@@ -6,57 +6,48 @@
 
 <form id="settingsForm" onsubmit="return saveSettings(event)">
 
-    <!-- Paths -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-folder me-1"></i>Paths</div>
         <div class="card-body">
             <div class="mb-3">
                 <label class="form-label">MakeMKV path</label>
-                <input type="text" class="form-control"
-                       name="makemkv_path" value="{{ config.makemkv_path }}">
-                <div class="form-text">Path to makemkvcon64.exe</div>
+                <input type="text" class="form-control" name="makemkv_path" value="{{ config.makemkv_path }}">
+                <div class="form-text">Path to makemkvcon</div>
             </div>
             <div class="mb-3">
                 <label class="form-label">HandBrakeCLI path</label>
-                <input type="text" class="form-control"
-                       name="handbrake_path" value="{{ config.handbrake_path }}">
-                <div class="form-text">Path to HandBrakeCLI.exe</div>
+                <input type="text" class="form-control" name="handbrake_path" value="{{ config.handbrake_path }}">
+                <div class="form-text">Path to HandBrakeCLI</div>
             </div>
             <div class="mb-3">
                 <label class="form-label">Raw MKV folder (temporary)</label>
-                <input type="text" class="form-control"
-                       name="raw_path" value="{{ config.raw_path }}">
+                <input type="text" class="form-control" name="raw_path" value="{{ config.raw_path }}">
             </div>
             <div class="mb-3">
                 <label class="form-label">Completed MP4 folder</label>
-                <input type="text" class="form-control"
-                       name="completed_path" value="{{ config.completed_path }}">
+                <input type="text" class="form-control" name="completed_path" value="{{ config.completed_path }}">
             </div>
         </div>
     </div>
 
-    <!-- Ripping settings -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-disc me-1"></i>Ripping</div>
         <div class="card-body">
             <div class="mb-3">
                 <label class="form-label">Minimum title length (seconds)</label>
-                <input type="number" class="form-control"
-                       name="min_title_length" value="{{ config.min_title_length }}" min="0">
-                <div class="form-text">Titles shorter than this are ignored (skips menus, trailers, etc.)</div>
+                <input type="number" class="form-control" name="min_title_length" value="{{ config.min_title_length }}" min="0">
+                <div class="form-text">Titles shorter than this are ignored.</div>
             </div>
             <div class="mb-3">
                 <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="mainFeatureOnly"
-                           name="main_feature_only" {% if config.main_feature_only %}checked{% endif %}>
+                    <input class="form-check-input" type="checkbox" id="mainFeatureOnly" name="main_feature_only" {% if config.main_feature_only %}checked{% endif %}>
                     <label class="form-check-label" for="mainFeatureOnly">Select main feature only</label>
                 </div>
-                <div class="form-text">Scans the disc first and rips only the longest title (main feature). Other titles such as trailers and bonus material are skipped.</div>
+                <div class="form-text">Rip only the longest title.</div>
             </div>
         </div>
     </div>
 
-    <!-- Encoding settings -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-camera-reels me-1"></i>Encoding</div>
         <div class="card-body">
@@ -66,195 +57,141 @@
                     <select class="form-select" id="presetSelect" name="handbrake_preset">
                         <option value="{{ config.handbrake_preset }}" selected>{{ config.handbrake_preset or '— Select preset —' }}</option>
                     </select>
-                    <button class="btn btn-outline-secondary" type="button" id="refreshPresetsBtn" title="Fetch presets from HandBrake">
-                        <i class="bi bi-arrow-clockwise"></i>
-                    </button>
+                    <button class="btn btn-outline-secondary" type="button" id="refreshPresetsBtn"><i class="bi bi-arrow-clockwise"></i></button>
                 </div>
-                <div class="form-text">
-                    Click <i class="bi bi-arrow-clockwise"></i> to fetch available presets from HandBrake
-                    (built-in + custom from the <code>presets/</code> folder).
-                </div>
+                <div class="form-text">Click <i class="bi bi-arrow-clockwise"></i> to fetch built-in + custom presets.</div>
             </div>
             <div class="mb-3">
                 <label class="form-label">HandBrake preset file (optional)</label>
-                <input type="text" class="form-control"
-                       name="handbrake_preset_file" value="{{ config.handbrake_preset_file }}">
-                <div class="form-text">
-                    Path to a JSON preset file exported from HandBrake GUI.
-                    Place the file in the <code>presets/</code> folder inside the project directory.
-                    Leave empty to use HandBrake's built-in presets.
-                </div>
+                <input type="text" class="form-control" name="handbrake_preset_file" value="{{ config.handbrake_preset_file }}">
+                <div class="form-text">Path to a JSON preset file. Place in <code>presets/</code>.</div>
             </div>
             <div class="mb-3">
                 <label class="form-label">Extra HandBrake arguments</label>
-                <input type="text" class="form-control"
-                       name="handbrake_extra_args" value="{{ config.handbrake_extra_args }}">
+                <input type="text" class="form-control" name="handbrake_extra_args" value="{{ config.handbrake_extra_args }}">
                 <div class="form-text">Appended after the preset flag, e.g. "-e x265 -q 20"</div>
             </div>
             <div class="mb-3">
                 <label class="form-label">Max parallel encode jobs</label>
-                <input type="number" class="form-control"
-                       name="max_encode_jobs" value="{{ config.max_encode_jobs }}" min="1" max="8">
+                <input type="number" class="form-control" name="max_encode_jobs" value="{{ config.max_encode_jobs }}" min="1" max="8">
             </div>
         </div>
     </div>
 
-    <!-- Drives -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-hdd me-1"></i>Drives</div>
         <div class="card-body">
             <div class="mb-3">
                 <label class="form-label">Monitored drives</label>
-                <input type="text" class="form-control"
-                       name="drives" value="{{ config.drives }}">
-                <div class="form-text">"auto" for automatic detection, or comma-separated drive letters (e.g. "D:, E:")</div>
+                <input type="text" class="form-control" name="drives" value="{{ config.drives }}">
+                <div class="form-text">"auto" or comma-separated device paths (e.g. "/dev/sr0, /dev/sr1")</div>
             </div>
         </div>
     </div>
 
-    <!-- Hidden drives -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-eye-slash me-1"></i>Hidden Drives</div>
         <div class="card-body" id="hiddenDrivesCard">
             {% if hidden_drives %}
-            <p class="form-text mb-3">These drives are hidden from the dashboard. Click to show them again.</p>
+            <p class="form-text mb-3">Click to show again on dashboard.</p>
             <div class="d-flex gap-2 flex-wrap" id="hiddenDrivesList">
                 {% for dl in hidden_drives %}
-                <button class="btn btn-outline-success" onclick="unhideDrive('{{ dl }}')">
-                    <i class="bi bi-eye me-1"></i>{{ dl }}
-                </button>
+                <button class="btn btn-outline-success" onclick="unhideDrive('{{ dl }}')"><i class="bi bi-eye me-1"></i>{{ dl }}</button>
                 {% endfor %}
             </div>
             {% else %}
-            <p class="text-secondary mb-0"><i class="bi bi-check-circle me-1"></i>No hidden drives. Hide drives from the dashboard using the <i class="bi bi-eye-slash"></i> button on the drive card.</p>
+            <p class="text-secondary mb-0"><i class="bi bi-check-circle me-1"></i>No hidden drives.</p>
             {% endif %}
         </div>
     </div>
 
-    <!-- Drive labels -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-tag me-1"></i>Drive Labels</div>
         <div class="card-body">
             {% if all_drives %}
-            <p class="form-text mb-3">Give your DVD/Blu-ray drives custom names to easily tell them apart.</p>
+            <p class="form-text mb-3">Give optical drives custom names.</p>
             {% for d in all_drives %}
             <div class="row g-2 align-items-center mb-2">
-                <div class="col-auto">
-                    <span class="badge bg-secondary">{{ d.letter }}</span>
-                </div>
-                {% if d.model %}
-                <div class="col-auto">
-                    <small class="text-secondary">{{ d.model }}</small>
-                </div>
-                {% endif %}
+                <div class="col-auto"><span class="badge bg-secondary">{{ d.letter }}</span></div>
+                {% if d.model %}<div class="col-auto"><small class="text-secondary">{{ d.model }}</small></div>{% endif %}
                 <div class="col">
-                    <input type="text" class="form-control form-control-sm"
-                           id="driveLabel_{{ d.letter | replace(':', '') }}"
-                           placeholder="Enter name..."
-                           value="{{ d.label }}">
+                    <input type="text" class="form-control form-control-sm" id="driveLabel_{{ d.letter | replace(':', '') | replace('/', '_') }}" placeholder="Enter name..." value="{{ d.label }}">
                 </div>
                 <div class="col-auto">
-                    <button class="btn btn-outline-primary btn-sm" onclick="saveDriveLabel('{{ d.letter }}')">
-                        <i class="bi bi-check-lg"></i>
-                    </button>
+                    <button class="btn btn-outline-primary btn-sm" onclick="saveDriveLabel('{{ d.letter }}')"><i class="bi bi-check-lg"></i></button>
                 </div>
             </div>
             {% endfor %}
             {% else %}
-            <p class="text-secondary mb-0">No drives found. Start ADR to detect optical drives.</p>
+            <p class="text-secondary mb-0">No drives found.</p>
             {% endif %}
         </div>
     </div>
 
-    <!-- Watch folder -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-folder-symlink me-1"></i>Watch Folder</div>
         <div class="card-body">
             <div class="mb-3">
                 <label class="form-label">Watched folder</label>
-                <input type="text" class="form-control"
-                       name="watch_path" value="{{ config.watch_path }}">
-                <div class="form-text">
-                    Path to a folder to watch. Video files (.mkv, .avi, .mp4, .iso, etc.) placed here
-                    are automatically converted using the HandBrake preset. Leave empty to disable.
-                </div>
+                <input type="text" class="form-control" name="watch_path" value="{{ config.watch_path }}">
+                <div class="form-text">Auto-encode videos placed here. Leave empty to disable.</div>
             </div>
             <div class="mb-3">
                 <label class="form-label">Watch folder output path</label>
-                <input type="text" class="form-control"
-                       name="watch_output_path" value="{{ config.watch_output_path }}">
-                <div class="form-text">Leave empty to use the same output folder as ripped discs (completed_path).</div>
+                <input type="text" class="form-control" name="watch_output_path" value="{{ config.watch_output_path }}">
+                <div class="form-text">Leave empty to use completed_path.</div>
             </div>
             <div class="mb-3">
                 <label class="form-label">Scan interval (seconds)</label>
-                <input type="number" class="form-control"
-                       name="watch_interval" value="{{ config.watch_interval }}" min="1" max="300">
-                <div class="form-text">How often the folder is scanned for new files.</div>
+                <input type="number" class="form-control" name="watch_interval" value="{{ config.watch_interval }}" min="1" max="300">
             </div>
         </div>
     </div>
 
-    <!-- TMDb -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-search me-1"></i>TMDb</div>
         <div class="card-body">
             <div class="mb-3">
                 <label class="form-label">TMDb API key</label>
-                <input type="text" class="form-control"
-                       name="tmdb_api_key" value="{{ config.tmdb_api_key }}">
-                <div class="form-text">
-                    Get a free key at
-                    <a href="https://www.themoviedb.org/settings/api" target="_blank" class="text-info">themoviedb.org</a>.
-                    Used to automatically identify movies and fetch posters.
-                </div>
+                <input type="text" class="form-control" name="tmdb_api_key" value="{{ config.tmdb_api_key }}">
+                <div class="form-text">Get a free key at <a href="https://www.themoviedb.org/settings/api" target="_blank" class="text-info">themoviedb.org</a>.</div>
             </div>
         </div>
     </div>
 
-    <!-- Plex -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-collection-play me-1"></i>Plex</div>
         <div class="card-body">
             <div class="mb-3">
                 <label class="form-label">Plex movie library path</label>
-                <input type="text" class="form-control"
-                       name="plex_path" value="{{ config.plex_path }}">
-                <div class="form-text">
-                    Path to the Plex Movies folder, e.g. <code>Z:\Media\Movies</code>.
-                    Leave empty to disable Plex move.
-                </div>
+                <input type="text" class="form-control" name="plex_path" value="{{ config.plex_path }}">
+                <div class="form-text">e.g. <code>/mnt/media/Movies</code>. Empty to disable.</div>
             </div>
             <div class="mb-3">
                 <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="autoMoveToPlex"
-                           name="auto_move_to_plex" {% if config.auto_move_to_plex %}checked{% endif %}>
+                    <input class="form-check-input" type="checkbox" id="autoMoveToPlex" name="auto_move_to_plex" {% if config.auto_move_to_plex %}checked{% endif %}>
                     <label class="form-check-label" for="autoMoveToPlex">Automatically move to Plex</label>
                 </div>
-                <div class="form-text">Matched movies are automatically moved to the Plex folder when encoding is complete.</div>
             </div>
         </div>
     </div>
 
-    <!-- Web UI -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-globe me-1"></i>Web Interface</div>
         <div class="card-body">
             <div class="row">
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Host</label>
-                    <input type="text" class="form-control"
-                           name="web_host" value="{{ config.web_host }}">
+                    <input type="text" class="form-control" name="web_host" value="{{ config.web_host }}">
                 </div>
                 <div class="col-md-6 mb-3">
                     <label class="form-label">Port</label>
-                    <input type="number" class="form-control"
-                           name="web_port" value="{{ config.web_port }}" min="1" max="65535">
+                    <input type="number" class="form-control" name="web_port" value="{{ config.web_port }}" min="1" max="65535">
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Logging -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-journal-text me-1"></i>Logging</div>
         <div class="card-body">
@@ -269,19 +206,11 @@
         </div>
     </div>
 
-    <!-- Save -->
     <div class="d-flex gap-2">
-        <button type="submit" class="btn btn-primary">
-            <i class="bi bi-check-lg me-1"></i>Save Settings
-        </button>
-        <span id="saveStatus" class="align-self-center text-success d-none">
-            <i class="bi bi-check-circle"></i> Saved!
-        </span>
+        <button type="submit" class="btn btn-primary"><i class="bi bi-check-lg me-1"></i>Save Settings</button>
+        <span id="saveStatus" class="align-self-center text-success d-none"><i class="bi bi-check-circle"></i> Saved!</span>
     </div>
-    <div id="restartNotice" class="alert alert-warning mt-3 d-none">
-        <i class="bi bi-arrow-repeat me-1"></i>
-        Some changes (e.g. number of encode jobs, drives, paths) require a restart to take effect.
-    </div>
+    <div id="restartNotice" class="alert alert-warning mt-3 d-none"><i class="bi bi-arrow-repeat me-1"></i>Some changes require a restart.</div>
 
 </form>
 {% endblock %}
@@ -294,28 +223,19 @@ function saveSettings(e) {
     const data = {};
     const formData = new FormData(form);
     for (const [key, value] of formData.entries()) {
-        // Try to convert numbers
         if (['min_title_length', 'max_encode_jobs', 'web_port', 'watch_interval'].includes(key)) {
             data[key] = parseInt(value, 10);
         } else {
             data[key] = value;
         }
     }
-
-    // Handle drives field: if comma-separated, convert to list
     if (data.drives && data.drives !== 'auto') {
         const parts = data.drives.split(',').map(s => s.trim()).filter(Boolean);
-        if (parts.length > 1) {
-            data.drives = parts;
-        } else if (parts.length === 1 && parts[0] !== 'auto') {
-            data.drives = parts;
-        }
+        if (parts.length > 1) data.drives = parts;
+        else if (parts.length === 1 && parts[0] !== 'auto') data.drives = parts;
     }
-
-    // Checkboxes: not in FormData when unchecked, so set explicitly
     data.main_feature_only = !!form.querySelector('[name="main_feature_only"]').checked;
     data.auto_move_to_plex = !!form.querySelector('[name="auto_move_to_plex"]').checked;
-
     fetch('/api/settings', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -336,11 +256,9 @@ function saveSettings(e) {
         }
     })
     .catch(err => alert('Error: ' + err.message));
-
     return false;
 }
 
-// ---- Preset dropdown logic ----
 const presetSelect = document.getElementById('presetSelect');
 const refreshBtn = document.getElementById('refreshPresetsBtn');
 const currentPreset = '{{ config.handbrake_preset }}';
@@ -348,16 +266,12 @@ const currentPreset = '{{ config.handbrake_preset }}';
 function loadPresets() {
     refreshBtn.disabled = true;
     refreshBtn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
-
     fetch('/api/presets')
         .then(r => r.json())
         .then(categories => {
-            // Clear existing options
             presetSelect.innerHTML = '';
-
             const isEmpty = Object.keys(categories).length === 0 ||
                 Object.values(categories).every(arr => arr.length === 0);
-
             if (isEmpty) {
                 const opt = document.createElement('option');
                 opt.value = currentPreset;
@@ -374,15 +288,11 @@ function loadPresets() {
                         const opt = document.createElement('option');
                         opt.value = name;
                         opt.textContent = name;
-                        if (name === currentPreset) {
-                            opt.selected = true;
-                            foundCurrent = true;
-                        }
+                        if (name === currentPreset) { opt.selected = true; foundCurrent = true; }
                         group.appendChild(opt);
                     }
                     presetSelect.appendChild(group);
                 }
-                // If current preset wasn't in the list, add it at the top
                 if (!foundCurrent && currentPreset) {
                     const opt = document.createElement('option');
                     opt.value = currentPreset;
@@ -392,10 +302,7 @@ function loadPresets() {
                 }
             }
         })
-        .catch(err => {
-            console.error('Failed to load presets:', err);
-            alert('Could not fetch presets: ' + err.message);
-        })
+        .catch(err => alert('Could not fetch presets: ' + err.message))
         .finally(() => {
             refreshBtn.disabled = false;
             refreshBtn.innerHTML = '<i class="bi bi-arrow-clockwise"></i>';
@@ -403,11 +310,8 @@ function loadPresets() {
 }
 
 refreshBtn.addEventListener('click', loadPresets);
-
-// Auto-load presets on page load
 loadPresets();
 
-// ---- Hidden drives management ----
 function unhideDrive(driveLetter) {
     if (!confirm('Show drive ' + driveLetter + ' on the dashboard again?')) return;
     fetch('/api/drives/' + encodeURIComponent(driveLetter) + '/toggle', {

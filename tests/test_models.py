@@ -1,7 +1,6 @@
 """Tests for adr.models — Job/Track models and status constants."""
 
 import pytest
-from datetime import datetime, timedelta
 
 from adr.models import (
     JobStatus,
@@ -13,15 +12,10 @@ from adr.models import (
 )
 
 
-# ------------------------------------------------------------------ #
-# Status enum values
-# ------------------------------------------------------------------ #
-
 class TestJobStatus:
     def test_all_values_present(self):
         expected = {"pending", "identifying", "ripping", "ripped", "encoding", "done", "cancelled", "error"}
-        actual = {s.value for s in JobStatus}
-        assert actual == expected
+        assert {s.value for s in JobStatus} == expected
 
     def test_value_access(self):
         assert JobStatus.PENDING.value == "pending"
@@ -32,43 +26,26 @@ class TestJobStatus:
 class TestTrackStatus:
     def test_all_values_present(self):
         expected = {"pending", "encoding", "done", "error"}
-        actual = {s.value for s in TrackStatus}
-        assert actual == expected
+        assert {s.value for s in TrackStatus} == expected
 
-
-# ------------------------------------------------------------------ #
-# Status frozensets
-# ------------------------------------------------------------------ #
 
 class TestStatusSets:
     def test_active_statuses_correct(self):
         assert ACTIVE_STATUSES == frozenset({
-            JobStatus.PENDING,
-            JobStatus.IDENTIFYING,
-            JobStatus.RIPPING,
-            JobStatus.RIPPED,
-            JobStatus.ENCODING,
+            JobStatus.PENDING, JobStatus.IDENTIFYING, JobStatus.RIPPING,
+            JobStatus.RIPPED, JobStatus.ENCODING,
         })
 
     def test_rip_phase_statuses_correct(self):
         assert RIP_PHASE_STATUSES == frozenset({
-            JobStatus.PENDING,
-            JobStatus.IDENTIFYING,
-            JobStatus.RIPPING,
+            JobStatus.PENDING, JobStatus.IDENTIFYING, JobStatus.RIPPING,
         })
 
     def test_encode_phase_statuses_correct(self):
-        assert ENCODE_PHASE_STATUSES == frozenset({
-            JobStatus.RIPPED,
-            JobStatus.ENCODING,
-        })
+        assert ENCODE_PHASE_STATUSES == frozenset({JobStatus.RIPPED, JobStatus.ENCODING})
 
     def test_terminal_statuses_correct(self):
-        assert TERMINAL_STATUSES == frozenset({
-            JobStatus.DONE,
-            JobStatus.ERROR,
-            JobStatus.CANCELLED,
-        })
+        assert TERMINAL_STATUSES == frozenset({JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED})
 
     def test_active_and_terminal_are_disjoint(self):
         assert ACTIVE_STATUSES.isdisjoint(TERMINAL_STATUSES)
@@ -82,6 +59,5 @@ class TestStatusSets:
         assert RIP_PHASE_STATUSES | ENCODE_PHASE_STATUSES <= ACTIVE_STATUSES
 
     def test_sets_are_frozen(self):
-        """frozensets should not be mutable."""
         with pytest.raises(AttributeError):
-            ACTIVE_STATUSES.add(JobStatus.DONE)  # type: ignore
+            ACTIVE_STATUSES.add(JobStatus.DONE)

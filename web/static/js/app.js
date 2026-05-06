@@ -2,31 +2,19 @@
  * Automatic Disc Ripper for Proxmox – Dashboard auto-refresh and utility functions.
  */
 
-// ------------------------------------------------------------------ //
-// Auto-refresh active jobs every 5 seconds
-// ------------------------------------------------------------------ //
-
 const REFRESH_INTERVAL = 5000;
 
 function refreshDashboard() {
-    // Only refresh on the dashboard page
     if (window.location.pathname !== '/') return;
-
     fetch('/api/jobs/active')
         .then(r => r.json())
         .then(activeJobs => {
-
-            // Detect new jobs that don't have a card yet → full reload
             const displayedIds = new Set(
                 Array.from(document.querySelectorAll('[data-job-id]'))
                     .map(el => parseInt(el.dataset.jobId))
             );
             const hasNewJob = activeJobs.some(j => !displayedIds.has(j.id));
-            if (hasNewJob) {
-                location.reload();
-                return;
-            }
-
+            if (hasNewJob) { location.reload(); return; }
             updateActiveJobs(activeJobs);
             updateQueueSize();
         })
@@ -36,37 +24,22 @@ function refreshDashboard() {
 function updateActiveJobs(jobs) {
     jobs.forEach(job => {
         const card = document.querySelector(`[data-job-id="${job.id}"]`);
-        if (!card) return; // New job appeared – full page reload needed
-
-        // If status changed (e.g. ripped→encoding), reload to get correct layout
+        if (!card) return;
         const prevStatus = card.dataset.jobStatus;
-        if (prevStatus && prevStatus !== job.status) {
-            location.reload();
-            return;
-        }
+        if (prevStatus && prevStatus !== job.status) { location.reload(); return; }
         card.dataset.jobStatus = job.status;
-
-        // Update progress bar (not present for queued/ripped jobs)
         const bar = card.querySelector('.progress-bar');
         if (bar) {
-            // phase_progress can be 0.0 which is falsy — use explicit null check
             const rawPct = (job.phase_progress != null ? job.phase_progress : job.progress);
-            if (typeof rawPct !== 'number' || isNaN(rawPct)) {
-                console.warn('ADR: non-numeric phase_progress for job', job.id, rawPct);
-            }
             const pct = ((rawPct || 0) * 100).toFixed(1);
             bar.style.width = pct + '%';
             bar.textContent = pct + '%';
             bar.setAttribute('aria-valuenow', pct);
-
-            // Update bar colour based on status
             bar.className = 'progress-bar progress-bar-striped progress-bar-animated';
             if (job.status === 'ripping') bar.classList.add('bg-warning');
             else if (job.status === 'encoding') bar.classList.add('bg-info');
             else bar.classList.add('bg-primary');
         }
-
-        // Update status badge
         const badge = card.querySelector('.badge');
         if (badge && job.status !== 'ripped') {
             badge.textContent = capitalize(job.status);
@@ -75,215 +48,114 @@ function updateActiveJobs(jobs) {
             else if (job.status === 'encoding') badge.classList.add('bg-info', 'text-dark');
             else badge.classList.add('bg-primary');
         }
-
-        // Update title (in case of re-match during rip/encode)
         const titleEl = card.querySelector('h6');
-        if (titleEl && job.display_title) {
-            titleEl.textContent = job.display_title;
-        }
-
-        // Update rich progress detail line
+        if (titleEl && job.display_title) titleEl.textContent = job.display_title;
         const detailEl = card.querySelector(`[data-job-detail="${job.id}"]`);
-        if (detailEl) {
-            detailEl.textContent = formatProgressDetail(job);
-        }
+        if (detailEl) detailEl.textContent = formatProgressDetail(job);
     });
-
-    // If a job finished (no longer in active list), reload the page
     const displayedIds = Array.from(document.querySelectorAll('[data-job-id]'))
         .map(el => parseInt(el.dataset.jobId));
     const activeIds = jobs.map(j => j.id);
     const finishedAny = displayedIds.some(id => !activeIds.includes(id));
-    if (finishedAny) {
-        setTimeout(() => location.reload(), 500);
-    }
+    if (finishedAny) setTimeout(() => location.reload(), 500);
 }
 
 function updateQueueSize() {
-    fetch('/api/status')
-        .then(r => r.json())
-        .then(data => {
-            const el = document.getElementById('queueSize');
-            if (el) el.textContent = data.encode_queue_size || 0;
-        })
-        .catch(() => {});
+    fetch('/api/status').then(r => r.json()).then(data => {
+        const el = document.getElementById('queueSize');
+        if (el) el.textContent = data.encode_queue_size || 0;
+    }).catch(() => {});
 }
-
-// ------------------------------------------------------------------ //
-// Job actions
-// ------------------------------------------------------------------ //
 
 function cancelJob(jobId) {
     if (!confirm('Are you sure you want to cancel job #' + jobId + '?')) return;
-
     fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) {
-                location.reload();
-            } else {
-                alert('Could not cancel: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(err => alert('Error: ' + err.message));
+        .then(r => r.json()).then(data => {
+            if (data.ok) location.reload();
+            else alert('Could not cancel: ' + (data.error || 'Unknown error'));
+        }).catch(err => alert('Error: ' + err.message));
 }
 
 function toggleDrive(driveLetter, disable) {
     const action = disable ? 'disable' : 'enable';
     if (!confirm(`Do you want to ${action} drive ${driveLetter}?`)) return;
-
     fetch(`/api/drives/${encodeURIComponent(driveLetter)}/toggle`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ disabled: disable }),
-    })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) location.reload();
-            else alert('Could not change: ' + (data.error || 'Unknown error'));
-        })
-        .catch(err => alert('Error: ' + err.message));
+    }).then(r => r.json()).then(data => {
+        if (data.ok) location.reload();
+        else alert('Could not change: ' + (data.error || 'Unknown error'));
+    }).catch(err => alert('Error: ' + err.message));
 }
-
-// ------------------------------------------------------------------ //
-// Drive eject toggle
-// ------------------------------------------------------------------ //
 
 function toggleEject(driveLetter, enable) {
     const label = enable ? 'enable auto-eject' : 'disable auto-eject';
     if (!confirm(`Do you want to ${label} for drive ${driveLetter}?`)) return;
-
     fetch(`/api/drives/${encodeURIComponent(driveLetter)}/eject-toggle`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ auto_eject: enable }),
-    })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) location.reload();
-            else alert('Could not change eject setting: ' + (data.error || 'Unknown error'));
-        })
-        .catch(err => alert('Error: ' + err.message));
+    }).then(r => r.json()).then(data => {
+        if (data.ok) location.reload();
+        else alert('Could not change eject setting: ' + (data.error || 'Unknown error'));
+    }).catch(err => alert('Error: ' + err.message));
 }
-
-// ------------------------------------------------------------------ //
-// Drive eject (open tray)
-// ------------------------------------------------------------------ //
 
 function ejectDrive(driveLetter) {
-    fetch(`/api/drives/${encodeURIComponent(driveLetter)}/eject`, {
-        method: 'POST',
-    })
-        .then(r => r.json())
-        .then(data => {
-            if (!data.ok) {
-                alert('Could not eject: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(err => alert('Error: ' + err.message));
+    fetch(`/api/drives/${encodeURIComponent(driveLetter)}/eject`, { method: 'POST' })
+        .then(r => r.json()).then(data => {
+            if (!data.ok) alert('Could not eject: ' + (data.error || 'Unknown error'));
+        }).catch(err => alert('Error: ' + err.message));
 }
-
-// ------------------------------------------------------------------ //
-// Drive label
-// ------------------------------------------------------------------ //
 
 function saveDriveLabel(driveLetter) {
     const input = document.getElementById('driveLabel_' + driveLetter.replace(':', ''));
     if (!input) return;
     const label = input.value.trim();
-
     fetch(`/api/drives/${encodeURIComponent(driveLetter)}/label`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ label: label }),
-    })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) {
-                location.reload();
-            } else {
-                alert('Could not save label: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(err => alert('Error: ' + err.message));
+    }).then(r => r.json()).then(data => {
+        if (data.ok) location.reload();
+        else alert('Could not save label: ' + (data.error || 'Unknown error'));
+    }).catch(err => alert('Error: ' + err.message));
 }
-
-// ------------------------------------------------------------------ //
-// Clear history
-// ------------------------------------------------------------------ //
 
 function clearHistory() {
     if (!confirm('Clear all completed, failed, and cancelled jobs from history?')) return;
-
     fetch('/api/history/clear', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) {
-                alert(`${data.deleted} jobs deleted.`);
-                location.reload();
-            } else {
-                alert('Could not clear: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(err => alert('Error: ' + err.message));
+        .then(r => r.json()).then(data => {
+            if (data.ok) { alert(`${data.deleted} jobs deleted.`); location.reload(); }
+            else alert('Could not clear: ' + (data.error || 'Unknown error'));
+        }).catch(err => alert('Error: ' + err.message));
 }
 
 function deleteJob(jobId) {
     if (!confirm('Delete job #' + jobId + '?')) return;
-
     fetch(`/api/jobs/${jobId}`, { method: 'DELETE' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) {
-                const row = document.querySelector(`tr[data-status] td:first-child`);
-                // Simple approach: reload page
-                location.reload();
-            } else {
-                alert('Could not delete: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(err => alert('Error: ' + err.message));
+        .then(r => r.json()).then(data => {
+            if (data.ok) location.reload();
+            else alert('Could not delete: ' + (data.error || 'Unknown error'));
+        }).catch(err => alert('Error: ' + err.message));
 }
-
-// ------------------------------------------------------------------ //
-// Plex move controls
-// ------------------------------------------------------------------ //
 
 function togglePlexMove(jobId, checked) {
     fetch(`/api/jobs/${jobId}/toggle-plex`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ move_to_plex: checked }),
-    })
-        .then(r => r.json())
-        .then(data => {
-            if (!data.ok) {
-                alert('Could not change Plex flag: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(err => alert('Error: ' + err.message));
+    }).then(r => r.json()).then(data => {
+        if (!data.ok) alert('Could not change Plex flag: ' + (data.error || 'Unknown error'));
+    }).catch(err => alert('Error: ' + err.message));
 }
 
 function moveToPlexManual(jobId) {
     if (!confirm('Move files to the Plex folder?')) return;
     fetch(`/api/jobs/${jobId}/move-to-plex`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-    })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) {
-                location.reload();
-            } else {
-                alert('Could not move: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(err => alert('Error: ' + err.message));
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+    }).then(r => r.json()).then(data => {
+        if (data.ok) location.reload();
+        else alert('Could not move: ' + (data.error || 'Unknown error'));
+    }).catch(err => alert('Error: ' + err.message));
 }
-
-// ------------------------------------------------------------------ //
-// TMDb Re-match modal
-// ------------------------------------------------------------------ //
 
 function openRematchModal(jobId, currentTitle) {
     document.getElementById('rematchJobId').value = jobId;
@@ -303,142 +175,86 @@ function searchTmdb() {
     const resultsDiv = document.getElementById('rematchResults');
     const spinner = document.getElementById('rematchSpinner');
     const empty = document.getElementById('rematchEmpty');
-
     resultsDiv.innerHTML = '';
     empty.classList.add('d-none');
     spinner.classList.remove('d-none');
-
     let url = `/api/tmdb/search?q=${encodeURIComponent(query)}`;
     if (year) url += `&year=${year}`;
-
-    fetch(url)
-        .then(r => r.json())
-        .then(data => {
-            spinner.classList.add('d-none');
-            if (data.error) {
-                empty.textContent = data.error;
-                empty.classList.remove('d-none');
-                return;
-            }
-            const results = data.results || [];
-            if (results.length === 0) {
-                empty.textContent = 'No results found.';
-                empty.classList.remove('d-none');
-                return;
-            }
-            results.forEach(movie => {
-                const col = document.createElement('div');
-                col.className = 'col-6 col-md-4';
-                col.innerHTML = `
-                    <div class="card h-100" style="cursor:pointer; background: #0d1117; border-color: var(--adr-border);"
-                         onclick="applyRematch(${parseInt(movie.tmdb_id)})">
-                        <div class="row g-0 h-100">
-                            <div class="col-4">
-                                ${movie.poster_url
-                                    ? `<img src="${escapeHtml(movie.poster_url)}" class="img-fluid rounded-start" alt="" style="height:100%; object-fit:cover;">`
-                                    : `<div class="d-flex align-items-center justify-content-center h-100 bg-secondary rounded-start"><i class="bi bi-film fs-3"></i></div>`
-                                }
-                            </div>
-                            <div class="col-8">
-                                <div class="card-body p-2">
-                                    <h6 class="card-title mb-1 small">${escapeHtml(movie.title)}</h6>
-                                    <p class="card-text mb-0"><small class="text-secondary">${escapeHtml(String(movie.year || '?'))}</small></p>
-                                    <p class="card-text"><small class="text-secondary" style="font-size:.7rem;">${escapeHtml(movie.overview || '')}</small></p>
-                                </div>
+    fetch(url).then(r => r.json()).then(data => {
+        spinner.classList.add('d-none');
+        if (data.error) { empty.textContent = data.error; empty.classList.remove('d-none'); return; }
+        const results = data.results || [];
+        if (results.length === 0) { empty.textContent = 'No results found.'; empty.classList.remove('d-none'); return; }
+        results.forEach(movie => {
+            const col = document.createElement('div');
+            col.className = 'col-6 col-md-4';
+            col.innerHTML = `
+                <div class="card h-100" style="cursor:pointer; background: #0d1117; border-color: var(--adr-border);"
+                     onclick="applyRematch(${parseInt(movie.tmdb_id)})">
+                    <div class="row g-0 h-100">
+                        <div class="col-4">
+                            ${movie.poster_url
+                                ? `<img src="${escapeHtml(movie.poster_url)}" class="img-fluid rounded-start" alt="" style="height:100%; object-fit:cover;">`
+                                : `<div class="d-flex align-items-center justify-content-center h-100 bg-secondary rounded-start"><i class="bi bi-film fs-3"></i></div>`
+                            }
+                        </div>
+                        <div class="col-8">
+                            <div class="card-body p-2">
+                                <h6 class="card-title mb-1 small">${escapeHtml(movie.title)}</h6>
+                                <p class="card-text mb-0"><small class="text-secondary">${escapeHtml(String(movie.year || '?'))}</small></p>
+                                <p class="card-text"><small class="text-secondary" style="font-size:.7rem;">${escapeHtml(movie.overview || '')}</small></p>
                             </div>
                         </div>
-                    </div>`;
-                resultsDiv.appendChild(col);
-            });
-        })
-        .catch(err => {
-            spinner.classList.add('d-none');
-            empty.textContent = 'Search error: ' + err.message;
-            empty.classList.remove('d-none');
+                    </div>
+                </div>`;
+            resultsDiv.appendChild(col);
         });
+    }).catch(err => {
+        spinner.classList.add('d-none');
+        empty.textContent = 'Search error: ' + err.message;
+        empty.classList.remove('d-none');
+    });
 }
 
 function applyRematch(tmdbId) {
     const jobId = document.getElementById('rematchJobId').value;
     if (!confirm('Re-match this job to the selected movie?')) return;
-
     fetch(`/api/jobs/${jobId}/rematch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ tmdb_id: tmdbId }),
-    })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) {
-                bootstrap.Modal.getInstance(document.getElementById('rematchModal')).hide();
-                location.reload();
-            } else {
-                alert('Could not re-match: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(err => alert('Error: ' + err.message));
+    }).then(r => r.json()).then(data => {
+        if (data.ok) {
+            bootstrap.Modal.getInstance(document.getElementById('rematchModal')).hide();
+            location.reload();
+        } else {
+            alert('Could not re-match: ' + (data.error || 'Unknown error'));
+        }
+    }).catch(err => alert('Error: ' + err.message));
 }
 
-// ------------------------------------------------------------------ //
-// Helpers
-// ------------------------------------------------------------------ //
+function capitalize(str) { return str.charAt(0).toUpperCase() + str.slice(1); }
 
-function capitalize(str) {
-    return str.charAt(0).toUpperCase() + str.slice(1);
-}
-
-/**
- * Format rich progress detail from job.progress_info.
- * Returns a human-readable string like:
- *   Ripping: "Title 2/5 · 67.3%"
- *   Encoding: "Title 1/3 · 45.2% · ~2m 15s · 155 fps"
- *   Scanning: "Scanning video..."
- *   Muxing: "Muxing..."
- */
 function formatProgressDetail(job) {
     const pi = job.progress_info;
     if (!pi) return '';
-
     if (pi.phase === 'ripping') {
         const parts = [];
-        if (pi.title_total > 0) {
-            parts.push(`Title ${pi.title_current}/${pi.title_total}`);
-        }
-        if (pi.title_progress != null) {
-            parts.push((pi.title_progress * 100).toFixed(1) + '%');
-        }
-        if (parts.length === 0 && pi.description) {
-            return pi.description;
-        }
-        return parts.join(' \u00b7 ');
+        if (pi.title_total > 0) parts.push(`Title ${pi.title_current}/${pi.title_total}`);
+        if (pi.title_progress != null) parts.push((pi.title_progress * 100).toFixed(1) + '%');
+        if (parts.length === 0 && pi.description) return pi.description;
+        return parts.join(' · ');
     }
-
     if (pi.phase === 'encoding') {
-        if (pi.state === 'scanning') {
-            return 'Scanning video\u2026';
-        }
-        if (pi.state === 'muxing') {
-            return 'Muxing MP4\u2026';
-        }
+        if (pi.state === 'scanning') return 'Scanning video…';
+        if (pi.state === 'muxing') return 'Muxing MP4…';
         const parts = [];
-        if (pi.track_total > 1) {
-            parts.push(`Title ${pi.track_current}/${pi.track_total}`);
-        }
-        if (pi.track_progress != null) {
-            parts.push((pi.track_progress * 100).toFixed(1) + '%');
-        }
-        if (pi.pass_total > 1) {
-            parts.push(`Pass ${pi.pass_num + 1}/${pi.pass_total}`);
-        }
-        if (pi.eta_seconds > 0) {
-            parts.push('~' + formatEta(pi.eta_seconds));
-        }
-        if (pi.fps > 0) {
-            parts.push(pi.fps.toFixed(1) + ' fps');
-        }
-        return parts.join(' \u00b7 ');
+        if (pi.track_total > 1) parts.push(`Title ${pi.track_current}/${pi.track_total}`);
+        if (pi.track_progress != null) parts.push((pi.track_progress * 100).toFixed(1) + '%');
+        if (pi.pass_total > 1) parts.push(`Pass ${pi.pass_num + 1}/${pi.pass_total}`);
+        if (pi.eta_seconds > 0) parts.push('~' + formatEta(pi.eta_seconds));
+        if (pi.fps > 0) parts.push(pi.fps.toFixed(1) + ' fps');
+        return parts.join(' · ');
     }
-
     return '';
 }
 
@@ -460,7 +276,6 @@ function escapeHtml(str) {
 
 function copyPath(path) {
     navigator.clipboard.writeText(path).then(() => {
-        // Brief visual feedback on the button
         const btn = event.target.closest('button');
         if (btn) {
             const orig = btn.innerHTML;
@@ -470,72 +285,47 @@ function copyPath(path) {
     });
 }
 
-// ------------------------------------------------------------------ //
-// Video player
-// ------------------------------------------------------------------ //
-
 function openPlayer(jobId) {
     const video = document.getElementById('videoPlayer');
     const titleEl = document.getElementById('playerTitle');
     const fileList = document.getElementById('playerFileList');
-
-    // Pause & reset any previous playback
     video.pause();
     video.removeAttribute('src');
     fileList.classList.add('d-none');
     fileList.innerHTML = '';
     titleEl.textContent = 'Loading...';
-
     const modal = new bootstrap.Modal(document.getElementById('playerModal'));
     modal.show();
-
-    fetch(`/api/jobs/${jobId}/files`)
-        .then(r => r.json())
-        .then(data => {
-            if (data.error) {
-                titleEl.textContent = 'Error: ' + data.error;
-                return;
-            }
-            const files = data.files || [];
-            titleEl.textContent = data.title || 'Video Player';
-
-            if (files.length === 0) {
-                titleEl.textContent += ' — No MP4 files found';
-                return;
-            }
-
-            // If multiple files, show a file picker
-            if (files.length > 1) {
-                fileList.classList.remove('d-none');
-                files.forEach((f, i) => {
-                    const btn = document.createElement('button');
-                    btn.className = 'btn btn-sm me-1 mb-1 ' + (i === 0 ? 'btn-success' : 'btn-outline-light');
-                    btn.textContent = `${f.name} (${f.size_mb} MB)`;
-                    btn.onclick = () => {
-                        playFile(jobId, f.name);
-                        fileList.querySelectorAll('button').forEach(b => b.className = 'btn btn-sm me-1 mb-1 btn-outline-light');
-                        btn.className = 'btn btn-sm me-1 mb-1 btn-success';
-                    };
-                    fileList.appendChild(btn);
-                });
-            }
-
-            // Auto-play the first file
-            playFile(jobId, files[0].name);
-        })
-        .catch(err => {
-            titleEl.textContent = 'Error: ' + err.message;
-        });
+    fetch(`/api/jobs/${jobId}/files`).then(r => r.json()).then(data => {
+        if (data.error) { titleEl.textContent = 'Error: ' + data.error; return; }
+        const files = data.files || [];
+        titleEl.textContent = data.title || 'Video Player';
+        if (files.length === 0) { titleEl.textContent += ' — No MP4 files found'; return; }
+        if (files.length > 1) {
+            fileList.classList.remove('d-none');
+            files.forEach((f, i) => {
+                const btn = document.createElement('button');
+                btn.className = 'btn btn-sm me-1 mb-1 ' + (i === 0 ? 'btn-success' : 'btn-outline-light');
+                btn.textContent = `${f.name} (${f.size_mb} MB)`;
+                btn.onclick = () => {
+                    playFile(jobId, f.name);
+                    fileList.querySelectorAll('button').forEach(b => b.className = 'btn btn-sm me-1 mb-1 btn-outline-light');
+                    btn.className = 'btn btn-sm me-1 mb-1 btn-success';
+                };
+                fileList.appendChild(btn);
+            });
+        }
+        playFile(jobId, files[0].name);
+    }).catch(err => { titleEl.textContent = 'Error: ' + err.message; });
 }
 
 function playFile(jobId, filename) {
     const video = document.getElementById('videoPlayer');
     video.src = `/api/jobs/${jobId}/stream/${encodeURIComponent(filename)}`;
     video.load();
-    video.play().catch(() => {}); // autoplay may be blocked
+    video.play().catch(() => {});
 }
 
-// Stop video when modal closes
 document.addEventListener('DOMContentLoaded', () => {
     const playerModal = document.getElementById('playerModal');
     if (playerModal) {
@@ -547,10 +337,6 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 });
-
-// ------------------------------------------------------------------ //
-// Error detail modal
-// ------------------------------------------------------------------ //
 
 function showError(jobId, title, errorText) {
     document.getElementById('errorModalJob').textContent = '#' + jobId;
@@ -570,10 +356,6 @@ function copyErrorText() {
     });
 }
 
-// ------------------------------------------------------------------ //
-// System stats (navbar mini-bars)
-// ------------------------------------------------------------------ //
-
 function updateSysBar(barId, valId, percent, label) {
     const bar = document.getElementById(barId);
     const val = document.getElementById(valId);
@@ -586,34 +368,19 @@ function updateSysBar(barId, valId, percent, label) {
 }
 
 function refreshSystemStats() {
-    fetch('/api/system')
-        .then(r => r.json())
-        .then(data => {
-            updateSysBar('cpuBar', 'cpuVal', data.cpu_percent);
-            if (data.ram) {
-                updateSysBar('ramBar', 'ramVal', data.ram.percent,
-                    data.ram.used_gb.toFixed(1) + '/' + data.ram.total_gb.toFixed(0) + 'G');
-            }
-            if (data.disk) {
-                updateSysBar('diskBar', 'diskVal', data.disk.percent,
-                    data.disk.free_gb.toFixed(0) + 'G free');
-            }
-            if (data.gpu) {
-                const gpuStat = document.getElementById('gpuStat');
-                if (gpuStat) gpuStat.classList.remove('d-none');
-                updateSysBar('gpuBar', 'gpuVal', data.gpu.utilization);
-            }
-        })
-        .catch(() => {});
+    fetch('/api/system').then(r => r.json()).then(data => {
+        updateSysBar('cpuBar', 'cpuVal', data.cpu_percent);
+        if (data.ram) updateSysBar('ramBar', 'ramVal', data.ram.percent,
+            data.ram.used_gb.toFixed(1) + '/' + data.ram.total_gb.toFixed(0) + 'G');
+        if (data.disk) updateSysBar('diskBar', 'diskVal', data.disk.percent,
+            data.disk.free_gb.toFixed(0) + 'G free');
+        if (data.gpu) {
+            const gpuStat = document.getElementById('gpuStat');
+            if (gpuStat) gpuStat.classList.remove('d-none');
+            updateSysBar('gpuBar', 'gpuVal', data.gpu.utilization);
+        }
+    }).catch(() => {});
 }
-
-// ------------------------------------------------------------------ //
-// Init
-// ------------------------------------------------------------------ //
-
-// ------------------------------------------------------------------ //
-// Elapsed timer for active jobs
-// ------------------------------------------------------------------ //
 
 function updateElapsedTimers() {
     document.querySelectorAll('.elapsed-timer[data-start]').forEach(el => {
@@ -632,20 +399,12 @@ function updateElapsedTimers() {
     });
 }
 
-// ------------------------------------------------------------------ //
-// Init
-// ------------------------------------------------------------------ //
-
 document.addEventListener('DOMContentLoaded', () => {
-    // Start auto-refresh if on dashboard
     if (window.location.pathname === '/') {
         setInterval(refreshDashboard, REFRESH_INTERVAL);
-        // Start elapsed timers — tick every second
         updateElapsedTimers();
         setInterval(updateElapsedTimers, 1000);
     }
-
-    // System stats — poll every 5 seconds on all pages
     refreshSystemStats();
     setInterval(refreshSystemStats, 5000);
 });

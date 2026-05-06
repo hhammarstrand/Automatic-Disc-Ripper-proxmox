@@ -25,7 +25,6 @@ main {
     flex: 1;
 }
 
-/* ---- Navbar ---- */
 .navbar {
     background-color: #010409 !important;
     border-bottom: 1px solid var(--adr-border) !important;
@@ -42,29 +41,21 @@ main {
     color: var(--adr-text) !important;
 }
 
-/* ---- Cards ---- */
 .card {
     background-color: var(--adr-card) !important;
     border: 1px solid var(--adr-border) !important;
     transition: border-color 0.2s ease;
 }
-.card:hover {
-    border-color: #484f58 !important;
-}
+.card:hover { border-color: #484f58 !important; }
 .card-header {
     background-color: rgba(255, 255, 255, 0.04) !important;
     border-bottom: 1px solid var(--adr-border) !important;
     color: var(--adr-text) !important;
     font-weight: 600;
 }
-.card-body {
-    color: var(--adr-text) !important;
-}
-.card-title {
-    color: var(--adr-text) !important;
-}
+.card-body { color: var(--adr-text) !important; }
+.card-title { color: var(--adr-text) !important; }
 
-/* ---- Tables ---- */
 .table-dark, .table {
     --bs-table-bg: var(--adr-card) !important;
     --bs-table-color: var(--adr-text) !important;
@@ -88,7 +79,6 @@ main {
     border-bottom-color: var(--adr-border) !important;
 }
 
-/* ---- Forms / Inputs ---- */
 .form-control, .form-select {
     background-color: #0d1117 !important;
     color: var(--adr-text) !important;
@@ -100,25 +90,16 @@ main {
     border-color: var(--adr-accent) !important;
     box-shadow: 0 0 0 0.2rem rgba(88, 166, 255, 0.25) !important;
 }
-.form-control::placeholder {
-    color: var(--adr-text-muted) !important;
-}
-.form-label {
-    color: var(--adr-text) !important;
-    font-weight: 500;
-}
-.form-text {
-    color: var(--adr-text-muted) !important;
-}
+.form-control::placeholder { color: var(--adr-text-muted) !important; }
+.form-label { color: var(--adr-text) !important; font-weight: 500; }
+.form-text { color: var(--adr-text-muted) !important; }
 
-/* ---- Alerts ---- */
 .alert-secondary {
     background-color: var(--adr-card) !important;
     color: var(--adr-text-muted) !important;
     border-color: var(--adr-border) !important;
 }
 
-/* ---- Progress bars ---- */
 .progress {
     background-color: #21262d !important;
     border-radius: 6px;
@@ -128,16 +109,12 @@ main {
     font-weight: 600;
 }
 
-/* ---- Badges ---- */
-.badge {
-    font-weight: 500;
-}
+.badge { font-weight: 500; }
 .badge.bg-secondary {
     background-color: #30363d !important;
     color: var(--adr-text-muted) !important;
 }
 
-/* ---- Buttons ---- */
 .btn-outline-light {
     color: var(--adr-text) !important;
     border-color: var(--adr-border) !important;
@@ -155,71 +132,37 @@ main {
     color: #fff !important;
 }
 
-/* ---- Spinning disc animation ---- */
 @keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }
 }
-.spin {
-    animation: spin 2s linear infinite;
-}
+.spin { animation: spin 2s linear infinite; }
 
-/* ---- Job cards ---- */
-[data-job-id] {
-    transition: background-color 0.3s ease;
-}
+[data-job-id] { transition: background-color 0.3s ease; }
 
-/* ---- Footer ---- */
 footer {
     color: var(--adr-text-muted) !important;
     border-top-color: var(--adr-border) !important;
 }
 
-/* ---- Text overrides for dark theme ---- */
-.text-secondary {
-    color: var(--adr-text-muted) !important;
-}
-.text-light, .text-white {
-    color: var(--adr-text) !important;
-}
-h1, h2, h3, h4, h5, h6 {
-    color: var(--adr-text) !important;
-}
-p, span, div, td, th, label, small, li {
-    color: inherit;
-}
-a.text-info {
-    color: var(--adr-accent) !important;
-}
-a.text-info:hover {
-    color: #79c0ff !important;
-}
+.text-secondary { color: var(--adr-text-muted) !important; }
+.text-light, .text-white { color: var(--adr-text) !important; }
+h1, h2, h3, h4, h5, h6 { color: var(--adr-text) !important; }
+p, span, div, td, th, label, small, li { color: inherit; }
+a.text-info { color: var(--adr-accent) !important; }
+a.text-info:hover { color: #79c0ff !important; }
 
-/* ---- Misc ---- */
-.display-4 {
-    color: var(--adr-text) !important;
-}
-.text-break {
-    color: var(--adr-text) !important;
-}
+.display-4 { color: var(--adr-text) !important; }
+.text-break { color: var(--adr-text) !important; }
 
-/* Scrollbar styling for dark theme */
-::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-}
-::-webkit-scrollbar-track {
-    background: var(--adr-bg);
-}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--adr-bg); }
 ::-webkit-scrollbar-thumb {
     background: var(--adr-border);
     border-radius: 4px;
 }
-::-webkit-scrollbar-thumb:hover {
-    background: #484f58;
-}
+::-webkit-scrollbar-thumb:hover { background: #484f58; }
 
-/* ---- System stats mini-bars (navbar) ---- */
 .sys-stat {
     display: inline-flex;
     align-items: center;
@@ -251,7 +194,6 @@ a.text-info:hover {
     font-variant-numeric: tabular-nums;
 }
 
-/* ---- Disabled drive card ---- */
 .drive-card-disabled {
     opacity: 0.45;
     filter: grayscale(0.7);

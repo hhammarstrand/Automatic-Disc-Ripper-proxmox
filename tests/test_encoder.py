@@ -5,16 +5,11 @@ import pytest
 from adr.encoder import HandBrakeEncoder
 
 
-# ------------------------------------------------------------------ #
-# _normalize_progress_value
-# ------------------------------------------------------------------ #
-
 class TestNormalizeProgressValue:
     def test_fraction(self):
         assert HandBrakeEncoder._normalize_progress_value(0.5) == pytest.approx(0.5)
 
     def test_percentage(self):
-        """Values > 1.0 are treated as percentages and divided by 100."""
         assert HandBrakeEncoder._normalize_progress_value(75.0) == pytest.approx(0.75)
 
     def test_zero(self):
@@ -38,10 +33,6 @@ class TestNormalizeProgressValue:
     def test_over_100_clamped(self):
         assert HandBrakeEncoder._normalize_progress_value(150.0) == 1.0
 
-
-# ------------------------------------------------------------------ #
-# _extract_preset_names
-# ------------------------------------------------------------------ #
 
 class TestExtractPresetNames:
     def test_simple_preset(self):
@@ -69,13 +60,9 @@ class TestExtractPresetNames:
             "Folder": True,
             "ChildrenArray": [
                 {"PresetName": "Child1", "Folder": False},
-                {
-                    "PresetName": "SubFolder",
-                    "Folder": True,
-                    "ChildrenArray": [
-                        {"PresetName": "GrandChild", "Folder": False},
-                    ],
-                },
+                {"PresetName": "SubFolder", "Folder": True, "ChildrenArray": [
+                    {"PresetName": "GrandChild", "Folder": False},
+                ]},
             ],
         }
         HandBrakeEncoder._extract_preset_names(entry, names, seen)
@@ -95,8 +82,7 @@ class TestExtractPresetNames:
     def test_non_dict_entry(self):
         names = []
         seen = set()
-        # Should not crash
-        HandBrakeEncoder._extract_preset_names("not_a_dict", names, seen)  # type: ignore
+        HandBrakeEncoder._extract_preset_names("not_a_dict", names, seen)
         assert names == []
 
     def test_no_preset_name(self):

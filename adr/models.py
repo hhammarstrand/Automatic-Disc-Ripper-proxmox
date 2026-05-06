@@ -34,37 +34,18 @@ class TrackStatus(enum.Enum):
     ERROR = "error"
 
 
-# ------------------------------------------------------------------ #
-# Convenience status sets (avoid duplicating lists across modules)
-# ------------------------------------------------------------------ #
-
-#: Statuses where the job is still actively being processed.
 ACTIVE_STATUSES = frozenset({
-    JobStatus.PENDING,
-    JobStatus.IDENTIFYING,
-    JobStatus.RIPPING,
-    JobStatus.RIPPED,
-    JobStatus.ENCODING,
+    JobStatus.PENDING, JobStatus.IDENTIFYING, JobStatus.RIPPING,
+    JobStatus.RIPPED, JobStatus.ENCODING,
 })
-
-#: Statuses for the rip phase (disc is still in the drive).
 RIP_PHASE_STATUSES = frozenset({
-    JobStatus.PENDING,
-    JobStatus.IDENTIFYING,
-    JobStatus.RIPPING,
+    JobStatus.PENDING, JobStatus.IDENTIFYING, JobStatus.RIPPING,
 })
-
-#: Statuses for the encode phase.
 ENCODE_PHASE_STATUSES = frozenset({
-    JobStatus.RIPPED,
-    JobStatus.ENCODING,
+    JobStatus.RIPPED, JobStatus.ENCODING,
 })
-
-#: Terminal statuses — the job is finished (successfully or not).
 TERMINAL_STATUSES = frozenset({
-    JobStatus.DONE,
-    JobStatus.ERROR,
-    JobStatus.CANCELLED,
+    JobStatus.DONE, JobStatus.ERROR, JobStatus.CANCELLED,
 })
 
 
@@ -80,9 +61,9 @@ class Job(Base):
     poster_url = Column(String(512), nullable=True)
     drive = Column(String(10), nullable=False)
     status = Column(Enum(JobStatus), nullable=False, default=JobStatus.PENDING)
-    progress_rip = Column(Float, default=0.0)      # 0.0 – 1.0
-    progress_encode = Column(Float, default=0.0)    # 0.0 – 1.0
-    progress_info = Column(Text, nullable=True)      # JSON: rich progress detail
+    progress_rip = Column(Float, default=0.0)
+    progress_encode = Column(Float, default=0.0)
+    progress_info = Column(Text, nullable=True)
     output_path = Column(String(1024), nullable=True)
     error_message = Column(Text, nullable=True)
     started_at = Column(DateTime, default=utcnow)
@@ -95,33 +76,20 @@ class Job(Base):
 
     tracks = relationship("Track", back_populates="job", cascade="all, delete-orphan")
 
-    # -------------------------------------------------------------- #
-    # Convenience helpers
-    # -------------------------------------------------------------- #
-
     @property
     def display_title(self) -> str:
-        """Human-readable title like 'Movie Title (2023)' or disc label."""
         if self.title and self.year:
             return f"{self.title} ({self.year})"
         return self.title or self.disc_label or f"Job #{self.id}"
 
     @property
     def progress(self) -> float:
-        """Overall progress across rip + encode (0.0 – 1.0)."""
         if self.status == JobStatus.DONE:
             return 1.0
-        # Weight: rip=40%, encode=60%
         return (self.progress_rip or 0.0) * 0.4 + (self.progress_encode or 0.0) * 0.6
 
     @property
     def phase_progress(self) -> float:
-        """Progress for the *current* phase (0.0 – 1.0).
-
-        During ripping returns rip progress; during encoding returns
-        encode progress.  This is what the UI should show so the bar
-        goes 0–100% for each phase instead of a confusing weighted mix.
-        """
         if self.status in (JobStatus.RIPPING, JobStatus.IDENTIFYING):
             return self.progress_rip or 0.0
         if self.status in (JobStatus.ENCODING, JobStatus.RIPPED):
@@ -132,27 +100,23 @@ class Job(Base):
 
     @property
     def rip_duration(self) -> int | None:
-        """Rip duration in seconds, or None if not available."""
         if self.started_at and self.rip_completed_at:
             return int((self.rip_completed_at - self.started_at).total_seconds())
         return None
 
     @property
     def encode_duration(self) -> int | None:
-        """Encode duration in seconds, or None if not available."""
         if self.encode_started_at and self.completed_at:
             return int((self.completed_at - self.encode_started_at).total_seconds())
         return None
 
     @property
     def total_duration(self) -> int | None:
-        """Total pipeline duration in seconds, or None if not finished."""
         if self.started_at and self.completed_at:
             return int((self.completed_at - self.started_at).total_seconds())
         return None
 
     def to_dict(self) -> dict:
-        """Serialise to JSON-friendly dict for the API."""
         import json as _json
         try:
             pi = _json.loads(self.progress_info) if self.progress_info else None
@@ -224,10 +188,6 @@ class Track(Base):
         return f"<Track {self.track_number} job={self.job_id} [{self.status.value}]>"
 
 
-# ------------------------------------------------------------------ #
-# Database initialisation helpers
-# ------------------------------------------------------------------ #
-
 _engine = None
 _SessionFactory = None
 
@@ -240,9 +200,6 @@ def get_engine():
             db_url, echo=False, future=True,
             connect_args={"check_same_thread": False, "timeout": 30},
         )
-        # WAL mode + busy_timeout allow concurrent reads while writing —
-        # prevents "database is locked" when encoder workers + Flask read
-        # simultaneously.
         from sqlalchemy import event
 
         @event.listens_for(_engine, "connect")
@@ -255,7 +212,6 @@ def get_engine():
 
 
 def _migrate_db(engine) -> None:
-    """Apply lightweight schema migrations for columns added after initial release."""
     import logging
     _log = logging.getLogger(__name__)
     try:
@@ -283,7 +239,6 @@ def _migrate_db(engine) -> None:
 
 
 def _check_db_integrity(engine) -> bool:
-    """Run PRAGMA integrity_check on the database. Returns True if OK."""
     import logging
     _log = logging.getLogger(__name__)
     try:
@@ -302,11 +257,6 @@ def _check_db_integrity(engine) -> bool:
 
 
 def init_db() -> None:
-    """Create all tables if they don't exist, then apply migrations.
-
-    If the database file is corrupt, it is backed up and recreated
-    automatically so the application can continue running.
-    """
     import os
     import shutil
     import logging
@@ -314,11 +264,9 @@ def init_db() -> None:
 
     engine = get_engine()
 
-    # Check integrity of existing database
     if os.path.exists(DATABASE_PATH) and os.path.getsize(DATABASE_PATH) > 0:
         if not _check_db_integrity(engine):
             _log.warning("Database is corrupt — backing up and recreating")
-            # Dispose engine connections so the file can be moved
             engine.dispose()
             backup = str(DATABASE_PATH) + ".corrupt"
             try:
@@ -327,12 +275,10 @@ def init_db() -> None:
             except OSError as exc:
                 _log.warning("Could not move corrupt DB: %s — deleting instead", exc)
                 os.remove(str(DATABASE_PATH))
-            # Remove WAL/journal files too
             for suffix in ("-wal", "-shm", "-journal"):
                 p = str(DATABASE_PATH) + suffix
                 if os.path.exists(p):
                     os.remove(p)
-            # Reset engine so it reconnects to the new (empty) file
             global _engine, _SessionFactory
             _engine = None
             _SessionFactory = None
@@ -343,7 +289,6 @@ def init_db() -> None:
 
 
 def get_session() -> Session:
-    """Return a new SQLAlchemy session."""
     global _SessionFactory
     if _SessionFactory is None:
         _SessionFactory = sessionmaker(bind=get_engine())
