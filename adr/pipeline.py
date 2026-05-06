@@ -470,7 +470,7 @@ class DrivePipeline:
         Only processes if the event is for our drive. Runs the full pipeline
         in a new thread so the watcher isn't blocked.
         """
-        if drive.upper() != self.drive.upper():
+        if normalize_drive(drive) != normalize_drive(self.drive):
             return
         # Check if drive was disabled at runtime via settings UI
         if normalize_drive(drive) in self._config.disabled_drives:

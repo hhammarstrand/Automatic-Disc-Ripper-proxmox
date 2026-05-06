@@ -16,14 +16,16 @@ MAKEMKV_VERSION="${MAKEMKV_VERSION:-1.17.9}"
 msg "Installing system dependencies"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
+# Qt is intentionally NOT installed: the makemkv-bin tarball ships a precompiled
+# `makemkvcon` (CLI), which is the only binary ADR needs. Building the GUI
+# (`makemkv`) would require qtbase5-dev + libqt5svg5-dev, ~150 MB of extra deps.
 apt-get install -y -qq --no-install-recommends \
     ca-certificates curl git \
     python3 python3-venv python3-pip \
-    handbrake-cli eject util-linux udev \
+    handbrake-cli eject util-linux udev libudev-dev \
     build-essential pkg-config \
     libc6-dev libssl-dev libexpat1-dev \
-    zlib1g-dev libbz2-dev liblzma-dev \
-    qtbase5-dev libqt5svg5-dev
+    zlib1g-dev libbz2-dev liblzma-dev
 
 msg "Building MakeMKV ${MAKEMKV_VERSION} from source"
 build_makemkv() {
@@ -34,7 +36,8 @@ build_makemkv() {
     curl -fsSLO "https://www.makemkv.com/download/makemkv-bin-${MAKEMKV_VERSION}.tar.gz"
     tar xzf "makemkv-oss-${MAKEMKV_VERSION}.tar.gz"
     tar xzf "makemkv-bin-${MAKEMKV_VERSION}.tar.gz"
-    (cd "makemkv-oss-${MAKEMKV_VERSION}" && ./configure --prefix=/usr >/dev/null && make -j"$(nproc)" && make install)
+    # --disable-gui skips Qt (we only need libdriveio + libmakemkv for the CLI).
+    (cd "makemkv-oss-${MAKEMKV_VERSION}" && ./configure --prefix=/usr --disable-gui >/dev/null && make -j"$(nproc)" && make install)
     # The -bin package requires accepting the EULA. The env var below
     # simulates the "accept" prompt used by upstream's Makefile.
     mkdir -p "makemkv-bin-${MAKEMKV_VERSION}/tmp"
