@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Settings — Automatic Disc Ripper for Windows{% endblock %}
+{% block title %}Settings — Automatic Disc Ripper{% endblock %}
 
 {% block content %}
 <h4 class="mb-4"><i class="bi bi-gear me-2"></i>Settings</h4>
@@ -14,13 +14,13 @@
                 <label class="form-label">MakeMKV path</label>
                 <input type="text" class="form-control"
                        name="makemkv_path" value="{{ config.makemkv_path }}">
-                <div class="form-text">Path to makemkvcon64.exe</div>
+                <div class="form-text">Path to makemkvcon (default /usr/bin/makemkvcon)</div>
             </div>
             <div class="mb-3">
                 <label class="form-label">HandBrakeCLI path</label>
                 <input type="text" class="form-control"
                        name="handbrake_path" value="{{ config.handbrake_path }}">
-                <div class="form-text">Path to HandBrakeCLI.exe</div>
+                <div class="form-text">Path to HandBrakeCLI (default /usr/bin/HandBrakeCLI)</div>
             </div>
             <div class="mb-3">
                 <label class="form-label">Raw MKV folder (temporary)</label>
@@ -107,7 +107,7 @@
                 <label class="form-label">Monitored drives</label>
                 <input type="text" class="form-control"
                        name="drives" value="{{ config.drives }}">
-                <div class="form-text">"auto" for automatic detection, or comma-separated drive letters (e.g. "D:, E:")</div>
+                <div class="form-text">"auto" for automatic detection, or comma-separated device paths (e.g. "/dev/sr0, /dev/sr1")</div>
             </div>
         </div>
     </div>
@@ -211,6 +211,26 @@
         </div>
     </div>
 
+    <!-- MakeMKV registration key -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-key me-1"></i>MakeMKV key</div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">
+                MakeMKV needs a registration key. While MakeMKV is in beta a free key is
+                published on the forum and rotates roughly monthly. Click refresh to fetch
+                the current beta key automatically, or paste your own purchased key.
+            </p>
+            <div class="input-group mb-2">
+                <input type="text" class="form-control" id="makemkvKeyInput"
+                       placeholder="T-… (leave blank to fetch the free beta key)">
+                <button class="btn btn-outline-info" type="button" onclick="refreshMakemkvKey()">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh / save key
+                </button>
+            </div>
+            <div id="makemkvKeyStatus" class="form-text"></div>
+        </div>
+    </div>
+
     <!-- Plex -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-collection-play me-1"></i>Plex</div>
@@ -220,7 +240,7 @@
                 <input type="text" class="form-control"
                        name="plex_path" value="{{ config.plex_path }}">
                 <div class="form-text">
-                    Path to the Plex Movies folder, e.g. <code>Z:\Media\Movies</code>.
+                    Path to the Plex Movies folder, e.g. <code>/mnt/plex/Movies</code>.
                     Leave empty to disable Plex move.
                 </div>
             </div>
@@ -288,6 +308,34 @@
 
 {% block scripts %}
 <script>
+function refreshMakemkvKey() {
+    const input = document.getElementById('makemkvKeyInput');
+    const status = document.getElementById('makemkvKeyStatus');
+    const key = input.value.trim();
+    status.textContent = key ? 'Saving key…' : 'Fetching the latest beta key…';
+    status.className = 'form-text text-muted';
+    fetch('/api/makemkv/refresh-key', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(key ? {key} : {}),
+    })
+    .then(r => r.json().then(j => ({ok: r.ok, body: j})))
+    .then(({ok, body}) => {
+        if (ok && body.ok) {
+            status.textContent = '✓ Key stored (' + (body.key_hint || 'updated') + ')';
+            status.className = 'form-text text-success';
+            input.value = '';
+        } else {
+            status.textContent = '✗ ' + (body.error || 'Failed to set key');
+            status.className = 'form-text text-danger';
+        }
+    })
+    .catch(err => {
+        status.textContent = '✗ ' + err;
+        status.className = 'form-text text-danger';
+    });
+}
+
 function saveSettings(e) {
     e.preventDefault();
     const form = document.getElementById('settingsForm');

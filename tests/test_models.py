@@ -1,17 +1,16 @@
 """Tests for adr.models — Job/Track models and status constants."""
 
+
 import pytest
-from datetime import datetime, timedelta
 
 from adr.models import (
+    ACTIVE_STATUSES,
+    ENCODE_PHASE_STATUSES,
+    RIP_PHASE_STATUSES,
+    TERMINAL_STATUSES,
     JobStatus,
     TrackStatus,
-    ACTIVE_STATUSES,
-    RIP_PHASE_STATUSES,
-    ENCODE_PHASE_STATUSES,
-    TERMINAL_STATUSES,
 )
-
 
 # ------------------------------------------------------------------ #
 # Status enum values
@@ -42,33 +41,33 @@ class TestTrackStatus:
 
 class TestStatusSets:
     def test_active_statuses_correct(self):
-        assert ACTIVE_STATUSES == frozenset({
+        assert frozenset({
             JobStatus.PENDING,
             JobStatus.IDENTIFYING,
             JobStatus.RIPPING,
             JobStatus.RIPPED,
             JobStatus.ENCODING,
-        })
+        }) == ACTIVE_STATUSES
 
     def test_rip_phase_statuses_correct(self):
-        assert RIP_PHASE_STATUSES == frozenset({
+        assert frozenset({
             JobStatus.PENDING,
             JobStatus.IDENTIFYING,
             JobStatus.RIPPING,
-        })
+        }) == RIP_PHASE_STATUSES
 
     def test_encode_phase_statuses_correct(self):
-        assert ENCODE_PHASE_STATUSES == frozenset({
+        assert frozenset({
             JobStatus.RIPPED,
             JobStatus.ENCODING,
-        })
+        }) == ENCODE_PHASE_STATUSES
 
     def test_terminal_statuses_correct(self):
-        assert TERMINAL_STATUSES == frozenset({
+        assert frozenset({
             JobStatus.DONE,
             JobStatus.ERROR,
             JobStatus.CANCELLED,
-        })
+        }) == TERMINAL_STATUSES
 
     def test_active_and_terminal_are_disjoint(self):
         assert ACTIVE_STATUSES.isdisjoint(TERMINAL_STATUSES)

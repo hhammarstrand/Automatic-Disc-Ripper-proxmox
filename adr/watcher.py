@@ -1,4 +1,4 @@
-"""Watch folder scanner for Automatic Disc Ripper for Windows.
+"""Watch folder scanner for Automatic Disc Ripper.
 
 Monitors a directory for new video files and queues them for
 HandBrake encoding using the standard preset. This works
@@ -11,10 +11,11 @@ import threading
 import time
 from pathlib import Path
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from adr.config import Config
 from adr.models import Job, JobStatus, Track, TrackStatus, get_session
-from adr.utils import utcnow, BYTES_PER_MB, make_plex_folder_name
-from sqlalchemy.exc import SQLAlchemyError
+from adr.utils import BYTES_PER_MB, make_plex_folder_name, utcnow
 
 logger = logging.getLogger(__name__)
 

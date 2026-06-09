@@ -10,9 +10,8 @@ import re
 import subprocess
 import tempfile
 import threading
-import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from adr.config import Config
 
@@ -64,16 +63,22 @@ class MakeMKVRipper:
     # ------------------------------------------------------------------ #
 
     @staticmethod
-    def _make_dev_source(drive_letter: str) -> str:
-        """Build the MakeMKV device source string for a Windows drive letter.
+    def _make_dev_source(drive: str) -> str:
+        """Build the MakeMKV device source string for a drive.
 
-        MakeMKV accepts `dev:DRIVE_LETTER` on Windows, e.g. `dev:G:`.
-        This avoids the unreliable disc-index lookup entirely.
+        On Linux MakeMKV addresses drives by device node, e.g. `dev:/dev/sr0`.
+        This avoids the unreliable disc-index lookup entirely. Legacy Windows
+        drive letters (e.g. "G:") are still accepted so the parser tests keep
+        exercising both forms.
         """
-        dl = drive_letter.rstrip("\\")
-        if not dl.endswith(":"):
-            dl += ":"
-        return f"dev:{dl}"
+        d = (drive or "").strip()
+        if d.startswith("/dev/"):
+            return f"dev:{d}"
+        # Legacy Windows drive-letter form.
+        d = d.rstrip("\\")
+        if not d.endswith(":"):
+            d += ":"
+        return f"dev:{d}"
 
     def scan_disc(self, drive_letter: str) -> dict[int, dict]:
         """Scan a disc and return title information without ripping.
@@ -157,7 +162,9 @@ class MakeMKVRipper:
         _stop_progress = threading.Event()
 
         try:
-            progress_file = tempfile.NamedTemporaryFile(
+            # delete=False is intentional: MakeMKV writes to this path while a
+            # poll thread reads it; we close it immediately and unlink in finally.
+            progress_file = tempfile.NamedTemporaryFile(  # noqa: SIM115
                 mode="w", suffix="_mkv_progress.txt", delete=False,
             )
             progress_path = progress_file.name
@@ -203,7 +210,7 @@ class MakeMKVRipper:
                 while not _stop_progress.is_set():
                     _stop_progress.wait(0.5)
                     try:
-                        with open(progress_path, "r", encoding="utf-8", errors="replace") as f:
+                        with open(progress_path, encoding="utf-8", errors="replace") as f:
                             f.seek(last_pos)
                             new_data = f.read()
                             if not new_data:

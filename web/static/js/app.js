@@ -1,5 +1,5 @@
 /**
- * Automatic Disc Ripper for Windows – Dashboard auto-refresh and utility functions.
+ * Automatic Disc Ripper – Dashboard auto-refresh and utility functions.
  */
 
 // ------------------------------------------------------------------ //

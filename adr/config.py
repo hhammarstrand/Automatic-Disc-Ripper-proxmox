@@ -1,17 +1,20 @@
-"""Configuration management for Automatic Disc Ripper for Windows.
+"""Configuration management for Automatic Disc Ripper.
 
 Loads settings from config/adr.yaml, validates them, and provides
 a singleton Config object used throughout the application.
+
+This is the Linux/Proxmox build: paths default to /opt/adr and optical
+drives are addressed by device path (/dev/sr0) instead of drive letters.
 """
 
-import os
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from adr.utils import normalize_drive, get_project_root
+from adr.utils import get_project_root, normalize_drive
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +25,10 @@ DATABASE_PATH = PROJECT_ROOT / "adr.db"
 
 # Defaults used if keys are missing from YAML
 _DEFAULTS: dict[str, Any] = {
-    "makemkv_path": r"C:\Program Files (x86)\MakeMKV\makemkvcon64.exe",
-    "handbrake_path": r"C:\Program Files\HandBrake\HandBrakeCLI.exe",
-    "raw_path": r"C:\ADR\raw",
-    "completed_path": r"C:\ADR\completed",
+    "makemkv_path": "/usr/bin/makemkvcon",
+    "handbrake_path": "/usr/bin/HandBrakeCLI",
+    "raw_path": "/opt/adr/raw",
+    "completed_path": "/opt/adr/completed",
     "min_title_length": 120,
     "handbrake_preset": "Fast 1080p30",
     "handbrake_preset_file": "",
@@ -64,7 +67,7 @@ class Config:
     def load(self) -> None:
         """(Re)load configuration from disk."""
         if self._path.exists():
-            with open(self._path, "r", encoding="utf-8") as fh:
+            with open(self._path, encoding="utf-8") as fh:
                 self._data = yaml.safe_load(fh) or {}
             logger.info("Loaded config from %s", self._path)
         else:
@@ -75,17 +78,9 @@ class Config:
         for key, default in _DEFAULTS.items():
             self._data.setdefault(key, default)
 
-        # Normalize path separators to native Windows backslashes so the
-        # UI displays consistent paths regardless of how they were entered.
-        _PATH_KEYS = (
-            "makemkv_path", "handbrake_path", "handbrake_preset_file",
-            "raw_path", "completed_path", "plex_path",
-            "watch_path", "watch_output_path",
-        )
-        for key in _PATH_KEYS:
-            val = self._data.get(key, "")
-            if isinstance(val, str) and val:
-                self._data[key] = val.replace("/", "\\")
+        # On Linux paths are already forward-slash POSIX paths, so no
+        # separator normalisation is needed (the Windows build rewrote
+        # "/" to "\\" here).
 
         # Ensure output directories exist (warn instead of crash if
         # the target drive is not available, e.g. network share offline)

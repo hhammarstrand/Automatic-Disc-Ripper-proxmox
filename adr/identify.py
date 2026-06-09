@@ -13,7 +13,7 @@ from typing import Any
 
 import requests
 
-from adr.utils import parse_disc_label, extract_tmdb_year
+from adr.utils import extract_tmdb_year, parse_disc_label
 
 logger = logging.getLogger(__name__)
 

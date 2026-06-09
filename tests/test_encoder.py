@@ -4,7 +4,6 @@ import pytest
 
 from adr.encoder import HandBrakeEncoder
 
-
 # ------------------------------------------------------------------ #
 # _normalize_progress_value
 # ------------------------------------------------------------------ #

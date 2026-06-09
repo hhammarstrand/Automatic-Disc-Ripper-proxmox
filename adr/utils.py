@@ -1,4 +1,4 @@
-"""Utility helpers for Automatic Disc Ripper for Windows."""
+"""Utility helpers for Automatic Disc Ripper."""
 
 import logging
 import re
@@ -6,7 +6,6 @@ import socket
 import sys
 import unicodedata
 from pathlib import Path
-
 
 logger = logging.getLogger(__name__)
 
@@ -198,14 +197,20 @@ BYTES_PER_MB = 1_048_576
 # ------------------------------------------------------------------ #
 
 def normalize_drive(letter: str) -> str:
-    """Normalize a drive letter to uppercase without trailing backslash.
+    """Normalize a drive identifier.
 
-    Examples:
-        "d:\\"  -> "D:"
-        "D:"   -> "D:"
+    Linux device paths are returned unchanged (they are case-sensitive):
+        "/dev/sr0" -> "/dev/sr0"
+
+    Legacy Windows drive letters are upper-cased without trailing backslash so
+    the parsers and tests that still exercise that form keep working:
+        "d:\\" -> "D:"
         "d:"   -> "D:"
     """
-    return letter.upper().rstrip("\\")
+    s = (letter or "").strip()
+    if s.startswith("/dev/"):
+        return s
+    return s.upper().rstrip("\\")
 
 
 # ------------------------------------------------------------------ #

@@ -1,0 +1,30 @@
+[Unit]
+Description=Automatic Disc Ripper
+Documentation=https://github.com/hhammarstrand/adr-proxmox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=adr
+Group=adr
+WorkingDirectory=/opt/adr
+Environment=PYTHONUNBUFFERED=1
+Environment=HOME=/opt/adr
+# TMDb and MakeMKV keys can also be supplied here via an optional env file:
+EnvironmentFile=-/etc/default/adr
+ExecStart=/opt/adr/.venv/bin/python /opt/adr/run.py
+Restart=on-failure
+RestartSec=5
+# The 'adr' user must reach the optical devices (/dev/sr*, /dev/sg*).
+SupplementaryGroups=cdrom disk
+# Hardening (relaxed where the workload needs it: optical devices, /opt/adr,
+# and spawning MakeMKV / HandBrake subprocesses).
+NoNewPrivileges=yes
+ProtectSystem=full
+ProtectHome=no
+PrivateTmp=yes
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

@@ -4,7 +4,6 @@ import pytest
 
 from adr.ripper import MakeMKVRipper, RipResult
 
-
 # ------------------------------------------------------------------ #
 # _parse_csv_line
 # ------------------------------------------------------------------ #
@@ -238,6 +237,16 @@ class TestLogMessage:
 # ------------------------------------------------------------------ #
 
 class TestMakeDevSource:
+    def test_linux_device_path(self):
+        assert MakeMKVRipper._make_dev_source("/dev/sr0") == "dev:/dev/sr0"
+
+    def test_linux_device_path_second_drive(self):
+        assert MakeMKVRipper._make_dev_source("/dev/sr1") == "dev:/dev/sr1"
+
+    def test_linux_device_path_with_whitespace(self):
+        assert MakeMKVRipper._make_dev_source("  /dev/sr0  ") == "dev:/dev/sr0"
+
+    # Legacy Windows drive-letter forms are still accepted.
     def test_drive_letter_with_colon(self):
         assert MakeMKVRipper._make_dev_source("G:") == "dev:G:"
 

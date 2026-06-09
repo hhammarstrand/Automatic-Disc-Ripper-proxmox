@@ -37,10 +37,11 @@ desktop.ini
 config/adr.yaml
 config.yaml
 
+# MakeMKV registration key (secret)
+.MakeMKV/
+
 # Distribution / Build
 dist/
 build/
 *.egg-info/
 *.spec
-HandBrakeCLI.exe
-config/arm.yaml

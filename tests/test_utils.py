@@ -1,21 +1,18 @@
 """Tests for adr.utils — pure helper functions."""
 
-import pytest
-from pathlib import Path
 from unittest.mock import patch
 
 from adr.utils import (
-    sanitize_filename,
-    parse_disc_label,
-    format_duration,
-    parse_duration,
-    normalize_drive,
-    extract_tmdb_year,
-    make_plex_folder_name,
-    get_lan_ip,
     BYTES_PER_MB,
+    extract_tmdb_year,
+    format_duration,
+    get_lan_ip,
+    make_plex_folder_name,
+    normalize_drive,
+    parse_disc_label,
+    parse_duration,
+    sanitize_filename,
 )
-
 
 # ------------------------------------------------------------------ #
 # sanitize_filename
@@ -171,6 +168,17 @@ class TestParseDuration:
 # ------------------------------------------------------------------ #
 
 class TestNormalizeDrive:
+    def test_linux_device_path(self):
+        assert normalize_drive("/dev/sr0") == "/dev/sr0"
+
+    def test_linux_device_path_preserves_case(self):
+        # Device paths are case-sensitive and must not be upper-cased.
+        assert normalize_drive("/dev/sr1") == "/dev/sr1"
+
+    def test_linux_device_path_strips_whitespace(self):
+        assert normalize_drive("  /dev/sr0 ") == "/dev/sr0"
+
+    # Legacy Windows drive-letter normalisation still works.
     def test_lowercase_with_backslash(self):
         assert normalize_drive("d:\\") == "D:"
 

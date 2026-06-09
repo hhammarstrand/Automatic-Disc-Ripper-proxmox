@@ -1,12 +1,12 @@
-"""SQLAlchemy database models for Automatic Disc Ripper for Windows.
+"""SQLAlchemy database models for Automatic Disc Ripper.
 
 Tracks ripping/encoding jobs and individual tracks (titles) per disc.
 """
 
 import enum
 
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, Enum, ForeignKey, Text, Boolean
-from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session
+from sqlalchemy import Boolean, Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text, create_engine
+from sqlalchemy.orm import Session, declarative_base, relationship, sessionmaker
 
 from adr.config import DATABASE_PATH
 from adr.utils import utcnow
@@ -307,15 +307,15 @@ def init_db() -> None:
     If the database file is corrupt, it is backed up and recreated
     automatically so the application can continue running.
     """
+    import logging
     import os
     import shutil
-    import logging
     _log = logging.getLogger(__name__)
 
     engine = get_engine()
 
     # Check integrity of existing database
-    if os.path.exists(DATABASE_PATH) and os.path.getsize(DATABASE_PATH) > 0:
+    if os.path.exists(DATABASE_PATH) and os.path.getsize(DATABASE_PATH) > 0:  # noqa: SIM102
         if not _check_db_integrity(engine):
             _log.warning("Database is corrupt — backing up and recreating")
             # Dispose engine connections so the file can be moved

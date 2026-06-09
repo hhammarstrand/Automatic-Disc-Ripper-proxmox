@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Automatic Disc Ripper for Windows – Entry point.
+"""Automatic Disc Ripper – Entry point.
 
 Starts the disc watcher, pipeline manager, and Flask web UI.
 
@@ -17,14 +17,14 @@ import sys
 from adr.config import Config
 from adr.models import init_db
 from adr.pipeline import PipelineManager
-from adr.utils import setup_logging, get_lan_ip
+from adr.utils import get_lan_ip, setup_logging
 from web.app import create_app
 
 logger = logging.getLogger(__name__)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Automatic Disc Ripper for Windows: Automatic Disc Ripper for Windows")
+    parser = argparse.ArgumentParser(description="Automatic Disc Ripper — automatic optical disc ripping & transcoding")
     parser.add_argument("--config", type=str, default=None, help="Path to adr.yaml config file")
     parser.add_argument("--port", type=int, default=None, help="Override web UI port")
     parser.add_argument("--host", type=str, default=None, help="Override web UI host")
@@ -35,7 +35,7 @@ def main() -> None:
     setup_logging(config.log_level)
 
     logger.info("=" * 60)
-    logger.info("Automatic Disc Ripper for Windows v1.0.0 starting")
+    logger.info("Automatic Disc Ripper v1.0.0 starting")
     logger.info("=" * 60)
     logger.info("Config: %s", config)
     logger.info("MakeMKV: %s", config.makemkv_path)
@@ -80,7 +80,7 @@ def main() -> None:
         pass
     finally:
         pipeline.stop()
-        logger.info("Automatic Disc Ripper for Windows stopped")
+        logger.info("Automatic Disc Ripper stopped")
 
 
 if __name__ == "__main__":

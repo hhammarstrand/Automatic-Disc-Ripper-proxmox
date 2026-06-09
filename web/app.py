@@ -1,4 +1,4 @@
-"""Flask web application and REST API for Automatic Disc Ripper for Windows.
+"""Flask web application and REST API for Automatic Disc Ripper.
 
 Provides a dashboard UI and JSON API for monitoring/controlling
 the ripping pipeline.
@@ -8,17 +8,30 @@ import logging
 from pathlib import Path
 
 import psutil
-from flask import Flask, render_template, request, jsonify, send_file, abort
+from flask import Flask, abort, jsonify, render_template, request, send_file
 from sqlalchemy.exc import SQLAlchemyError
 
 from adr.config import Config
 from adr.disc import eject_drive, get_drive_models
-from adr.identify import TMDB_SEARCH_URL, TMDB_DETAIL_URL, TMDB_IMAGE_BASE, TMDB_IMAGE_BASE_SMALL
+from adr.identify import TMDB_DETAIL_URL, TMDB_IMAGE_BASE, TMDB_IMAGE_BASE_SMALL, TMDB_SEARCH_URL
 from adr.models import (
-    Job, JobStatus, get_session,
-    ACTIVE_STATUSES, RIP_PHASE_STATUSES, ENCODE_PHASE_STATUSES, TERMINAL_STATUSES,
+    ACTIVE_STATUSES,
+    ENCODE_PHASE_STATUSES,
+    RIP_PHASE_STATUSES,
+    TERMINAL_STATUSES,
+    Job,
+    JobStatus,
+    get_session,
 )
-from adr.utils import get_lan_ip, utcnow, format_duration, normalize_drive, BYTES_PER_MB, extract_tmdb_year, get_bundle_root
+from adr.utils import (
+    BYTES_PER_MB,
+    extract_tmdb_year,
+    format_duration,
+    get_bundle_root,
+    get_lan_ip,
+    normalize_drive,
+    utcnow,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -425,7 +438,7 @@ def _register_api_routes(app: Flask) -> None:
             # Sanitise filename to prevent path traversal
             safe_name = Path(filename).name
             file_path = out / safe_name
-            if not file_path.exists() or not file_path.suffix.lower() == ".mp4":
+            if not file_path.exists() or file_path.suffix.lower() != ".mp4":
                 abort(404)
             # Ensure the resolved path is still inside the output dir
             if not file_path.resolve().is_relative_to(out.resolve()):
@@ -621,7 +634,7 @@ def _register_api_routes(app: Flask) -> None:
         mem = psutil.virtual_memory()
         # Disk usage for completed_path drive
         try:
-            disk_path = str(_config.completed_path) if _config else "C:\\"
+            disk_path = str(_config.completed_path) if _config else "/"
             disk = psutil.disk_usage(disk_path)
             disk_info = {
                 "total_gb": round(disk.total / (1024**3), 1),
@@ -707,7 +720,7 @@ def _register_api_routes(app: Flask) -> None:
         info["file_exists"] = True
 
         try:
-            with open(preset_file, "r", encoding="utf-8") as fh:
+            with open(preset_file, encoding="utf-8") as fh:
                 data = _json.load(fh)
             info["valid_json"] = True
 
@@ -742,12 +755,59 @@ def _register_api_routes(app: Flask) -> None:
         """Get current settings as JSON."""
         return jsonify(_config.as_dict())
 
+    @app.route("/api/makemkv/refresh-key", methods=["POST"])
+    def api_refresh_makemkv_key():
+        """Fetch/refresh the MakeMKV registration key.
+
+        Body (optional): {"key": "T-..."} to set an explicit key, otherwise the
+        latest free beta key is fetched from the MakeMKV forum. The key is
+        written to ~/.MakeMKV/settings.conf for the service user.
+        """
+        from adr import makemkv_key
+
+        data = request.get_json(silent=True) or {}
+        explicit = str(data.get("key", "")).strip() or None
+        if explicit and not makemkv_key.is_valid_key(explicit):
+            return jsonify({"ok": False, "error": "Key is malformed (expected T-...)"}), 400
+        try:
+            key = makemkv_key.ensure_key(explicit)
+        except Exception as exc:  # noqa: BLE001 — surface any fetch/IO failure to the UI
+            logger.warning("MakeMKV key refresh failed: %s", exc)
+            return jsonify({"ok": False, "error": str(exc)}), 500
+        if not key:
+            return jsonify({
+                "ok": False,
+                "error": "Could not obtain a key. Check internet access or paste one manually.",
+            }), 502
+        # Never echo the full secret back to the browser — just confirm + show a hint.
+        return jsonify({"ok": True, "key_hint": key[:6] + "…" + key[-4:]})
+
+    # Settings keys the UI is allowed to write. Anything outside this set is
+    # rejected so a LAN attacker cannot, for example, point makemkv_path at an
+    # arbitrary binary and turn the (unauthenticated) API into remote code
+    # execution.
+    _ALLOWED_SETTINGS_KEYS = frozenset({
+        "makemkv_path", "handbrake_path", "raw_path", "completed_path",
+        "min_title_length", "handbrake_preset", "handbrake_preset_file",
+        "handbrake_extra_args", "max_encode_jobs", "drives", "tmdb_api_key",
+        "watch_path", "watch_output_path", "watch_interval", "web_host",
+        "web_port", "log_level", "disabled_drives", "eject_after_rip",
+        "no_eject_drives", "main_feature_only", "plex_path",
+        "auto_move_to_plex", "drive_labels",
+    })
+
     @app.route("/api/settings", methods=["POST"])
     def api_save_settings():
         """Update settings from JSON body."""
         data = request.get_json()
         if not data:
             return jsonify({"error": "No data provided"}), 400
+
+        # Reject unknown keys outright — prevents config injection via the
+        # unauthenticated API.
+        unknown = set(data.keys()) - _ALLOWED_SETTINGS_KEYS
+        if unknown:
+            return jsonify({"error": f"Unknown setting(s): {', '.join(sorted(unknown))}"}), 400
 
         # Basic validation
         errors = []
@@ -772,9 +832,8 @@ def _register_api_routes(app: Flask) -> None:
                     errors.append("watch_interval must be >= 1")
             except (TypeError, ValueError):
                 errors.append("watch_interval must be a number")
-        if "log_level" in data:
-            if data["log_level"] not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
-                errors.append("Invalid log_level")
+        if "log_level" in data and data["log_level"] not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
+            errors.append("Invalid log_level")
         if errors:
             return jsonify({"error": "; ".join(errors)}), 400
 

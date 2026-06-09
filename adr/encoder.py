@@ -4,6 +4,7 @@ Runs HandBrakeCLI as a subprocess, parses JSON progress output,
 and supports queueing multiple encode jobs.
 """
 
+import contextlib
 import json
 import logging
 import os
@@ -11,8 +12,8 @@ import re
 import subprocess
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from adr.config import Config
 from adr.utils import BYTES_PER_MB, get_bundle_root
@@ -386,11 +387,10 @@ class HandBrakeEncoder:
         if not isinstance(entry, dict):
             return
         name = entry.get("PresetName")
-        if name and name not in seen:
-            # Skip folder entries (Type=0 means preset, but be lenient)
-            if not entry.get("Folder", False):
-                names.append(name)
-                seen.add(name)
+        # Skip folder entries (Type=0 means preset, but be lenient)
+        if name and name not in seen and not entry.get("Folder", False):
+            names.append(name)
+            seen.add(name)
         # Recurse into children
         for child in entry.get("ChildrenArray", []):
             HandBrakeEncoder._extract_preset_names(child, names, seen)
@@ -480,10 +480,8 @@ class HandBrakeEncoder:
                     fps_val = 0.0
                     rate_m = re.search(r'"?Rate"?\s*:\s*([\d.]+)', json_str)
                     if rate_m:
-                        try:
+                        with contextlib.suppress(ValueError):
                             fps_val = float(rate_m.group(1))
-                        except ValueError:
-                            pass
                     info = {
                         "progress": prog_val,
                         "eta_seconds": 0,

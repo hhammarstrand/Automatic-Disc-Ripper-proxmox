@@ -1,17 +1,15 @@
 """Tests for adr.identify — TMDb lookup and scoring helpers."""
 
-import pytest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from adr.identify import (
-    _normalise,
-    _title_similarity,
-    _score_result,
-    MovieInfo,
     MIN_CONFIDENCE_FOR_RENAME,
+    MovieInfo,
+    _normalise,
+    _score_result,
+    _title_similarity,
     identify_disc,
 )
-
 
 # ------------------------------------------------------------------ #
 # _normalise

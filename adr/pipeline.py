@@ -1,4 +1,4 @@
-"""Pipeline orchestrator for Automatic Disc Ripper for Windows.
+"""Pipeline orchestrator for Automatic Disc Ripper.
 
 Coordinates the full workflow per drive: detect → identify → rip → eject → encode.
 Each optical drive gets its own DrivePipeline thread. Encoding jobs are dispatched
@@ -25,7 +25,15 @@ from adr.encoder import HandBrakeEncoder
 from adr.identify import identify_disc
 from adr.models import Job, JobStatus, Track, TrackStatus, get_session, init_db
 from adr.ripper import MakeMKVRipper
-from adr.utils import sanitize_filename, utcnow, unique_output_dir, parse_duration, normalize_drive, BYTES_PER_MB, make_plex_folder_name
+from adr.utils import (
+    BYTES_PER_MB,
+    make_plex_folder_name,
+    normalize_drive,
+    parse_duration,
+    sanitize_filename,
+    unique_output_dir,
+    utcnow,
+)
 from adr.watcher import FolderWatcher
 
 logger = logging.getLogger(__name__)
@@ -252,9 +260,6 @@ class EncoderWorker(threading.Thread):
 
             # Query DB for accurate counts (other workers may have updated)
             total_tracks = session.query(Track).filter(Track.job_id == task.job_id).count()
-            completed_before = session.query(Track).filter(
-                Track.job_id == task.job_id, Track.status == TrackStatus.DONE
-            ).count()
 
             _last_enc_pct = [0.0]  # mutable container for closure
             _last_enc_commit = [0.0]
@@ -290,14 +295,14 @@ class EncoderWorker(threading.Thread):
                     done_count = session.query(Track).filter(
                         Track.job_id == task.job_id, Track.status == TrackStatus.DONE
                     ).count()
-                    
+
                     overall = (done_count + p) / total_tracks if total_tracks > 0 else p
                     overall = min(overall, 1.0)
-                    
+
                     current_overall = job.progress_encode or 0.0
                     if overall < current_overall:
                         return  # ignore backwards jumps from concurrent tracks
-                        
+
                     job.progress_encode = overall
 
                     # Build rich progress info, safely handling None values from API
@@ -332,7 +337,7 @@ class EncoderWorker(threading.Thread):
                         "state": info.get("state", "working"),
                     }
                     job.progress_info = json.dumps(pi)
-                    
+
                     committed = False
                     for attempt in range(3):
                         try:
@@ -470,7 +475,7 @@ class DrivePipeline:
         Only processes if the event is for our drive. Runs the full pipeline
         in a new thread so the watcher isn't blocked.
         """
-        if drive.upper() != self.drive.upper():
+        if normalize_drive(drive) != normalize_drive(self.drive):
             return
         # Check if drive was disabled at runtime via settings UI
         if normalize_drive(drive) in self._config.disabled_drives:
@@ -585,13 +590,13 @@ class DrivePipeline:
 
                 if p < _last_rip_pct[0]:
                     return  # ignore backwards jumps
-                
+
                 now = time.time()
                 if now - _last_rip_commit[0] < 2.0:
                     return
-                    
+
                 _last_rip_pct[0] = p
-                
+
                 pi = {
                     "phase": "ripping",
                     "title_current": info.get("title_current", 0),
@@ -680,7 +685,7 @@ class DrivePipeline:
             for idx, mkv_file in enumerate(rip_result.mkv_files):
                 # Try to find duration from title_info by matching filename
                 duration_sec = None
-                for ti_idx, ti_info in rip_result.title_info.items():
+                for ti_info in rip_result.title_info.values():
                     if ti_info.get("filename") == mkv_file.name:
                         duration_sec = parse_duration(ti_info.get("duration", "0:00:00")) or None
                         break
@@ -697,10 +702,10 @@ class DrivePipeline:
                 session.commit()
 
                 # Plex filename: "Title (Year).mp4" or "Title (Year) - pt2.mp4" for multi-track
-                if len(rip_result.mkv_files) == 1:
-                    out_name = plex_folder_name
-                else:
-                    out_name = f"{plex_folder_name} - pt{idx + 1}"
+                out_name = (
+                    plex_folder_name if len(rip_result.mkv_files) == 1
+                    else f"{plex_folder_name} - pt{idx + 1}"
+                )
 
                 self._encode_queue.put(EncodeTask(
                     job_id=job.id,
