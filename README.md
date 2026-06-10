@@ -1,5 +1,8 @@
 # Automatic Disc Ripper — Proxmox LXC edition
 
+[![tests](https://github.com/hhammarstrand/Automatic-Disc-Ripper-proxmox/actions/workflows/tests.yml/badge.svg)](https://github.com/hhammarstrand/Automatic-Disc-Ripper-proxmox/actions/workflows/tests.yml)
+[![license: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Automatic, hands-off DVD/Blu-ray ripping for your homelab. Insert a disc and it
 is ripped with **MakeMKV**, transcoded to MP4 with **HandBrake**, identified and
 named via **TMDb**, and dropped into a Plex-ready folder — all inside a single

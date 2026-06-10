@@ -6,9 +6,10 @@
 #   bash -c "$(curl -fsSL https://raw.githubusercontent.com/hhammarstrand/Automatic-Disc-Ripper-proxmox/main/scripts/install.sh)"
 #
 # What it does:
-#   1. Creates an unprivileged-by-default? (privileged) Ubuntu 24.04 LXC
-#   2. Passes the optical drive(s) (/dev/sr*) into the container
-#   3. Installs MakeMKV + HandBrakeCLI + the app and enables the systemd service
+#   1. Creates a privileged Ubuntu 24.04 LXC (simplest path for optical
+#      passthrough; pass CT_UNPRIVILEGED=1 if you have idmap configured).
+#   2. Passes the optical drive(s) (/dev/sr*, /dev/sg*) into the container.
+#   3. Installs MakeMKV + HandBrakeCLI + the app and enables the systemd service.
 #
 # Everything is overridable with environment variables — see the defaults below.
 # For a fully non-interactive install set ADR_NONINTERACTIVE=1 and any CT_* vars.
