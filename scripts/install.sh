@@ -3,7 +3,7 @@
 # Automatic Disc Ripper — Proxmox LXC installer (run this on the Proxmox HOST).
 #
 # One-liner:
-#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/hhammarstrand/adr-proxmox/main/scripts/install.sh)"
+#   bash -c "$(curl -fsSL https://raw.githubusercontent.com/hhammarstrand/Automatic-Disc-Ripper-proxmox/main/scripts/install.sh)"
 #
 # What it does:
 #   1. Creates an unprivileged-by-default? (privileged) Ubuntu 24.04 LXC
@@ -18,7 +18,7 @@ set -euo pipefail
 # ----------------------------------------------------------------------------- #
 # Configuration (env-overridable)
 # ----------------------------------------------------------------------------- #
-ADR_REPO_URL="${ADR_REPO_URL:-https://github.com/hhammarstrand/adr-proxmox.git}"
+ADR_REPO_URL="${ADR_REPO_URL:-https://github.com/hhammarstrand/Automatic-Disc-Ripper-proxmox.git}"
 ADR_BRANCH="${ADR_BRANCH:-main}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"            # optional — needed only for a private repo
 

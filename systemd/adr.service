@@ -1,6 +1,6 @@
 [Unit]
 Description=Automatic Disc Ripper
-Documentation=https://github.com/hhammarstrand/adr-proxmox
+Documentation=https://github.com/hhammarstrand/Automatic-Disc-Ripper-proxmox
 After=network-online.target
 Wants=network-online.target
 

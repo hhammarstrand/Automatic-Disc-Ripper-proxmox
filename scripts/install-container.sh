@@ -5,7 +5,7 @@
 # Normally invoked by scripts/install.sh on the Proxmox host, but it can also be
 # run standalone inside an existing Ubuntu 24.04 container:
 #
-#   curl -fsSL https://raw.githubusercontent.com/hhammarstrand/adr-proxmox/main/scripts/install-container.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/hhammarstrand/Automatic-Disc-Ripper-proxmox/main/scripts/install-container.sh | bash
 #
 # Env vars honoured:
 #   ADR_REPO_URL          git URL (default: public repo)
@@ -16,7 +16,7 @@
 #
 set -euo pipefail
 
-ADR_REPO_URL="${ADR_REPO_URL:-https://github.com/hhammarstrand/adr-proxmox.git}"
+ADR_REPO_URL="${ADR_REPO_URL:-https://github.com/hhammarstrand/Automatic-Disc-Ripper-proxmox.git}"
 ADR_BRANCH="${ADR_BRANCH:-main}"
 GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 TMDB_API_KEY="${TMDB_API_KEY:-}"

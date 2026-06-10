@@ -30,7 +30,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 On your **Proxmox host** (as root — via SSH or the node **Shell** in the Proxmox web UI):
 
 ```bash
-bash -c "$(curl -fsSL https://raw.githubusercontent.com/hhammarstrand/adr-proxmox/main/scripts/install.sh)"
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/hhammarstrand/Automatic-Disc-Ripper-proxmox/main/scripts/install.sh)"
 ```
 
 You'll be asked for a few values (container ID, disk size, the optical device,
@@ -92,7 +92,7 @@ in this browser tab. Please install "Automatic Disc Ripper" for me by:
    like root@pve:~#). If not, ask me to open one first.
 2. Typing the following command into the shell and pressing Enter:
 
-       bash -c "$(curl -fsSL https://raw.githubusercontent.com/hhammarstrand/adr-proxmox/main/scripts/install.sh)"
+       bash -c "$(curl -fsSL https://raw.githubusercontent.com/hhammarstrand/Automatic-Disc-Ripper-proxmox/main/scripts/install.sh)"
 
 3. Watching the installer output. When it prompts me for:
       - container ID (CTID)   -> suggest the number it shows as default
