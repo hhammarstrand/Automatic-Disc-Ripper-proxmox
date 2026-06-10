@@ -67,7 +67,7 @@ def sanitize_filename(name: str) -> str:
     name = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", name)
     # Collapse whitespace
     name = re.sub(r"\s+", " ", name).strip()
-    # Limit length (Windows MAX_PATH safety)
+    # Limit length to stay safely below typical filesystem limits.
     if len(name) > 200:
         name = name[:200]
     return name
