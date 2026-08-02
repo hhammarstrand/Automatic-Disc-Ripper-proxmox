@@ -80,15 +80,28 @@ fi
 # ----------------------------------------------------------------------------- #
 if [[ "$USE_EXISTING" -eq 1 ]]; then
     [[ -d "$NAS_MOUNTPOINT" ]] || die "MEDIA_HOST_PATH '$NAS_MOUNTPOINT' does not exist on this host."
+    # Ask which mount BACKS this path, not whether the path is itself a mount
+    # point — a subdirectory of a share (…/TrueNAS/Movies) is perfectly valid
+    # and must not be mistaken for local disk.
     FSTYPE="$(findmnt -rn -o FSTYPE --target "$NAS_MOUNTPOINT" 2>/dev/null || echo unknown)"
     SRC="$(findmnt -rn -o SOURCE --target "$NAS_MOUNTPOINT" 2>/dev/null || echo "$NAS_MOUNTPOINT")"
-    if mountpoint -q "$NAS_MOUNTPOINT"; then
-        msg_ok "Using existing mount: ${NAS_MOUNTPOINT} (${FSTYPE} from ${SRC})"
-    else
-        msg_warn "${NAS_MOUNTPOINT} is not a mount point — it is a plain directory"
-        msg_warn "on the host's own disk. That works, but rips will fill the host"
-        msg_warn "disk rather than network storage. Continuing anyway."
-    fi
+    MOUNT_TARGET="$(findmnt -rn -o TARGET --target "$NAS_MOUNTPOINT" 2>/dev/null || echo "")"
+
+    case "$FSTYPE" in
+        nfs|nfs4|cifs|smb3|fuse.sshfs|glusterfs|ceph)
+            if [[ "$MOUNT_TARGET" == "$NAS_MOUNTPOINT" ]]; then
+                msg_ok "Using existing network mount: ${NAS_MOUNTPOINT} (${FSTYPE} from ${SRC})"
+            else
+                msg_ok "Using ${NAS_MOUNTPOINT} — a directory on the ${FSTYPE} share mounted"
+                msg_ok "at ${MOUNT_TARGET} (${SRC})"
+            fi
+            ;;
+        *)
+            msg_warn "${NAS_MOUNTPOINT} is on a '${FSTYPE}' filesystem, not network storage."
+            msg_warn "Finished films will be written to the host's own disk. That works,"
+            msg_warn "but it is probably not what you intended. Continuing anyway."
+            ;;
+    esac
     if [[ "$NAS_MOUNTPOINT" == /mnt/pve/* ]]; then
         msg_info "This is a Proxmox-managed storage; it stays under Proxmox's control."
         msg_info "Nothing will be written to /etc/fstab."
