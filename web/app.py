@@ -805,10 +805,13 @@ def _register_api_routes(app: Flask) -> None:
         """Report the real state of the configured storage paths."""
         from adr import storage as _storage
 
+        staging = _storage.should_stage(_config.completed_path, _config.stage_locally)
         paths = {
             "raw": _storage.describe_path(_config.raw_path),
             "completed": _storage.describe_path(_config.completed_path),
         }
+        if staging:
+            paths["staging"] = _storage.describe_path(_config.staging_path)
         if _config.plex_path:
             paths["plex"] = _storage.describe_path(_config.plex_path)
 
@@ -835,6 +838,7 @@ def _register_api_routes(app: Flask) -> None:
         return jsonify({
             "paths": paths,
             "warnings": warnings,
+            "staging": staging,
             "service_uid": _storage.SERVICE_UID,
             "ctid": os.environ.get("ADR_CTID", "").strip() or None,
         })

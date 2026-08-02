@@ -162,6 +162,20 @@ def check_destination(path: str | Path, require_mount: bool = False) -> tuple[bo
     return True, ""
 
 
+def should_stage(destination: str | Path, enabled: bool = True) -> bool:
+    """Whether encoding should go to local scratch before being transferred.
+
+    Only worth doing when the destination is network storage. HandBrake writes
+    its output continuously, so encoding straight to a NAS keeps the share busy
+    for the entire encode; staging locally turns that into one sequential
+    transfer at the end. When the destination is already a local disk, staging
+    would just be an extra copy of several GB, so it is skipped.
+    """
+    if not enabled:
+        return False
+    return bool(describe_path(destination)["is_network"])
+
+
 def probe_nas(kind: str, host: str, timeout: float = 3.0) -> dict[str, Any]:
     """TCP-probe a NAS to confirm it is reachable and serving the right protocol.
 

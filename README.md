@@ -180,6 +180,8 @@ UI under **Settings**. Key options:
 | `tmdb_api_key` | — | Free key from [themoviedb.org](https://www.themoviedb.org/settings/api) |
 | `plex_path` | — | Move finished movies into a Plex library folder |
 | `require_completed_mount` | `false` | Refuse to start a rip unless the destination is a real mount point — set automatically by `adr-setup-nas` |
+| `stage_locally` | `true` | Encode to local disk and transfer the finished film in one copy. Only applies when `completed_path` is network storage |
+| `staging_path` | `/opt/adr/staging` | Local scratch used while encoding to network storage |
 
 ### MakeMKV key
 
@@ -203,13 +205,22 @@ belong on a NAS. Ripping stays **local** (fast scratch on the container disk)
 and only the finished MP4s go to the NAS.
 
 ```
- Proxmox host                                  NAS (192.168.1.10)
- ├─ /dev/sr0 ──► LXC ─ rip ─► /opt/adr/raw     ┌──────────────────┐
- │                     │        (local, fast)  │ /volume1/media   │
- │                     └─ transcode ─────────► │  Title (Year)/   │
- └─ /mnt/adr-media ◄── NFS/SMB ────────────────┘  Title (Year).mp4│
-        (bind-mounted into the CT as /opt/adr/completed)
+ Proxmox host — everything happens locally          NAS (192.168.1.10)
+ ┌──────────────────────────────────────────┐      ┌──────────────────┐
+ │ /dev/sr0 ─rip─► /opt/adr/raw    (MKV)    │      │ /volume1/media   │
+ │                     │                    │      │  Title (Year)/   │
+ │              transcode                   │      │   …(Year).mp4    │
+ │                     ▼                    │      └──────────────────┘
+ │            /opt/adr/staging     (MP4)    │              ▲
+ └──────────────────────────────────────────┘              │
+                       └── one transfer when finished ──────┘
 ```
+
+Only the finished MP4 crosses the network, and only once. HandBrake writes to
+local disk for the whole encode rather than keeping the share busy for 30–40
+minutes. This is automatic whenever `completed_path` is a network filesystem;
+for local storage the staging step is skipped, since it would just be a
+pointless extra copy of several GB.
 
 **The easiest route is the web UI:** open **Storage** in the navigation. It shows
 whether your finished files are landing on network storage or quietly on the

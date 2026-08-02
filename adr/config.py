@@ -51,6 +51,13 @@ _DEFAULTS: dict[str, Any] = {
     # "mounted" and "an empty directory on the container disk" is invisible
     # until the disk fills up.
     "require_completed_mount": False,
+    # Encode to local disk and transfer the finished file to the destination in
+    # one operation, instead of letting HandBrake write across the network for
+    # the whole encode. Only takes effect when completed_path is a network
+    # filesystem — staging to and from the same local disk would be a pointless
+    # extra copy.
+    "stage_locally": True,
+    "staging_path": "/opt/adr/staging",
     "plex_path": "",
     "auto_move_to_plex": True,
     "drive_labels": {},
@@ -89,7 +96,7 @@ class Config:
 
         # Ensure output directories exist (warn instead of crash if
         # the target drive is not available, e.g. network share offline)
-        for dir_key in ("raw_path", "completed_path"):
+        for dir_key in ("raw_path", "completed_path", "staging_path"):
             try:
                 os.makedirs(self._data[dir_key], exist_ok=True)
             except OSError as exc:
@@ -234,6 +241,16 @@ class Config:
     def require_completed_mount(self) -> bool:
         """Whether completed_path must be a mount point before a rip may start."""
         return bool(self._data.get("require_completed_mount", False))
+
+    @property
+    def stage_locally(self) -> bool:
+        """Whether to encode locally and transfer the finished file in one go."""
+        return bool(self._data.get("stage_locally", True))
+
+    @property
+    def staging_path(self) -> Path:
+        """Local scratch directory used while encoding to network storage."""
+        return Path(self._data.get("staging_path", "/opt/adr/staging"))
 
     @property
     def plex_path(self) -> str:

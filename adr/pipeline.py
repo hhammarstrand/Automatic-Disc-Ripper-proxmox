@@ -25,7 +25,7 @@ from adr.encoder import HandBrakeEncoder
 from adr.identify import identify_disc
 from adr.models import Job, JobStatus, Track, TrackStatus, get_session, init_db
 from adr.ripper import MakeMKVRipper
-from adr.storage import check_destination
+from adr.storage import check_destination, should_stage
 from adr.utils import (
     BYTES_PER_MB,
     make_plex_folder_name,
@@ -145,6 +145,61 @@ def rename_job_output(job, session) -> None:
         logger.warning("Rename failed for job %s: %s", job.id, exc)
 
 
+def transfer_to_destination(job, session, final_parent: Path) -> bool:
+    """Move a finished job's folder from local staging to its real destination.
+
+    Used when encoding was staged locally (see EncodeTask.final_dir): instead of
+    HandBrake writing across the network for the whole encode, the completed
+    folder is transferred once, sequentially.
+
+    On failure the staged files are deliberately left where they are and the
+    job records where to find them — losing a finished rip to a network blip
+    would be far worse than an error the user can act on.
+
+    Returns True when the files are at their destination.
+    """
+    src = Path(job.output_path) if job.output_path else None
+    if not src or not src.exists():
+        logger.warning("Transfer: staged output missing for job %s (%s)", job.id, src)
+        job.error_message = f"Encoded files not found in staging ({src})."
+        return False
+
+    dest = final_parent / src.name
+    if dest.exists():
+        counter = 2
+        while (candidate := dest.parent / f"{src.name} ({counter})").exists():
+            counter += 1
+        dest = candidate
+
+    size_mb = sum(f.stat().st_size for f in src.rglob("*") if f.is_file()) / BYTES_PER_MB
+    logger.info("Transferring job %s to %s (%.0f MB)", job.id, dest, size_mb)
+    started = time.monotonic()
+    try:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dest))
+    except (OSError, shutil.Error) as exc:
+        logger.error("Transfer failed for job %s: %s", job.id, exc)
+        job.error_message = (
+            f"Encoding succeeded but the transfer to {dest} failed: {exc}. "
+            f"The finished files are still in {src} — fix the destination and "
+            "move them, or re-run the job."
+        )
+        return False
+
+    elapsed = max(time.monotonic() - started, 0.001)
+    logger.info(
+        "Transfer complete for job %s: %.0f MB in %.0fs (%.1f MB/s)",
+        job.id, size_mb, elapsed, size_mb / elapsed,
+    )
+
+    job.output_path = str(dest)
+    for t in job.tracks:
+        if t.output_path:
+            t.output_path = str(dest / Path(t.output_path).name)
+    session.commit()
+    return True
+
+
 def move_to_plex(job, session, config) -> bool:
     """Move a finished job's output folder to the Plex library.
 
@@ -198,14 +253,29 @@ def move_to_plex(job, session, config) -> bool:
 # ------------------------------------------------------------------ #
 
 class EncodeTask:
-    """A single file to encode, dispatched to the encoder worker pool."""
+    """A single file to encode, dispatched to the encoder worker pool.
 
-    def __init__(self, job_id: int, track_id: int, input_path: Path, output_dir: Path, output_filename: str):
+    ``output_dir`` is where HandBrake writes. When ``final_dir`` is set it is
+    a *staging* directory on local disk, and the finished folder is transferred
+    to ``final_dir`` once every track of the job has encoded — one sequential
+    copy instead of HandBrake writing across the network for the whole encode.
+    """
+
+    def __init__(
+        self,
+        job_id: int,
+        track_id: int,
+        input_path: Path,
+        output_dir: Path,
+        output_filename: str,
+        final_dir: Path | None = None,
+    ):
         self.job_id = job_id
         self.track_id = track_id
         self.input_path = input_path
         self.output_dir = output_dir
         self.output_filename = output_filename
+        self.final_dir = final_dir
 
 
 # ------------------------------------------------------------------ #
@@ -403,8 +473,21 @@ class EncoderWorker(threading.Thread):
 
                 # If the user re-matched via TMDb while ripping/encoding,
                 # the title may have changed.  Rename the output folder
-                # and files to the new Plex-style name.
+                # and files to the new Plex-style name.  Doing this before the
+                # transfer keeps it a cheap local rename.
                 rename_job_output(job, session)
+
+                # Encoded to local staging — now do the single transfer to the
+                # real destination (typically the NAS).
+                if task.final_dir is not None:
+                    transferred = transfer_to_destination(job, session, task.final_dir)
+                    if not transferred:
+                        # The files are intact in staging; say so rather than
+                        # reporting a success the user does not have.
+                        job.status = JobStatus.ERROR
+                        job.completed_at = utcnow()
+                        session.commit()
+                        return
 
                 # Move to Plex library if configured and flagged
                 move_to_plex(job, session, self._config)
@@ -517,6 +600,12 @@ class DrivePipeline:
                 self._config.completed_path,
                 require_mount=self._config.require_completed_mount,
             )
+            # When encoding is staged locally, the scratch area needs room too —
+            # otherwise the rip only fails later, at the staging step.
+            if dest_ok and should_stage(self._config.completed_path, self._config.stage_locally):
+                dest_ok, dest_err = check_destination(self._config.staging_path)
+                if not dest_ok:
+                    dest_err = f"Local staging area unusable: {dest_err}"
             if not dest_ok:
                 job.status = JobStatus.ERROR
                 job.error_message = dest_err
@@ -695,7 +784,21 @@ class DrivePipeline:
 
             # Build Plex-style folder and filename
             plex_folder_name = make_plex_folder_name(plex_title, plex_year)
-            output_dir = unique_output_dir(self._config.completed_path / plex_folder_name)
+
+            # Encode to local disk when the destination is network storage, so
+            # HandBrake is not writing over the network for the whole encode —
+            # the finished folder is transferred once at the end instead.
+            staging = should_stage(self._config.completed_path, self._config.stage_locally)
+            if staging:
+                final_dir = self._config.completed_path
+                output_dir = unique_output_dir(self._config.staging_path / plex_folder_name)
+                logger.info(
+                    "Encoding to local staging %s; will transfer to %s when finished",
+                    output_dir, final_dir,
+                )
+            else:
+                final_dir = None
+                output_dir = unique_output_dir(self._config.completed_path / plex_folder_name)
             job.output_path = str(output_dir)
 
             for idx, mkv_file in enumerate(rip_result.mkv_files):
@@ -729,6 +832,7 @@ class DrivePipeline:
                     input_path=mkv_file,
                     output_dir=output_dir,
                     output_filename=out_name,
+                    final_dir=final_dir,
                 ))
 
             job.status = JobStatus.ENCODING

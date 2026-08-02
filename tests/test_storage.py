@@ -12,6 +12,7 @@ from adr.storage import (
     check_destination,
     describe_path,
     probe_nas,
+    should_stage,
 )
 
 
@@ -165,3 +166,22 @@ def test_service_uid_matches_the_installer():
 
     installer = Path(__file__).resolve().parent.parent / "scripts" / "install-container.sh"
     assert f"ADR_UID:-{SERVICE_UID}" in installer.read_text(encoding="utf-8")
+
+
+class TestShouldStage:
+    def test_local_destination_is_not_staged(self, tmp_path):
+        """Staging to and from the same local disk would be a pointless copy."""
+        assert should_stage(tmp_path, enabled=True) is False
+
+    def test_disabled_never_stages(self, tmp_path):
+        assert should_stage(tmp_path, enabled=False) is False
+
+    def test_network_destination_is_staged(self, monkeypatch):
+        import adr.storage as s
+        monkeypatch.setattr(s, "describe_path", lambda p: {"is_network": True})
+        assert s.should_stage("/mnt/nas", enabled=True) is True
+
+    def test_network_destination_respects_the_switch(self, monkeypatch):
+        import adr.storage as s
+        monkeypatch.setattr(s, "describe_path", lambda p: {"is_network": True})
+        assert s.should_stage("/mnt/nas", enabled=False) is False
