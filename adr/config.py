@@ -46,6 +46,11 @@ _DEFAULTS: dict[str, Any] = {
     "eject_after_rip": True,
     "no_eject_drives": [],
     "main_feature_only": True,
+    # Refuse to start a rip unless completed_path is a real mount point.
+    # adr-setup-nas turns this on, because with a NAS the difference between
+    # "mounted" and "an empty directory on the container disk" is invisible
+    # until the disk fills up.
+    "require_completed_mount": False,
     "plex_path": "",
     "auto_move_to_plex": True,
     "drive_labels": {},
@@ -224,6 +229,11 @@ class Config:
     def main_feature_only(self) -> bool:
         """Whether to rip only the main (longest) title from each disc."""
         return bool(self._data.get("main_feature_only", True))
+
+    @property
+    def require_completed_mount(self) -> bool:
+        """Whether completed_path must be a mount point before a rip may start."""
+        return bool(self._data.get("require_completed_mount", False))
 
     @property
     def plex_path(self) -> str:

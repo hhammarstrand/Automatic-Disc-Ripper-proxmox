@@ -869,15 +869,21 @@ def _register_api_routes(app: Flask) -> None:
         if not host or not share:
             return jsonify({"error": "host and share are required"}), 400
 
+        # The password is used to render the command and then dropped; it is
+        # never written to the config, the database or the log.
+        password = str(data.get("password", ""))
+        command = _storage.build_setup_command(
+            kind, host, share,
+            ctid=str(data.get("ctid", "")).strip() or os.environ.get("ADR_CTID", "").strip() or None,
+            username=str(data.get("username", "")).strip(),
+            mountpoint=str(data.get("mountpoint", "")).strip(),
+            password=password,
+        )
         return jsonify({
-            "command": _storage.build_setup_command(
-                kind, host, share,
-                ctid=str(data.get("ctid", "")).strip() or os.environ.get("ADR_CTID", "").strip() or None,
-                username=str(data.get("username", "")).strip(),
-                mountpoint=str(data.get("mountpoint", "")).strip(),
-            ),
+            "command": command,
             "nas_url": _storage.build_nas_url(kind, host, share),
             "service_uid": _storage.SERVICE_UID,
+            "contains_password": bool(password),
         })
 
     # Settings keys the UI is allowed to write; anything outside this set is

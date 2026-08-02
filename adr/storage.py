@@ -117,6 +117,51 @@ def describe_path(path: str | Path) -> dict[str, Any]:
     return info
 
 
+def check_destination(path: str | Path, require_mount: bool = False) -> tuple[bool, str]:
+    """Check that finished files can actually be written to *path*.
+
+    Called before a rip starts. Ripping a disc takes tens of minutes and
+    produces several GB, so discovering at the very end that the destination
+    is missing, read-only, or an unmounted NAS wastes the whole run.
+
+    With *require_mount* the path must additionally be a real mount point.
+    ``adr-setup-nas`` turns that on, because for a NAS the difference between
+    "mounted" and "an empty directory on the container disk" is invisible
+    until the disk fills up.
+
+    Returns ``(ok, message)``; *message* is empty when ok.
+    """
+    info = describe_path(path)
+
+    if not info["exists"]:
+        return False, (
+            f"Destination {info['path']} does not exist. "
+            "Check 'Completed MP4 folder' under Settings."
+        )
+
+    if require_mount and not info["is_mount"]:
+        return False, (
+            f"Destination {info['path']} is not a mounted filesystem. The NAS "
+            "share is not attached, so finished files would fill the container "
+            "disk instead. A bind-mount is captured when the container starts — "
+            "if the NAS was mounted afterwards, restart the container."
+        )
+
+    if not info["writable"]:
+        return False, (
+            f"Destination {info['path']} is not writable by the service user "
+            f"(uid {SERVICE_UID}). On an NFS share, allow that uid on the export."
+        )
+
+    # A dual-layer DVD needs ~8.5 GB of raw MKV plus the finished MP4.
+    if info["free_gb"] is not None and info["free_gb"] < 5:
+        return False, (
+            f"Only {info['free_gb']} GB free on {info['path']} — not enough for a rip."
+        )
+
+    return True, ""
+
+
 def probe_nas(kind: str, host: str, timeout: float = 3.0) -> dict[str, Any]:
     """TCP-probe a NAS to confirm it is reachable and serving the right protocol.
 
@@ -149,6 +194,11 @@ def build_nas_url(kind: str, host: str, share: str) -> str:
     return f"{(kind or '').lower()}://{(host or '').strip()}{share}"
 
 
+def _shell_single_quote(value: str) -> str:
+    """Quote *value* for safe use inside single quotes in a POSIX shell."""
+    return "'" + value.replace("'", "'\"'\"'") + "'"
+
+
 def build_setup_command(
     kind: str,
     host: str,
@@ -156,18 +206,38 @@ def build_setup_command(
     ctid: str | int | None = None,
     username: str = "",
     mountpoint: str = "",
+    password: str = "",
 ) -> str:
     """Build the exact adr-setup-nas command to paste on the Proxmox host.
 
-    The password is intentionally NOT included: it is never sent to this
-    application, so the user fills it in on the host where it belongs.
+    For SMB the password can be supplied two ways:
+
+    * omitted (recommended) — the command begins with a ``read -rsp`` prompt,
+      so the password is typed on the host and never crosses the network or
+      touches this application at all;
+    * supplied — embedded in the command for a single copy-paste. Convenient,
+      but it travels over plain HTTP to get here and is then visible on screen,
+      so it is opt-in rather than the default.
+
+    Either way nothing is stored: the value is used to render this string and
+    then discarded.
     """
     url = build_nas_url(kind, host, share)
+    is_smb = (kind or "").lower() == "smb"
+
+    prefix = ""
     parts = [f"NAS_URL={url}"]
-    if (kind or "").lower() == "smb":
+
+    if is_smb:
         parts.append(f"NAS_USERNAME={username or '<user>'}")
-        parts.append("NAS_PASSWORD='<password>'")
+        if password:
+            parts.append(f"NAS_PASSWORD={_shell_single_quote(password)}")
+        else:
+            # Prompt on the host instead of carrying the secret through here.
+            prefix = "read -rsp 'SMB password: ' NAS_PASSWORD && echo\n"
+            parts.append("NAS_PASSWORD=\"$NAS_PASSWORD\"")
+
     if mountpoint:
         parts.append(f"NAS_MOUNTPOINT={mountpoint}")
     parts.append(f"adr-setup-nas {ctid or '<CTID>'}")
-    return " \\\n  ".join(parts)
+    return prefix + " \\\n  ".join(parts)

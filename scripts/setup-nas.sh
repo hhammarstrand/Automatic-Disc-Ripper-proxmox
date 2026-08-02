@@ -239,6 +239,27 @@ if [[ "$WAS_RUNNING" -eq 1 ]]; then
     msg_info "Checking the mount from inside the container…"
     if pct exec "$CTID" -- mountpoint -q /opt/adr/completed 2>/dev/null; then
         msg_ok "/opt/adr/completed is the NAS share inside CT ${CTID}"
+        # From now on a rip refuses to start unless the share is really
+        # mounted, instead of quietly filling the container disk.
+        # shellcheck disable=SC2016
+        # Single quotes are intended: $f is a variable of the shell running
+        # INSIDE the container, not of this host script.
+        if pct exec "$CTID" -- sh -c '
+            f=/opt/adr/config/adr.yaml
+            [ -f "$f" ] || exit 1
+            if grep -q "^require_completed_mount:" "$f"; then
+                sed -i "s/^require_completed_mount:.*/require_completed_mount: true/" "$f"
+            else
+                echo "require_completed_mount: true" >> "$f"
+            fi
+            chown adr:adr "$f" 2>/dev/null || true
+        ' 2>/dev/null; then
+            pct exec "$CTID" -- systemctl restart adr >/dev/null 2>&1 || true
+            msg_ok "Rips will now refuse to start if the NAS is not mounted"
+        else
+            msg_warn "Could not enable the mount check — set 'require_completed_mount: true'"
+            msg_warn "in /opt/adr/config/adr.yaml to guard against an unmounted NAS."
+        fi
         if pct exec "$CTID" -- sudo -u adr test -w /opt/adr/completed 2>/dev/null; then
             msg_ok "The 'adr' service user can write to it"
         else

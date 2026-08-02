@@ -9,6 +9,7 @@ from adr.storage import (
     SERVICE_UID,
     build_nas_url,
     build_setup_command,
+    check_destination,
     describe_path,
     probe_nas,
 )
@@ -91,11 +92,33 @@ class TestBuildSetupCommand:
         assert "adr-setup-nas 200" in cmd
         assert "PASSWORD" not in cmd
 
-    def test_smb_command_prompts_for_password_on_the_host(self):
+    def test_smb_without_password_prompts_on_the_host(self):
         cmd = build_setup_command("smb", "nas", "media", 200, username="plex")
         assert "NAS_USERNAME=plex" in cmd
-        # The real password must never be embedded — only a placeholder.
-        assert "NAS_PASSWORD='<password>'" in cmd
+        assert cmd.startswith("read -rsp"), "password should be read on the host"
+        assert 'NAS_PASSWORD="$NAS_PASSWORD"' in cmd
+
+    def test_smb_with_password_embeds_it(self):
+        cmd = build_setup_command("smb", "nas", "media", 200, username="p", password="hunter2")
+        assert "NAS_PASSWORD='hunter2'" in cmd
+        assert not cmd.startswith("read -rsp"), "no prompt needed when supplied"
+
+    @pytest.mark.parametrize(
+        "password",
+        ["it's", "a'b'c", "; rm -rf /", "$(whoami)", "`id`", 'quote"and\\slash'],
+    )
+    def test_password_is_shell_escaped(self, password):
+        """A password with shell metacharacters must not become executable code."""
+        import shlex
+
+        cmd = build_setup_command("smb", "nas", "media", 1, username="u", password=password)
+        line = next(ln for ln in cmd.splitlines() if "NAS_PASSWORD=" in ln)
+        token = shlex.split(line.rstrip("\\").strip())[0]
+        assert token == f"NAS_PASSWORD={password}", "password must survive quoting intact"
+
+    def test_password_ignored_for_nfs(self):
+        cmd = build_setup_command("nfs", "h", "/s", 1, password="secret")
+        assert "secret" not in cmd
 
     def test_missing_ctid_leaves_an_obvious_placeholder(self):
         assert "<CTID>" in build_setup_command("nfs", "h", "/s")
@@ -103,6 +126,37 @@ class TestBuildSetupCommand:
     def test_custom_mountpoint_included(self):
         cmd = build_setup_command("nfs", "h", "/s", 1, mountpoint="/mnt/films")
         assert "NAS_MOUNTPOINT=/mnt/films" in cmd
+
+
+class TestCheckDestination:
+    def test_ok_for_a_normal_writable_directory(self, tmp_path):
+        ok, msg = check_destination(tmp_path)
+        assert ok is True
+        assert msg == ""
+
+    def test_missing_directory_is_rejected(self):
+        ok, msg = check_destination("/nope/not/here")
+        assert ok is False
+        assert "does not exist" in msg
+
+    def test_require_mount_rejects_a_plain_directory(self, tmp_path):
+        """The NAS case: an unmounted share looks like an ordinary empty dir."""
+        ok, msg = check_destination(tmp_path, require_mount=True)
+        assert ok is False
+        assert "not a mounted filesystem" in msg
+        assert "restart the container" in msg
+
+    def test_require_mount_accepts_a_real_mount_point(self):
+        ok, msg = check_destination("/", require_mount=True)
+        assert ok is True, msg
+
+    @pytest.mark.skipif(os.getuid() == 0, reason="root bypasses permission bits")
+    def test_unwritable_directory_is_rejected(self, tmp_path):
+        os.chmod(tmp_path, 0o500)
+        ok, msg = check_destination(tmp_path)
+        assert ok is False
+        assert "not writable" in msg
+        assert str(SERVICE_UID) in msg
 
 
 def test_service_uid_matches_the_installer():

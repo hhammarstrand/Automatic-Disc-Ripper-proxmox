@@ -51,10 +51,25 @@
         <div class="form-text" id="shareHint">e.g. <code>/volume1/media</code> — as it appears in your NFS exports.</div>
       </div>
 
-      <div class="col-md-4 d-none" id="userWrap">
+      <div class="col-md-4 d-none smb-only" id="userWrap">
         <label class="form-label">SMB username</label>
         <input type="text" class="form-control" id="nasUser" placeholder="plex">
-        <div class="form-text">The password is entered on the host, never here.</div>
+      </div>
+
+      <div class="col-md-5 d-none smb-only" id="passWrap">
+        <label class="form-label">SMB password <span class="text-secondary">(optional)</span></label>
+        <div class="input-group">
+          <input type="password" class="form-control" id="nasPass" placeholder="leave empty to be prompted on the host">
+          <button class="btn btn-outline-secondary" type="button" onclick="togglePass()" title="Show/hide">
+            <i class="bi bi-eye" id="passEye"></i>
+          </button>
+        </div>
+        <div class="form-text">
+          Leave it empty and the command will prompt for it on the host — the
+          password then never crosses the network. Fill it in for a single
+          copy-paste instead; it is used to build the command and discarded,
+          never stored, but this page is plain HTTP.
+        </div>
       </div>
 
       <div class="col-md-3">
@@ -97,9 +112,17 @@
 
 {% block scripts %}
 <script>
+function togglePass() {
+  const i = document.getElementById('nasPass');
+  const e = document.getElementById('passEye');
+  const hidden = i.type === 'password';
+  i.type = hidden ? 'text' : 'password';
+  e.className = hidden ? 'bi bi-eye-slash' : 'bi bi-eye';
+}
+
 function onKindChange() {
   const smb = document.getElementById('nasKind').value === 'smb';
-  document.getElementById('userWrap').classList.toggle('d-none', !smb);
+  document.querySelectorAll('.smb-only').forEach(el => el.classList.toggle('d-none', !smb));
   document.getElementById('shareHint').innerHTML = smb
     ? 'e.g. <code>media</code> — the share name, without slashes.'
     : 'e.g. <code>/volume1/media</code> — as it appears in your NFS exports.';
@@ -190,6 +213,7 @@ function generateCommand() {
     share: document.getElementById('nasShare').value.trim(),
     ctid:  document.getElementById('nasCtid').value.trim(),
     username: document.getElementById('nasUser').value.trim(),
+    password: document.getElementById('nasPass').value,
   };
   if (!body.host || !body.share) {
     document.getElementById('probeResult').innerHTML =
@@ -208,7 +232,11 @@ function generateCommand() {
     document.getElementById('commandText').textContent = d.command;
     document.getElementById('uidHint').innerHTML =
       `The share must be writable by uid <code>${d.service_uid}</code>. `
-      + `The helper tests this and prints the exact export or permission to change if it is not.`;
+      + `The helper tests this and prints the exact export or permission to change if it is not.`
+      + (d.contains_password
+          ? ' <span class="text-warning"><i class="bi bi-shield-exclamation me-1"></i>'
+            + 'This command contains your password — clear it from your shell history afterwards.</span>'
+          : '');
     document.getElementById('commandBox').classList.remove('d-none');
   }).catch(err => {
     document.getElementById('probeResult').innerHTML =

@@ -179,6 +179,7 @@ UI under **Settings**. Key options:
 | `handbrake_preset` | `Fast 1080p30` | Any built-in or custom preset |
 | `tmdb_api_key` | — | Free key from [themoviedb.org](https://www.themoviedb.org/settings/api) |
 | `plex_path` | — | Move finished movies into a Plex library folder |
+| `require_completed_mount` | `false` | Refuse to start a rip unless the destination is a real mount point — set automatically by `adr-setup-nas` |
 
 ### MakeMKV key
 
@@ -214,6 +215,15 @@ and only the finished MP4s go to the NAS.
 whether your finished files are landing on network storage or quietly on the
 container disk, tests that the NAS is reachable, and generates the exact command
 to paste into your Proxmox shell — pre-filled with your container ID.
+
+For SMB the page takes a username, and the password is optional:
+
+- **Leave it empty** (recommended) and the generated command starts with a
+  `read -rsp` prompt, so the password is typed on the host and never crosses
+  the network.
+- **Fill it in** for a single copy-paste. It is used to build the command and
+  then discarded — never written to the config, database or log — but it does
+  travel over plain HTTP to get there, so the page says so.
 
 > The mount itself is deliberately not performed by the web UI. This app runs
 > inside the container as an unprivileged user, and the page has no
@@ -266,13 +276,25 @@ the SMB user to have write access to the share.
 - **Restart the container after a NAS outage.** A bind-mount captures whatever
   the source resolves to when the container *starts*. If the NAS is remounted
   later, a running container will not see it and keeps writing to the host
-  disk. `adr-setup-nas` guards against this two ways: it makes the bare
+  disk. `adr-setup-nas` guards against this three ways: it makes the bare
   mountpoint immutable while unmounted (so a missing NAS becomes a loud error
-  instead of a silently filled host disk), and it makes Proxmox's guest
-  autostart wait for the mount. After any outage:
+  instead of a silently filled host disk), it makes Proxmox's guest autostart
+  wait for the mount, and it sets `require_completed_mount: true` so a rip
+  **refuses to start** unless the share is really mounted — you get an
+  immediate, explanatory error instead of discovering it 40 minutes and 8 GB
+  later. After any outage:
   ```bash
   pct reboot <CTID>
   ```
+
+#### The pre-rip check
+
+Every rip verifies its destination before MakeMKV is launched: the directory
+must exist, be writable by the service user, and have room. With
+`require_completed_mount: true` it must also be a genuine mount point. A failing
+check aborts the job immediately and the reason appears in the job's error in
+the web UI. Without a NAS the setting stays `false` and local storage works
+exactly as before.
 
 ### Local or already-mounted storage
 

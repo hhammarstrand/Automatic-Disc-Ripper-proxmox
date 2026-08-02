@@ -25,6 +25,7 @@ from adr.encoder import HandBrakeEncoder
 from adr.identify import identify_disc
 from adr.models import Job, JobStatus, Track, TrackStatus, get_session, init_db
 from adr.ripper import MakeMKVRipper
+from adr.storage import check_destination
 from adr.utils import (
     BYTES_PER_MB,
     make_plex_folder_name,
@@ -508,6 +509,21 @@ class DrivePipeline:
             session.add(job)
             session.commit()
             logger.info("Job %s created for drive %s: label=%s", job.id, self.drive, volume_name)
+
+            # 1b. Fail fast if the finished files have nowhere to go. A rip
+            # takes tens of minutes and several GB; discovering at the end that
+            # the NAS was never mounted wastes the entire run.
+            dest_ok, dest_err = check_destination(
+                self._config.completed_path,
+                require_mount=self._config.require_completed_mount,
+            )
+            if not dest_ok:
+                job.status = JobStatus.ERROR
+                job.error_message = dest_err
+                job.completed_at = utcnow()
+                session.commit()
+                logger.error("Job %s aborted before ripping: %s", job.id, dest_err)
+                return
 
             # 2. Identify disc via TMDb
             tmdb_confident = False
