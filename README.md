@@ -366,6 +366,16 @@ For a **private** repo, pass the token through:
 pct exec <CTID> -- env GITHUB_TOKEN=github_pat_xxx /opt/adr/scripts/update.sh
 ```
 
+`update.sh` runs inside the container, so it cannot refresh the host-side NAS
+helper (`/usr/local/sbin/adr-setup-nas`). To update everything, run both on the
+Proxmox host:
+
+```bash
+pct exec <CTID> -- /opt/adr/scripts/update.sh \
+  && pct pull <CTID> /opt/adr/scripts/setup-nas.sh /usr/local/sbin/adr-setup-nas \
+  && chmod +x /usr/local/sbin/adr-setup-nas
+```
+
 ---
 
 ## Verifying the install

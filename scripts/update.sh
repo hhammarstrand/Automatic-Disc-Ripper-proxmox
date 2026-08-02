@@ -93,3 +93,14 @@ else
     msg_warn "Check: journalctl -u adr -e"
     exit 1
 fi
+
+# The NAS helper is a copy of scripts/setup-nas.sh living on the Proxmox HOST
+# (as /usr/local/sbin/adr-setup-nas). This script runs inside the container and
+# cannot reach it, so say so rather than leaving a stale copy behind.
+echo
+msg_info "The host-side NAS helper is not updated by this script."
+msg_info "To refresh it, run this on the Proxmox host:"
+echo
+echo "    pct pull <CTID> /opt/adr/scripts/setup-nas.sh /usr/local/sbin/adr-setup-nas \\"
+echo "      && chmod +x /usr/local/sbin/adr-setup-nas"
+echo
