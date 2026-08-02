@@ -5,6 +5,7 @@ the ripping pipeline.
 """
 
 import logging
+import os
 from pathlib import Path
 
 import psutil
@@ -186,6 +187,14 @@ def _register_ui_routes(app: Flask) -> None:
                     "label": _config.drive_label(dl),
                 })
         return render_template("settings.html", config=cfg, hidden_drives=hidden_drives, all_drives=all_drives)
+
+    @app.route("/storage")
+    def storage_page():
+        """Storage page: where files actually land, and how to attach a NAS."""
+        return render_template(
+            "storage.html",
+            ctid=os.environ.get("ADR_CTID", "").strip() or "",
+        )
 
 
 # ------------------------------------------------------------------ #
@@ -781,6 +790,95 @@ def _register_api_routes(app: Flask) -> None:
             }), 502
         # Never echo the full secret back to the browser — just confirm + show a hint.
         return jsonify({"ok": True, "key_hint": key[:6] + "…" + key[-4:]})
+
+    # ------------------------------------------------------------------ #
+    # Storage / NAS
+    #
+    # This application cannot mount anything: it runs inside the container as
+    # the unprivileged 'adr' user, while the mount belongs on the Proxmox host.
+    # These endpoints are therefore strictly read-only — they report where
+    # files are actually landing and generate the command to run on the host.
+    # ------------------------------------------------------------------ #
+
+    @app.route("/api/storage")
+    def api_storage():
+        """Report the real state of the configured storage paths."""
+        from adr import storage as _storage
+
+        paths = {
+            "raw": _storage.describe_path(_config.raw_path),
+            "completed": _storage.describe_path(_config.completed_path),
+        }
+        if _config.plex_path:
+            paths["plex"] = _storage.describe_path(_config.plex_path)
+
+        completed = paths["completed"]
+        # The failure mode worth shouting about: completed_path looks perfectly
+        # normal but is really the container disk, so rips silently fill it.
+        warnings = []
+        if completed["exists"] and not completed["is_mount"]:
+            warnings.append(
+                "Finished files are being written to the container disk, not to "
+                "network storage. If you meant to use a NAS, attach it below."
+            )
+        if completed["exists"] and not completed["writable"]:
+            warnings.append(
+                f"The service user (uid {_storage.SERVICE_UID}) cannot write to "
+                f"{completed['path']} — every rip will fail at the final step."
+            )
+        if completed["free_gb"] is not None and completed["free_gb"] < 15:
+            warnings.append(
+                f"Only {completed['free_gb']} GB free — a dual-layer DVD needs "
+                "about 8.5 GB of scratch plus the finished file."
+            )
+
+        return jsonify({
+            "paths": paths,
+            "warnings": warnings,
+            "service_uid": _storage.SERVICE_UID,
+            "ctid": os.environ.get("ADR_CTID", "").strip() or None,
+        })
+
+    @app.route("/api/storage/probe", methods=["POST"])
+    def api_storage_probe():
+        """Check that a NAS is reachable before the user runs anything."""
+        from adr import storage as _storage
+
+        data = request.get_json() or {}
+        result = _storage.probe_nas(
+            str(data.get("kind", "")),
+            str(data.get("host", "")),
+        )
+        return jsonify(result), (200 if result.get("ok") else 400)
+
+    @app.route("/api/storage/command", methods=["POST"])
+    def api_storage_command():
+        """Build the adr-setup-nas command for the user to run on the host.
+
+        The password is never accepted or echoed here — it is filled in on the
+        host, where it is actually needed.
+        """
+        from adr import storage as _storage
+
+        data = request.get_json() or {}
+        kind = str(data.get("kind", "")).lower()
+        if kind not in _storage.NAS_PORTS:
+            return jsonify({"error": "kind must be 'nfs' or 'smb'"}), 400
+        host = str(data.get("host", "")).strip()
+        share = str(data.get("share", "")).strip()
+        if not host or not share:
+            return jsonify({"error": "host and share are required"}), 400
+
+        return jsonify({
+            "command": _storage.build_setup_command(
+                kind, host, share,
+                ctid=str(data.get("ctid", "")).strip() or os.environ.get("ADR_CTID", "").strip() or None,
+                username=str(data.get("username", "")).strip(),
+                mountpoint=str(data.get("mountpoint", "")).strip(),
+            ),
+            "nas_url": _storage.build_nas_url(kind, host, share),
+            "service_uid": _storage.SERVICE_UID,
+        })
 
     # Settings keys the UI is allowed to write; anything outside this set is
     # rejected, which stops unknown keys being injected into adr.yaml.

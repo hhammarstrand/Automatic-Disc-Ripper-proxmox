@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}Storage — Automatic Disc Ripper{% endblock %}
+
+{% block content %}
+<h4 class="mb-1"><i class="bi bi-hdd-network me-2"></i>Storage</h4>
+<p class="text-secondary small mb-4">
+  Where your finished files actually land — and how to send them to a NAS.
+</p>
+
+<div id="storageWarnings"></div>
+
+<!-- ------------------------------------------------------------------ -->
+<!-- Current state                                                       -->
+<!-- ------------------------------------------------------------------ -->
+<div class="row g-3 mb-4" id="storageCards">
+  <div class="col-12 text-secondary small"><span class="spinner-border spinner-border-sm me-2"></span>Checking storage…</div>
+</div>
+
+<!-- ------------------------------------------------------------------ -->
+<!-- Attach a NAS                                                        -->
+<!-- ------------------------------------------------------------------ -->
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-server me-1"></i>Attach a NAS share</div>
+  <div class="card-body">
+
+    <div class="alert alert-secondary small mb-4">
+      <i class="bi bi-info-circle me-1"></i>
+      The mount belongs on the <strong>Proxmox host</strong>, not in here. This app
+      runs inside the container as an unprivileged user and deliberately cannot
+      mount anything — an unauthenticated page that could mount as root would be
+      a bad idea on a LAN. So: fill this in, test the connection, then paste the
+      generated command into your Proxmox shell. This page will confirm when it
+      worked.
+    </div>
+
+    <div class="row g-3">
+      <div class="col-md-3">
+        <label class="form-label">Protocol</label>
+        <select class="form-select" id="nasKind" onchange="onKindChange()">
+          <option value="nfs" selected>NFS</option>
+          <option value="smb">SMB / CIFS</option>
+        </select>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">NAS address</label>
+        <input type="text" class="form-control" id="nasHost" placeholder="192.168.1.10">
+      </div>
+      <div class="col-md-5">
+        <label class="form-label">Share / export path</label>
+        <input type="text" class="form-control" id="nasShare" placeholder="/volume1/media">
+        <div class="form-text" id="shareHint">e.g. <code>/volume1/media</code> — as it appears in your NFS exports.</div>
+      </div>
+
+      <div class="col-md-4 d-none" id="userWrap">
+        <label class="form-label">SMB username</label>
+        <input type="text" class="form-control" id="nasUser" placeholder="plex">
+        <div class="form-text">The password is entered on the host, never here.</div>
+      </div>
+
+      <div class="col-md-3">
+        <label class="form-label">Container ID</label>
+        <input type="text" class="form-control" id="nasCtid" value="{{ ctid }}" placeholder="200">
+        <div class="form-text">Shown in the Proxmox sidebar.</div>
+      </div>
+    </div>
+
+    <div class="d-flex gap-2 mt-3 flex-wrap">
+      <button class="btn btn-outline-info" onclick="testNas()">
+        <i class="bi bi-plug me-1"></i>Test connection
+      </button>
+      <button class="btn btn-primary" onclick="generateCommand()">
+        <i class="bi bi-terminal me-1"></i>Generate command
+      </button>
+      <span id="probeResult" class="align-self-center small"></span>
+    </div>
+
+    <div id="commandBox" class="mt-4 d-none">
+      <label class="form-label">Run this on the Proxmox host (as root)</label>
+      <div class="position-relative">
+        <pre id="commandText" style="background:#0d1117;border:1px solid var(--adr-border);border-radius:6px;padding:1rem;white-space:pre-wrap;word-break:break-all;color:#79c0ff;"></pre>
+        <button class="btn btn-sm btn-outline-light position-absolute top-0 end-0 m-2" onclick="copyCommand()">
+          <i class="bi bi-clipboard"></i> Copy
+        </button>
+      </div>
+      <div class="form-text" id="uidHint"></div>
+      <div class="alert alert-warning small mt-3 mb-0">
+        <i class="bi bi-arrow-repeat me-1"></i>
+        The helper restarts the container at the end. That restart is required:
+        a bind-mount is captured when the container starts, so a share mounted
+        afterwards stays invisible to a running container.
+      </div>
+    </div>
+
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function onKindChange() {
+  const smb = document.getElementById('nasKind').value === 'smb';
+  document.getElementById('userWrap').classList.toggle('d-none', !smb);
+  document.getElementById('shareHint').innerHTML = smb
+    ? 'e.g. <code>media</code> — the share name, without slashes.'
+    : 'e.g. <code>/volume1/media</code> — as it appears in your NFS exports.';
+  document.getElementById('nasShare').placeholder = smb ? 'media' : '/volume1/media';
+}
+
+function card(title, icon, d) {
+  if (!d) return '';
+  let badge, note;
+  if (!d.exists) {
+    badge = '<span class="badge bg-danger">missing</span>';
+    note = 'Directory does not exist.';
+  } else if (d.is_network) {
+    badge = '<span class="badge bg-success">network storage</span>';
+    note = `${escapeHtml(d.fstype)} — ${escapeHtml(d.source || '')}`;
+  } else if (d.is_mount) {
+    badge = '<span class="badge bg-info text-dark">mounted</span>';
+    note = `${escapeHtml(d.fstype || 'local')} — ${escapeHtml(d.source || '')}`;
+  } else {
+    badge = '<span class="badge bg-secondary">container disk</span>';
+    note = 'Not a mount point — this is local storage inside the container.';
+  }
+  const wr = d.writable
+    ? '<span class="badge bg-success">writable</span>'
+    : '<span class="badge bg-danger">not writable</span>';
+  const cap = (d.free_gb !== null && d.free_gb !== undefined)
+    ? `<div class="mt-2"><div class="progress" style="height:16px;">
+         <div class="progress-bar ${d.used_percent > 90 ? 'bg-danger' : d.used_percent > 75 ? 'bg-warning' : 'bg-info'}"
+              style="width:${d.used_percent || 0}%">${d.used_percent || 0}%</div></div>
+       <small class="text-secondary">${d.free_gb} GB free of ${d.total_gb} GB</small></div>`
+    : '';
+  return `<div class="col-md-6 col-xl-4">
+    <div class="card h-100"><div class="card-body">
+      <div class="d-flex justify-content-between align-items-start mb-1">
+        <h6 class="mb-0"><i class="bi bi-${icon} me-1"></i>${escapeHtml(title)}</h6>
+        ${badge}
+      </div>
+      <div class="text-break small text-secondary">${escapeHtml(d.path)}</div>
+      <div class="small mt-2">${note}</div>
+      <div class="mt-2">${wr}</div>
+      ${cap}
+    </div></div></div>`;
+}
+
+function loadStorage() {
+  fetch('/api/storage').then(r => r.json()).then(data => {
+    const c = document.getElementById('storageCards');
+    c.innerHTML =
+        card('Finished files', 'collection-play', data.paths.completed)
+      + card('Rip scratch', 'hourglass-split', data.paths.raw)
+      + (data.paths.plex ? card('Plex library', 'film', data.paths.plex) : '');
+
+    const w = document.getElementById('storageWarnings');
+    w.innerHTML = (data.warnings || []).map(m =>
+      `<div class="alert alert-warning"><i class="bi bi-exclamation-triangle me-2"></i>${escapeHtml(m)}</div>`
+    ).join('');
+
+    if (data.ctid && !document.getElementById('nasCtid').value) {
+      document.getElementById('nasCtid').value = data.ctid;
+    }
+  }).catch(err => {
+    document.getElementById('storageCards').innerHTML =
+      `<div class="col-12 text-danger small">Could not read storage status: ${escapeHtml(err.message)}</div>`;
+  });
+}
+
+function testNas() {
+  const el = document.getElementById('probeResult');
+  const host = document.getElementById('nasHost').value.trim();
+  if (!host) { el.innerHTML = '<span class="text-warning">Enter the NAS address first.</span>'; return; }
+  el.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testing…';
+  fetch('/api/storage/probe', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({ kind: document.getElementById('nasKind').value, host: host }),
+  }).then(r => r.json().then(d => ({ ok: r.ok, d })))
+    .then(({ ok, d }) => {
+      el.innerHTML = ok
+        ? `<span class="text-success"><i class="bi bi-check-circle me-1"></i>${escapeHtml(d.detail)}</span>`
+        : `<span class="text-danger"><i class="bi bi-x-circle me-1"></i>${escapeHtml(d.error)}</span>`;
+    })
+    .catch(err => { el.innerHTML = `<span class="text-danger">${escapeHtml(err.message)}</span>`; });
+}
+
+function generateCommand() {
+  const body = {
+    kind:  document.getElementById('nasKind').value,
+    host:  document.getElementById('nasHost').value.trim(),
+    share: document.getElementById('nasShare').value.trim(),
+    ctid:  document.getElementById('nasCtid').value.trim(),
+    username: document.getElementById('nasUser').value.trim(),
+  };
+  if (!body.host || !body.share) {
+    document.getElementById('probeResult').innerHTML =
+      '<span class="text-warning">Address and share are both required.</span>';
+    return;
+  }
+  fetch('/api/storage/command', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body),
+  }).then(r => r.json()).then(d => {
+    if (d.error) {
+      document.getElementById('probeResult').innerHTML =
+        `<span class="text-danger">${escapeHtml(d.error)}</span>`;
+      return;
+    }
+    document.getElementById('commandText').textContent = d.command;
+    document.getElementById('uidHint').innerHTML =
+      `The share must be writable by uid <code>${d.service_uid}</code>. `
+      + `The helper tests this and prints the exact export or permission to change if it is not.`;
+    document.getElementById('commandBox').classList.remove('d-none');
+  }).catch(err => {
+    document.getElementById('probeResult').innerHTML =
+      `<span class="text-danger">${escapeHtml(err.message)}</span>`;
+  });
+}
+
+function copyCommand() {
+  const t = document.getElementById('commandText').textContent;
+  navigator.clipboard.writeText(t).then(() => {
+    const b = event.target.closest('button');
+    const o = b.innerHTML;
+    b.innerHTML = '<i class="bi bi-check"></i> Copied';
+    setTimeout(() => b.innerHTML = o, 1500);
+  });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  onKindChange();
+  loadStorage();
+  setInterval(loadStorage, 15000);
+});
+</script>
+{% endblock %}

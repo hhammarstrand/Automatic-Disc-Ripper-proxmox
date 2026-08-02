@@ -207,6 +207,13 @@ esac
 # systemd service
 # ----------------------------------------------------------------------------- #
 msg_info "Installing and starting systemd service…"
+# The container has no way to discover its own Proxmox CTID, so record it here.
+# The Storage page uses it to generate a ready-to-run adr-setup-nas command.
+if [[ -n "${ADR_CTID:-}" ]]; then
+    touch /etc/default/adr && chmod 0644 /etc/default/adr
+    sed -i '/^ADR_CTID=/d' /etc/default/adr
+    echo "ADR_CTID=${ADR_CTID}" >> /etc/default/adr
+fi
 install -m 0644 "$INSTALL_DIR/systemd/adr.service" /etc/systemd/system/adr.service
 systemctl daemon-reload
 systemctl enable --now adr.service >/dev/null 2>&1 || systemctl enable --now adr.service

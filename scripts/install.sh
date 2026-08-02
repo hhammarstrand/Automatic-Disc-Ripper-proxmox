@@ -290,6 +290,7 @@ pct exec "$CT_ID" -- env \
     RAW_BASE="$RAW_BASE" \
     TMDB_API_KEY="$TMDB_API_KEY" \
     ADR_MAKEMKV_KEY_MODE="$MAKEMKV_KEY" \
+    ADR_CTID="$CT_ID" \
     bash -c '
         # pipefail matters here: without it a 404 from curl is masked by the
         # exit status of the bash it pipes into, and a failed fetch would be

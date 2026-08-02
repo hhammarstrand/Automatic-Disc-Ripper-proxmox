@@ -22,7 +22,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **One-command install** on the Proxmox host: creates the container, passes the optical drive through, installs everything, starts the service.
 - **No compilation:** MakeMKV from the `heyarje/makemkv-beta` PPA, HandBrakeCLI from Ubuntu universe.
 - **Automatic MakeMKV key:** fetches the current free beta key, or accepts your own.
-- **Web dashboard** (port 8080) with live progress, job history, settings, and in-browser playback.
+- **Web dashboard** (port 8080) with live progress, job history, a Storage page for NAS setup, settings, and in-browser playback.
 - **Multi-drive** support and a **watch folder** for batch encoding of existing video files.
 - **Install via Claude for Chrome** — paste one prompt and it does the whole thing for you.
 
@@ -210,7 +210,18 @@ and only the finished MP4s go to the NAS.
         (bind-mounted into the CT as /opt/adr/completed)
 ```
 
-Run this **on the Proxmox host** — during install or any time afterwards:
+**The easiest route is the web UI:** open **Storage** in the navigation. It shows
+whether your finished files are landing on network storage or quietly on the
+container disk, tests that the NAS is reachable, and generates the exact command
+to paste into your Proxmox shell — pre-filled with your container ID.
+
+> The mount itself is deliberately not performed by the web UI. This app runs
+> inside the container as an unprivileged user, and the page has no
+> authentication; a button that could mount as root on your LAN would be a
+> liability, not a feature. So the UI does everything except the privileged
+> step.
+
+Or run it directly **on the Proxmox host** — during install or any time afterwards:
 
 ```bash
 # NFS
@@ -346,7 +357,7 @@ ruff check .       # lint
 
 ```
 adr/        Core package (config, disc, ripper, encoder, identify, pipeline, watcher, makemkv_key)
-web/        Flask app, templates, static assets
+web/        Flask app (dashboard, history, storage, settings), templates, static assets
 scripts/    install.sh (host), install-container.sh, setup-nas.sh, update.sh, uninstall.sh
 systemd/    adr.service unit
 config/     adr.yaml.example
