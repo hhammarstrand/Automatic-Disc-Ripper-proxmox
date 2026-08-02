@@ -57,20 +57,35 @@ fi
 msg_ok "Base packages installed (HandBrakeCLI: $(HandBrakeCLI --version 2>&1 | head -1 || echo present))"
 
 # ----------------------------------------------------------------------------- #
-# MakeMKV from the Heyarne PPA (no compilation)
+# MakeMKV from the heyarje PPA (no compilation)
+#
+# https://launchpad.net/~heyarje/+archive/ubuntu/makemkv-beta
+# Publishes makemkv-bin / makemkv-oss for noble (24.04) among others.
 # ----------------------------------------------------------------------------- #
-msg_info "Installing MakeMKV (Heyarne PPA)…"
-if add-apt-repository -y ppa:heyarne/makemkv >/dev/null 2>&1; then
+MAKEMKV_PPA="${MAKEMKV_PPA:-ppa:heyarje/makemkv-beta}"
+msg_info "Installing MakeMKV (${MAKEMKV_PPA})…"
+MAKEMKV_OK=0
+if add-apt-repository -y "$MAKEMKV_PPA" >/dev/null 2>&1; then
     apt-get update -qq
     if apt-get install -y -qq makemkv-bin makemkv-oss >/dev/null 2>&1; then
-        msg_ok "MakeMKV installed: $(makemkvcon --version 2>/dev/null | head -1 || echo present)"
+        MAKEMKV_OK=1
     else
-        msg_warn "MakeMKV packages failed to install from the PPA."
-        msg_warn "Ripping will not work until 'makemkvcon' is available — see README troubleshooting."
+        msg_warn "MakeMKV packages failed to install from ${MAKEMKV_PPA}."
     fi
 else
-    msg_warn "Could not add the MakeMKV PPA (network/launchpad issue)."
-    msg_warn "Install MakeMKV manually later; HandBrake-only encoding still works."
+    msg_warn "Could not add the MakeMKV PPA ${MAKEMKV_PPA} (network/launchpad issue)."
+fi
+
+# Trust the binary on disk, not the exit codes above.
+if command -v makemkvcon >/dev/null 2>&1; then
+    MAKEMKV_OK=1
+    msg_ok "MakeMKV installed: $(makemkvcon --version 2>/dev/null | head -1 || echo present)"
+else
+    MAKEMKV_OK=0
+    msg_warn "makemkvcon is NOT installed — disc ripping will not work."
+    msg_warn "The watch folder (HandBrake-only transcoding) still works."
+    msg_warn "Install it later inside the container with:"
+    msg_warn "    add-apt-repository -y ${MAKEMKV_PPA} && apt-get update && apt-get install -y makemkv-bin makemkv-oss"
 fi
 
 # ----------------------------------------------------------------------------- #
@@ -193,3 +208,26 @@ if [[ $ok -eq 1 ]]; then
 else
     msg_warn "Web UI did not respond yet. Check: journalctl -u adr -e"
 fi
+
+# ----------------------------------------------------------------------------- #
+# Component summary — say plainly what will and will not work
+# ----------------------------------------------------------------------------- #
+echo
+echo "  Component status"
+echo "  ────────────────"
+if [[ "$MAKEMKV_OK" -eq 1 ]]; then
+    echo -e "   ${GN}✓${CL} MakeMKV      $(command -v makemkvcon)   — disc ripping enabled"
+else
+    echo -e "   ${RD}✗${CL} MakeMKV      missing               — disc ripping DISABLED"
+fi
+if command -v HandBrakeCLI >/dev/null 2>&1; then
+    echo -e "   ${GN}✓${CL} HandBrakeCLI $(command -v HandBrakeCLI) — transcoding enabled"
+else
+    echo -e "   ${RD}✗${CL} HandBrakeCLI missing               — transcoding DISABLED"
+fi
+if [[ -s "$INSTALL_DIR/.MakeMKV/settings.conf" ]]; then
+    echo -e "   ${GN}✓${CL} MakeMKV key  stored"
+else
+    echo -e "   ${YW}!${CL} MakeMKV key  not set             — add it in the web UI under Settings"
+fi
+echo

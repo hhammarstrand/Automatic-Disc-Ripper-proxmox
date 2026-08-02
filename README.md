@@ -20,7 +20,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 
 - **Zero-touch pipeline:** detect → identify (TMDb) → rip (MakeMKV) → eject → transcode (HandBrake) → Plex-ready output.
 - **One-command install** on the Proxmox host: creates the container, passes the optical drive through, installs everything, starts the service.
-- **No compilation:** MakeMKV from the Heyarne PPA, HandBrakeCLI from Ubuntu universe.
+- **No compilation:** MakeMKV from the `heyarje/makemkv-beta` PPA, HandBrakeCLI from Ubuntu universe.
 - **Automatic MakeMKV key:** fetches the current free beta key, or accepts your own.
 - **Web dashboard** (port 8080) with live progress, job history, settings, and in-browser playback.
 - **Multi-drive** support and a **watch folder** for batch encoding of existing video files.
@@ -242,7 +242,7 @@ Insert a disc and watch `journalctl -u adr -f` log `Disc inserted in /dev/sr0`.
   passthrough lines exist in `/etc/pve/lxc/<CTID>.conf`. Restart the container
   after attaching a USB drive.
 - **MakeMKV “registration” errors:** refresh the beta key (Settings → MakeMKV key).
-- **MakeMKV PPA failed to install:** the Heyarne PPA may lag a fresh Ubuntu
+- **MakeMKV PPA failed to install:** the `heyarje/makemkv-beta` PPA may lag a fresh Ubuntu
   release; install MakeMKV manually, then `systemctl restart adr`.
 - **Ripping fails inside an unprivileged container:** optical SG_IO passthrough is
   far simpler in a **privileged** container (`CT_UNPRIVILEGED=0`, the default).
