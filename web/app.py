@@ -782,10 +782,15 @@ def _register_api_routes(app: Flask) -> None:
         # Never echo the full secret back to the browser — just confirm + show a hint.
         return jsonify({"ok": True, "key_hint": key[:6] + "…" + key[-4:]})
 
-    # Settings keys the UI is allowed to write. Anything outside this set is
-    # rejected so a LAN attacker cannot, for example, point makemkv_path at an
-    # arbitrary binary and turn the (unauthenticated) API into remote code
-    # execution.
+    # Settings keys the UI is allowed to write; anything outside this set is
+    # rejected, which stops unknown keys being injected into adr.yaml.
+    #
+    # It is NOT a privilege boundary. makemkv_path and handbrake_path are
+    # deliberately writable because the Settings page exposes them, so anyone
+    # who can reach this API can point them at another binary and have it
+    # executed as the 'adr' user on the next job. The API is unauthenticated by
+    # design, so the actual boundary is the network: keep the container on a
+    # trusted LAN and never port-forward it (see README).
     _ALLOWED_SETTINGS_KEYS = frozenset({
         "makemkv_path", "handbrake_path", "raw_path", "completed_path",
         "min_title_length", "handbrake_preset", "handbrake_preset_file",

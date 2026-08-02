@@ -167,7 +167,10 @@ case "${ADR_MAKEMKV_KEY_MODE}" in
         msg_warn "Skipping MakeMKV key — set one later in the web UI (Settings)."
         ;;
     auto|AUTO)
-        if sudo -u "$RUN_USER" HOME="$INSTALL_DIR" \
+        # PYTHONPATH is required: 'python -m adr.makemkv_key' only resolves the
+        # 'adr' package if the install dir is importable, and this script does
+        # not run from there.
+        if sudo -u "$RUN_USER" HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" \
             "$INSTALL_DIR/.venv/bin/python" -m adr.makemkv_key --ensure >/dev/null 2>&1; then
             msg_ok "MakeMKV beta key fetched and stored"
         else
@@ -176,7 +179,8 @@ case "${ADR_MAKEMKV_KEY_MODE}" in
         fi
         ;;
     *)
-        if sudo -u "$RUN_USER" HOME="$INSTALL_DIR" ADR_MAKEMKV_KEY="$ADR_MAKEMKV_KEY_MODE" \
+        if sudo -u "$RUN_USER" HOME="$INSTALL_DIR" PYTHONPATH="$INSTALL_DIR" \
+            ADR_MAKEMKV_KEY="$ADR_MAKEMKV_KEY_MODE" \
             "$INSTALL_DIR/.venv/bin/python" -m adr.makemkv_key --ensure --key "$ADR_MAKEMKV_KEY_MODE" >/dev/null 2>&1; then
             msg_ok "MakeMKV key stored"
         else

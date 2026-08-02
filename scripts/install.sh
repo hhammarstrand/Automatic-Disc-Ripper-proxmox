@@ -28,7 +28,11 @@ CT_HOSTNAME="${CT_HOSTNAME:-adr}"
 CT_CORES="${CT_CORES:-4}"
 CT_RAM="${CT_RAM:-2048}"
 CT_SWAP="${CT_SWAP:-512}"
-CT_DISK="${CT_DISK:-8}"
+# A dual-layer DVD rips to ~8.5 GB of raw MKV before HandBrake produces the
+# MP4, and both live on the rootfs unless MEDIA_HOST_PATH is set — so 8 GiB
+# fills up mid-rip. 32 GiB comfortably fits a DVD; Blu-ray needs more or a
+# bind-mount (see MEDIA_HOST_PATH).
+CT_DISK="${CT_DISK:-32}"
 CT_BRIDGE="${CT_BRIDGE:-vmbr0}"
 CT_STORAGE="${CT_STORAGE:-local-lvm}"
 CT_TEMPLATE_STORAGE="${CT_TEMPLATE_STORAGE:-local}"
@@ -71,11 +75,27 @@ trap cleanup_on_fail EXIT
 [[ $EUID -eq 0 ]] || die "Run this as root on the Proxmox host."
 command -v pct  >/dev/null 2>&1 || die "'pct' not found — this must run on a Proxmox VE node."
 command -v pveam >/dev/null 2>&1 || die "'pveam' not found — this must run on a Proxmox VE node."
+command -v git  >/dev/null 2>&1 || die "'git' not found — install it with: apt install -y git"
 
 echo
 echo "  Automatic Disc Ripper — Proxmox LXC installer"
 echo "  ============================================="
 echo
+
+# Confirm the repository is reachable BEFORE downloading a template and
+# creating a container — otherwise a wrong URL or a private repo without a
+# token only surfaces after minutes of work and leaves a half-built CT behind.
+_probe_url="$ADR_REPO_URL"
+[[ -n "$GITHUB_TOKEN" ]] && _probe_url="https://x-access-token:${GITHUB_TOKEN}@${ADR_REPO_URL#https://}"
+if ! git ls-remote --heads "$_probe_url" "$ADR_BRANCH" >/dev/null 2>&1; then
+    die "Cannot reach ${ADR_REPO_URL} (branch ${ADR_BRANCH}).
+     If the repository is PRIVATE, supply a token with 'Contents: read':
+       export GITHUB_TOKEN=github_pat_xxx
+       bash -c \"\$(curl -fsSL -H \"Authorization: Bearer \$GITHUB_TOKEN\" $RAW_BASE/scripts/install.sh)\"
+     If it is public, check this host's DNS and outbound HTTPS to github.com.
+     Nothing has been created — it is safe to fix this and re-run."
+fi
+msg_ok "Repository reachable: ${ADR_REPO_URL} (${ADR_BRANCH})"
 
 ask() {  # ask <var> <prompt> <default>
     local __var="$1" __prompt="$2" __default="$3" __reply
@@ -259,7 +279,10 @@ pct exec "$CT_ID" -- env \
     TMDB_API_KEY="$TMDB_API_KEY" \
     ADR_MAKEMKV_KEY_MODE="$MAKEMKV_KEY" \
     bash -c '
-        set -e
+        # pipefail matters here: without it a 404 from curl is masked by the
+        # exit status of the bash it pipes into, and a failed fetch would be
+        # reported as a completed installation.
+        set -eo pipefail
         if [[ -f /opt/adr/scripts/install-container.sh ]]; then
             bash /opt/adr/scripts/install-container.sh
         else

@@ -42,8 +42,10 @@ bash -c "$(curl -fsSL https://raw.githubusercontent.com/hhammarstrand/Automatic-
 
 `raw.githubusercontent.com` returns **404** for private repositories unless the
 request carries a token, so the bootstrap `curl` needs an auth header too — not
-just the clone. Create a [fine-grained token](https://github.com/settings/tokens)
-with *Contents: read* on this repo, then:
+just the clone. Create a
+[fine-grained token](https://github.com/settings/personal-access-tokens/new)
+scoped to this repository with **Repository permissions → Contents: Read-only**,
+then:
 
 ```bash
 export GITHUB_TOKEN=github_pat_xxx
@@ -53,6 +55,15 @@ bash -c "$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
 
 The exported `GITHUB_TOKEN` is picked up automatically by the installer for the
 subsequent `git clone` and for the in-container fetch — you only set it once.
+
+> **If the command returns instantly with no output**, the `curl` fetched
+> nothing (bad token or wrong URL) and `bash -c ""` simply did nothing. That is
+> a fetch failure, not a successful install. Check it with:
+> ```bash
+> curl -fsSI -H "Authorization: Bearer $GITHUB_TOKEN" \
+>   https://raw.githubusercontent.com/hhammarstrand/Automatic-Disc-Ripper-proxmox/main/scripts/install.sh
+> ```
+> A working token prints `HTTP/2 200`.
 
 > **Tip:** making the repo public (*Settings → General → Danger Zone → Change
 > visibility*) lets you and anyone else use the short form above. The installer
@@ -88,7 +99,7 @@ Open that URL and you're done. Insert a disc to start ripping.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `CT_ID` | next free | Container ID |
-| `CT_CORES` / `CT_RAM` / `CT_DISK` | `4` / `2048` / `8` | CPU cores / RAM (MiB) / disk (GiB) |
+| `CT_CORES` / `CT_RAM` / `CT_DISK` | `4` / `2048` / `32` | CPU cores / RAM (MiB) / disk (GiB) |
 | `CT_STORAGE` / `CT_BRIDGE` | `local-lvm` / `vmbr0` | Container storage / network bridge |
 | `CT_UNPRIVILEGED` | `0` | `0` = privileged (recommended for optical passthrough) |
 | `DISC_DEVICE` | first `/dev/sr*` | Optical device to pass through |
@@ -125,7 +136,7 @@ in this browser tab. Please install "Automatic Disc Ripper" for me by:
 3. Watching the installer output. When it prompts me for:
       - container ID (CTID)   -> suggest the number it shows as default
       - hostname              -> suggest "adr"
-      - disk / RAM / cores    -> accept defaults (8 / 2048 / 4)
+      - disk / RAM / cores    -> accept defaults (32 / 2048 / 4)
       - CT_UNPRIVILEGED       -> answer "0" (privileged)
       - DISC_DEVICE           -> accept the default it found (e.g. /dev/sr0)
       - TMDB_API_KEY          -> leave empty for now, I will add it later
