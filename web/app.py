@@ -78,9 +78,12 @@ def create_app(config: Config, pipeline_manager=None) -> Flask:
     # Make LAN IP available in all templates
     @app.context_processor
     def inject_globals():
+        from adr import __version__
+
         return {
             "lan_ip": get_lan_ip(),
             "lan_port": _config.web_port if _config else 8080,
+            "adr_version": __version__,
         }
 
     return app
