@@ -103,7 +103,7 @@ Open that URL and you're done. Insert a disc to start ripping.
 | `CT_STORAGE` / `CT_BRIDGE` | `local-lvm` / `vmbr0` | Container storage / network bridge |
 | `CT_UNPRIVILEGED` | `0` | `0` = privileged (recommended for optical passthrough) |
 | `DISC_DEVICE` | first `/dev/sr*` | Optical device to pass through |
-| `MEDIA_HOST_PATH` | — | Host dir bind-mounted to `/opt/adr/completed` |
+| `MEDIA_HOST_PATH` | — | Host dir already mounted, bind-mounted to `/opt/adr/completed` (e.g. `/mnt/pve/<storage-id>`) |
 | `NAS_URL` | — | `nfs://host/export/path` or `smb://host/share` — mounts a NAS for the finished files |
 | `NAS_USERNAME` / `NAS_PASSWORD` | — | SMB credentials (SMB only) |
 | `NAS_MOUNTPOINT` | `/mnt/adr-media` | Where the share is mounted on the host |
@@ -242,7 +242,27 @@ For SMB the page takes a username, and the password is optional:
 > liability, not a feature. So the UI does everything except the privileged
 > step.
 
-Or run it directly **on the Proxmox host** — during install or any time afterwards:
+#### Already added the share under Datacenter → Storage?
+
+Then Proxmox has already mounted it, at `/mnt/pve/<storage-id>`, and there is
+nothing to mount. Point the container at it and let Proxmox stay in charge:
+
+```bash
+MEDIA_HOST_PATH=/mnt/pve/<storage-id> adr-setup-nas <CTID>
+```
+
+This touches neither `/etc/fstab` nor the mount itself. It still does the parts
+that matter: it verifies the container's service user can write there, waits for
+the mount before guests autostart, bind-mounts it into the container, and turns
+on the pre-rip mount check. Run it with no arguments to see which shares the
+host currently has mounted.
+
+This is usually the tidier route — the share is managed in one place, survives
+reboots, and is visible in the Proxmox UI.
+
+#### Or let the script mount it
+
+Run it directly **on the Proxmox host** — during install or any time afterwards:
 
 ```bash
 # NFS

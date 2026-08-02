@@ -33,6 +33,9 @@ NAS_MOUNTPOINT="${NAS_MOUNTPOINT:-/mnt/adr-media}"
 ADR_UID="${ADR_UID:-8420}"
 ADR_GID="${ADR_GID:-8420}"
 NAS_EXTRA_OPTS="${NAS_EXTRA_OPTS:-}"
+# Point at storage the host already has mounted — e.g. /mnt/pve/<storage-id>
+# for a share added under Datacenter → Storage. Mutually exclusive with NAS_URL.
+MEDIA_HOST_PATH="${MEDIA_HOST_PATH:-}"
 CREDS_FILE="/root/.adr-nas-credentials"
 
 RD=$'\e[31m'; GN=$'\e[32m'; YW=$'\e[33m'; BL=$'\e[34m'; CL=$'\e[0m'
@@ -43,26 +46,74 @@ msg_error() { echo -e " ${RD}✗${CL} $*" >&2; }
 die()       { msg_error "$*"; exit 1; }
 
 [[ $EUID -eq 0 ]] || die "Run as root on the Proxmox host."
-[[ -n "$NAS_URL" ]] || die "NAS_URL is required, e.g. NAS_URL=nfs://192.168.1.10/volume1/media $0 <CTID>"
-[[ -n "$CTID" ]] || die "Usage: NAS_URL=... $0 <CTID>"
+[[ -n "$CTID" ]] || die "Usage: NAS_URL=… $0 <CTID>   (or MEDIA_HOST_PATH=… $0 <CTID>)"
 command -v pct >/dev/null 2>&1 || die "'pct' not found — run this on a Proxmox VE node."
 pct config "$CTID" >/dev/null 2>&1 || die "Container $CTID does not exist."
 
-# ----------------------------------------------------------------------------- #
-# Parse NAS_URL
-# ----------------------------------------------------------------------------- #
-proto="${NAS_URL%%://*}"
-rest="${NAS_URL#*://}"
-host="${rest%%/*}"
-path="/${rest#*/}"
-[[ "$host" != "$rest" ]] || die "NAS_URL must include a share/export path, e.g. nfs://host/volume1/media"
+# Two ways to point the container at storage:
+#
+#   NAS_URL=…          this script mounts the share on the host itself
+#   MEDIA_HOST_PATH=…  the host already has it mounted — typically a storage
+#                      added under Datacenter → Storage, which Proxmox mounts
+#                      at /mnt/pve/<storage-id>. Nothing is mounted or written
+#                      to /etc/fstab in that case; Proxmox stays in charge.
+USE_EXISTING=0
+if [[ -z "$NAS_URL" ]]; then
+    [[ -n "$MEDIA_HOST_PATH" ]] || die \
+"Give either NAS_URL or MEDIA_HOST_PATH.
 
-case "$proto" in
-    nfs)  FSTYPE=nfs  ; SRC="${host}:${path}" ;;
-    smb|cifs) FSTYPE=cifs ; SRC="//${host}${path}" ;;
-    *)    die "Unsupported protocol '${proto}' — use nfs:// or smb://" ;;
-esac
-msg_ok "Parsed: ${proto} host=${host} path=${path}"
+  Mount it for me:
+      NAS_URL=nfs://192.168.1.10/volume1/media $0 $CTID
+
+  Already mounted (e.g. added under Datacenter → Storage):
+      MEDIA_HOST_PATH=/mnt/pve/<storage-id> $0 $CTID
+
+  Proxmox-managed storages currently mounted on this host:
+$(findmnt -rn -o TARGET --types nfs,nfs4,cifs 2>/dev/null | sed 's/^/      /' || true)
+$(find /mnt/pve -maxdepth 1 -mindepth 1 -type d 2>/dev/null | sed 's/^/      /' || true)"
+    USE_EXISTING=1
+    NAS_MOUNTPOINT="${MEDIA_HOST_PATH%/}"
+fi
+
+# ----------------------------------------------------------------------------- #
+# Resolve the source: either an already-mounted path, or a NAS_URL to mount
+# ----------------------------------------------------------------------------- #
+if [[ "$USE_EXISTING" -eq 1 ]]; then
+    [[ -d "$NAS_MOUNTPOINT" ]] || die "MEDIA_HOST_PATH '$NAS_MOUNTPOINT' does not exist on this host."
+    FSTYPE="$(findmnt -rn -o FSTYPE --target "$NAS_MOUNTPOINT" 2>/dev/null || echo unknown)"
+    SRC="$(findmnt -rn -o SOURCE --target "$NAS_MOUNTPOINT" 2>/dev/null || echo "$NAS_MOUNTPOINT")"
+    if mountpoint -q "$NAS_MOUNTPOINT"; then
+        msg_ok "Using existing mount: ${NAS_MOUNTPOINT} (${FSTYPE} from ${SRC})"
+    else
+        msg_warn "${NAS_MOUNTPOINT} is not a mount point — it is a plain directory"
+        msg_warn "on the host's own disk. That works, but rips will fill the host"
+        msg_warn "disk rather than network storage. Continuing anyway."
+    fi
+    if [[ "$NAS_MOUNTPOINT" == /mnt/pve/* ]]; then
+        msg_info "This is a Proxmox-managed storage; it stays under Proxmox's control."
+        msg_info "Nothing will be written to /etc/fstab."
+    fi
+else
+    proto="${NAS_URL%%://*}"
+    rest="${NAS_URL#*://}"
+    host="${rest%%/*}"
+    path="/${rest#*/}"
+    [[ "$host" != "$rest" ]] || die "NAS_URL must include a share/export path, e.g. nfs://host/volume1/media"
+
+    case "$proto" in
+        nfs)  FSTYPE=nfs  ; SRC="${host}:${path}" ;;
+        smb|cifs) FSTYPE=cifs ; SRC="//${host}${path}" ;;
+        *)    die "Unsupported protocol '${proto}' — use nfs:// or smb://" ;;
+    esac
+    msg_ok "Parsed: ${proto} host=${host} path=${path}"
+fi
+
+# ----------------------------------------------------------------------------- #
+# Everything from here to the write test only applies when WE do the mounting.
+# An already-mounted path (a Proxmox storage, say) is left completely alone —
+# no packages, no fstab entry, no immutable guard on someone else's mountpoint.
+# ----------------------------------------------------------------------------- #
+if [[ "$USE_EXISTING" -eq 0 ]]; then
 
 # ----------------------------------------------------------------------------- #
 # Client packages on the host
@@ -153,6 +204,8 @@ fi
 mountpoint -q "$NAS_MOUNTPOINT" || die "mount reported success but ${NAS_MOUNTPOINT} is not a mount point."
 msg_ok "Mounted: $(findmnt -n -o SOURCE,FSTYPE,SIZE "$NAS_MOUNTPOINT" 2>/dev/null || echo "$SRC")"
 
+fi  # end: we did the mounting ourselves
+
 # ----------------------------------------------------------------------------- #
 # Prove the container's user can actually write there
 # ----------------------------------------------------------------------------- #
@@ -167,7 +220,12 @@ else
     WRITE_OK=0
     msg_error "uid ${ADR_UID} CANNOT write to ${NAS_MOUNTPOINT} — ripping will fail at the final step."
     echo
-    if [[ "$FSTYPE" == nfs ]]; then
+    # These are only set when this script parsed a NAS_URL; with an existing
+    # mount we know the path but not the server-side export name or user.
+    export_path="${path:-<the exported directory>}"
+    smb_user="${NAS_USERNAME:-<your SMB user>}"
+
+    if [[ "$FSTYPE" == nfs || "$FSTYPE" == nfs4 ]]; then
         cat <<EOF
    NFS authorises writes by NUMERIC uid, so the share must accept uid ${ADR_UID}.
    Do ONE of these on the NAS:
@@ -177,18 +235,32 @@ else
 
      b) Or squash all clients to a user that owns the directory
         (Linux /etc/exports syntax):
-          ${path}  <proxmox-ip>(rw,sync,all_squash,anonuid=${ADR_UID},anongid=${ADR_GID},no_subtree_check)
+          ${export_path}  <proxmox-ip>(rw,sync,all_squash,anonuid=${ADR_UID},anongid=${ADR_GID},no_subtree_check)
         then:  exportfs -ra
 
      Synology: Control Panel → Shared Folder → Edit → NFS Permissions →
        Squash: "Map all users to admin", or set the folder's owner to uid ${ADR_UID}.
      TrueNAS: Sharing → NFS → Edit → Mapall User/Group.
 EOF
+    elif [[ "$FSTYPE" == cifs ]]; then
+        cat <<EOF
+   For CIFS the local ownership comes from the mount's uid= option, so this is a
+   SERVER-side permission problem: '${smb_user}' lacks write access to the share.
+   Grant that user read/write in the NAS admin UI and re-run.
+EOF
+        if [[ "$USE_EXISTING" -eq 1 ]]; then
+            cat <<EOF
+
+   This mount is managed elsewhere (Datacenter → Storage, or /etc/fstab). If the
+   files show up owned by another user, add uid=${ADR_UID},gid=${ADR_GID} to that
+   mount's options.
+EOF
+        fi
     else
         cat <<EOF
-   The share is mounted with uid=${ADR_UID}, so this is a SERVER-side permission
-   problem: the SMB user '${NAS_USERNAME}' lacks write access to ${path}.
-   Grant that user read/write on the share in the NAS admin UI and re-run.
+   ${NAS_MOUNTPOINT} is a '${FSTYPE}' filesystem. Give uid ${ADR_UID} write
+   access to it, for example:
+          chown -R ${ADR_UID}:${ADR_GID} ${NAS_MOUNTPOINT}
 EOF
     fi
     echo
