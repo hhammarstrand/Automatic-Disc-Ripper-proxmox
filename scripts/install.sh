@@ -271,6 +271,10 @@ rm -rf "$TMP_SRC"
 # Run the in-container installer
 # ----------------------------------------------------------------------------- #
 msg_info "Running in-container installation (this can take a few minutes)…"
+# The heredoc-ish single-quoted body below is deliberate: GITHUB_TOKEN and
+# RAW_BASE are handed to the container through `env` and must be expanded by
+# the shell INSIDE the container, not interpolated by this host shell.
+# shellcheck disable=SC2016
 pct exec "$CT_ID" -- env \
     ADR_REPO_URL="$ADR_REPO_URL" \
     ADR_BRANCH="$ADR_BRANCH" \

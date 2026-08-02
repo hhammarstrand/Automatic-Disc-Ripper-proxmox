@@ -32,8 +32,9 @@ msg_error() { echo -e " ${RD}✗${CL} $*" >&2; }
 [[ $EUID -eq 0 ]] || { msg_error "Run as root inside the container."; exit 1; }
 [[ -d "$INSTALL_DIR" ]] || { msg_error "$INSTALL_DIR does not exist — is ADR installed?"; exit 1; }
 
-# Anything that holds user state and must survive the update.
-PRESERVE=(config adr.db adr.db-wal adr.db-shm raw completed watch .MakeMKV .venv)
+# User state survives because the update is an overlay copy: the repository
+# ships none of config/adr.yaml, adr.db*, raw/, completed/, watch/, .MakeMKV/
+# or .venv/, so copying the new tree on top simply never touches them.
 
 msg_info "Fetching latest source from ${ADR_REPO_URL} (${ADR_BRANCH})…"
 TMP="$(mktemp -d)"
