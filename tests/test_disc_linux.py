@@ -1,6 +1,11 @@
 """Tests for the Linux optical-drive detection layer (adr.disc)."""
 
+import errno
+import logging
+import os
 import subprocess
+
+import pytest
 
 from adr import disc
 
@@ -45,27 +50,73 @@ def _path_factory(base):
 # ------------------------------------------------------------------ #
 
 class TestHasMedia:
+    @pytest.fixture(autouse=True)
+    def _forget_denials(self):
+        """The 'logged this already' set is module state; keep tests independent."""
+        disc._denied_devices.clear()
+        yield
+        disc._denied_devices.clear()
+
+    def _openable(self, monkeypatch):
+        monkeypatch.setattr(disc.os, "open", lambda *a, **k: 99)
+        monkeypatch.setattr(disc.os, "close", lambda fd: None)
+
+    def _open_fails(self, monkeypatch, err):
+        def _raise(*a, **k):
+            raise OSError(err, os.strerror(err))
+        monkeypatch.setattr(disc.os, "open", _raise)
+
     def test_capacity_positive_means_media(self, monkeypatch):
+        self._openable(monkeypatch)
         monkeypatch.setattr(disc, "_device_capacity", lambda dev: 4324560)
         assert disc._has_media("/dev/sr0") is True
 
     def test_empty_tray(self, monkeypatch):
         monkeypatch.setattr(disc, "_device_capacity", lambda dev: 0)
-
-        def _raise_enomedium(*a, **k):
-            raise OSError(123, "No medium found")
-
-        monkeypatch.setattr(disc.os, "open", _raise_enomedium)
+        self._open_fails(monkeypatch, errno.ENOMEDIUM)
         assert disc._has_media("/dev/sr0") is False
 
     def test_spinning_up_eio(self, monkeypatch):
         monkeypatch.setattr(disc, "_device_capacity", lambda dev: 0)
-
-        def _raise_eio(*a, **k):
-            raise OSError(5, "Input/output error")
-
-        monkeypatch.setattr(disc.os, "open", _raise_eio)
+        self._open_fails(monkeypatch, errno.EIO)
         assert disc._has_media("/dev/sr0") is True
+
+    @pytest.mark.parametrize("err", [errno.EPERM, errno.EACCES])
+    def test_a_disc_we_cannot_open_is_not_a_disc(self, monkeypatch, err):
+        """The LXC trap: /sys is the HOST's, so sysfs sees the host's disc.
+
+        Believing it starts a rip that MakeMKV cannot possibly complete.
+        """
+        monkeypatch.setattr(disc, "_device_capacity", lambda dev: 4324560)
+        self._open_fails(monkeypatch, err)
+        assert disc._has_media("/dev/sr0") is False
+
+    def test_missing_device_node_is_not_a_disc(self, monkeypatch):
+        monkeypatch.setattr(disc, "_device_capacity", lambda dev: 4324560)
+        self._open_fails(monkeypatch, errno.ENOENT)
+        assert disc._has_media("/dev/sr0") is False
+
+    def test_the_denial_is_logged_once_not_every_poll(self, monkeypatch, caplog):
+        monkeypatch.setattr(disc, "_device_capacity", lambda dev: 4324560)
+        self._open_fails(monkeypatch, errno.EPERM)
+        with caplog.at_level(logging.ERROR, logger="adr.disc"):
+            for _ in range(5):
+                disc._has_media("/dev/sr0")
+        assert len(caplog.records) == 1, "polling every 3s must not flood the journal"
+        assert "adr-doctor" in caplog.records[0].getMessage()
+
+    def test_recovery_re_arms_the_warning(self, monkeypatch, caplog):
+        """After a fix, a later regression must be reported again."""
+        monkeypatch.setattr(disc, "_device_capacity", lambda dev: 4324560)
+        self._open_fails(monkeypatch, errno.EPERM)
+        disc._has_media("/dev/sr0")
+        self._openable(monkeypatch)
+        assert disc._has_media("/dev/sr0") is True
+        self._open_fails(monkeypatch, errno.EPERM)
+        caplog.clear()
+        with caplog.at_level(logging.ERROR, logger="adr.disc"):
+            disc._has_media("/dev/sr0")
+        assert len(caplog.records) == 1
 
 
 # ------------------------------------------------------------------ #

@@ -12,6 +12,7 @@ Windows drive letters like "D:".
 """
 
 import contextlib
+import errno
 import logging
 import os
 import shutil
@@ -69,28 +70,74 @@ def _device_capacity(device: str) -> int:
         return 0
 
 
-def _has_media(device: str) -> bool:
-    """True if a disc is currently loaded in the drive.
+# Errnos a *reachable* drive can legitimately return from a non-blocking open:
+# an empty tray, or a disc still spinning up. None of them mean "no access".
+_EMPTY_TRAY_ERRNOS = frozenset({errno.ENOMEDIUM, errno.ENXIO})
+_SPINNING_UP_ERRNOS = frozenset({errno.EIO, errno.EBUSY})
 
-    Primary signal: kernel capacity (/sys/block/<name>/size > 0) which covers
-    data discs, audio CDs and label-less Blu-rays. Falls back to a non-blocking
-    open() so we still work if sysfs is unavailable inside a minimal container.
+# Log a cgroup denial once per device instead of every three seconds.
+_denied_devices: set[str] = set()
+
+
+def _probe_device(device: str) -> tuple[bool, int | None]:
+    """Try to open *device* without blocking.
+
+    Returns ``(reachable, errno)``. *reachable* is False only when the kernel
+    refused us access to the device itself — inside an LXC that means the
+    container's device cgroup is denying it, which is a configuration problem
+    and not a disc that happens to be absent. An empty tray or a drive still
+    spinning up is reachable; *errno* says which.
     """
-    if _device_capacity(device) > 0:
-        return True
-    # Fallback: try to open the raw device without blocking. An empty tray
-    # raises ENOMEDIUM / ENXIO; a loaded disc opens (or returns EIO/EBUSY
-    # mid-spinup, which we also treat as "media present").
     fd = None
     try:
         fd = os.open(device, os.O_RDONLY | os.O_NONBLOCK)
-        return True
+        return True, None
     except OSError as exc:
-        return exc.errno in (5, 16)  # EIO, EBUSY → spinning up → media present
+        if exc.errno in _EMPTY_TRAY_ERRNOS or exc.errno in _SPINNING_UP_ERRNOS:
+            return True, exc.errno
+        return False, exc.errno
     finally:
         if fd is not None:
             with contextlib.suppress(OSError):
                 os.close(fd)
+
+
+def _has_media(device: str) -> bool:
+    """True if a disc is currently loaded in the drive *and we can read it*.
+
+    The ordering here is deliberate. Inside an LXC, /sys is the HOST's sysfs,
+    so /sys/block/<name>/size reports the disc in the host's drive whether or
+    not this container is allowed to touch it. Trusting that alone means the
+    dashboard shows a disc, a rip job starts, and MakeMKV fails forty seconds
+    later with something unhelpful. So access is confirmed first; only then is
+    the kernel capacity used, which is what catches audio CDs and label-less
+    Blu-rays that blkid cannot see.
+    """
+    reachable, err = _probe_device(device)
+    if not reachable:
+        if device not in _denied_devices:
+            _denied_devices.add(device)
+            if err == errno.ENOENT:
+                logger.error(
+                    "%s does not exist in this container — the device passthrough did "
+                    "not apply at start. Run 'adr-doctor --fix <CTID>' on the Proxmox "
+                    "host, or restart the container.", device,
+                )
+            else:
+                logger.error(
+                    "%s cannot be opened (%s) — the container's device cgroup is "
+                    "denying access, so discs in it are ignored. Run "
+                    "'adr-doctor --fix <CTID>' on the Proxmox host.",
+                    device, errno.errorcode.get(err, err),
+                )
+        return False
+    _denied_devices.discard(device)
+
+    if err in _SPINNING_UP_ERRNOS:
+        return True          # the drive is busy with a disc it is spinning up
+    if _device_capacity(device) > 0:
+        return True
+    return err is None       # open() succeeded outright → media present
 
 
 def _blkid_label(device: str) -> str | None:
@@ -152,8 +199,6 @@ def diagnose_passthrough() -> dict:
 
     Returns {"drives": [...], "problems": [...], "ok": bool}.
     """
-    import errno as _errno
-
     drives: list[dict] = []
     problems: list[str] = []
 
@@ -177,20 +222,12 @@ def diagnose_passthrough() -> dict:
             "has_media": _device_capacity(dev) > 0,
         }
         if entry["node_present"]:
-            fd = None
-            try:
-                fd = os.open(dev, os.O_RDONLY | os.O_NONBLOCK)
-                entry["openable"] = True
-            except OSError as exc:
-                # No disc in the tray is not a fault — the drive is reachable.
-                if exc.errno in (_errno.ENOMEDIUM, _errno.ENXIO, _errno.EIO, _errno.EBUSY):
-                    entry["openable"] = True
-                else:
-                    entry["error"] = f"{_errno.errorcode.get(exc.errno, exc.errno)}: {exc.strerror}"
-            finally:
-                if fd is not None:
-                    with contextlib.suppress(OSError):
-                        os.close(fd)
+            # Same probe the watcher uses, so a clean report here means the
+            # watcher will also act on discs in this drive.
+            reachable, err = _probe_device(dev)
+            entry["openable"] = reachable
+            if not reachable:
+                entry["error"] = f"{errno.errorcode.get(err, err)}: {os.strerror(err)}"
         drives.append(entry)
 
         if not entry["node_present"]:
@@ -356,6 +393,16 @@ class DiscWatcher:
             "DiscWatcher initial state: %s",
             {d: ("disc" if v else "empty") for d, v in self._disc_present.items()},
         )
+
+        # A watcher with nothing to watch would otherwise sit there silently for
+        # ever. Say why: from inside the container "no drive" and "the drive was
+        # not passed through" look the same, and only one of them is fixable.
+        if not self._disc_present:
+            try:
+                for problem in diagnose_passthrough()["problems"]:
+                    logger.error("Optical drive unavailable: %s", problem)
+            except Exception:
+                logger.exception("Could not diagnose optical passthrough")
 
         while not self._stop_event.is_set():
             self._stop_event.wait(self._poll_interval)
