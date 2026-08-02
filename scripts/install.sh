@@ -265,6 +265,13 @@ else
     msg_warn "Could not clone $ADR_REPO_URL on the host despite a token being set."
     msg_warn "Falling back to an in-container clone."
 fi
+
+# Keep the NAS helper on the host so a share can be attached now or later
+# without re-downloading anything.
+if [[ -f "$TMP_SRC/adr/scripts/setup-nas.sh" ]]; then
+    install -m 0755 "$TMP_SRC/adr/scripts/setup-nas.sh" /usr/local/sbin/adr-setup-nas
+    msg_ok "NAS helper installed: adr-setup-nas"
+fi
 rm -rf "$TMP_SRC"
 
 # ----------------------------------------------------------------------------- #
@@ -301,6 +308,29 @@ pct exec "$CT_ID" -- env \
         fi
     '
 msg_ok "In-container installation finished"
+
+# ----------------------------------------------------------------------------- #
+# Optional: attach a NAS share for the finished files
+# ----------------------------------------------------------------------------- #
+if [[ -n "${NAS_URL:-}" ]]; then
+    echo
+    msg_info "Attaching NAS share ${NAS_URL}…"
+    if [[ -x /usr/local/sbin/adr-setup-nas ]]; then
+        # Non-fatal: a NAS misconfiguration must not discard a working install
+        # (and the summary below is the only copy of the root password).
+        NAS_URL="$NAS_URL" \
+        NAS_USERNAME="${NAS_USERNAME:-}" \
+        NAS_PASSWORD="${NAS_PASSWORD:-}" \
+        NAS_DOMAIN="${NAS_DOMAIN:-}" \
+        NAS_MOUNTPOINT="${NAS_MOUNTPOINT:-/mnt/adr-media}" \
+            /usr/local/sbin/adr-setup-nas "$CT_ID" || {
+                msg_warn "NAS setup did not complete. ADR is installed and will"
+                msg_warn "write locally until you re-run:  adr-setup-nas $CT_ID"
+            }
+    else
+        msg_warn "NAS helper not available — run 'adr-setup-nas $CT_ID' after install."
+    fi
+fi
 
 # ----------------------------------------------------------------------------- #
 # Done

@@ -91,13 +91,27 @@ fi
 # ----------------------------------------------------------------------------- #
 # Service user
 # ----------------------------------------------------------------------------- #
-msg_info "Creating service user '$RUN_USER'…"
+# The uid/gid is PINNED rather than left to useradd's dynamic allocation.
+# In a privileged LXC the container uid is the host uid, and an NFS server
+# authorises writes by numeric uid — so a uid that differs per install would
+# make "export this share to the ripper" impossible to document. 8420 is
+# outside the normal system range and stable across installs.
+ADR_UID="${ADR_UID:-8420}"
+ADR_GID="${ADR_GID:-8420}"
+
+msg_info "Creating service user '$RUN_USER' (uid/gid ${ADR_UID}:${ADR_GID})…"
+if ! getent group "$RUN_USER" >/dev/null 2>&1; then
+    groupadd -g "$ADR_GID" "$RUN_USER" 2>/dev/null || groupadd "$RUN_USER"
+fi
 if ! id "$RUN_USER" >/dev/null 2>&1; then
-    useradd -r -m -d "$INSTALL_DIR" -s /usr/sbin/nologin "$RUN_USER"
+    useradd -r -u "$ADR_UID" -g "$RUN_USER" -m -d "$INSTALL_DIR" \
+        -s /usr/sbin/nologin "$RUN_USER" 2>/dev/null \
+      || useradd -r -g "$RUN_USER" -m -d "$INSTALL_DIR" -s /usr/sbin/nologin "$RUN_USER"
 fi
 usermod -aG cdrom "$RUN_USER" 2>/dev/null || true
 usermod -aG disk  "$RUN_USER" 2>/dev/null || true
-msg_ok "Service user ready"
+ADR_UID="$(id -u "$RUN_USER")"; ADR_GID="$(id -g "$RUN_USER")"
+msg_ok "Service user ready (uid=${ADR_UID} gid=${ADR_GID})"
 
 # ----------------------------------------------------------------------------- #
 # Application source

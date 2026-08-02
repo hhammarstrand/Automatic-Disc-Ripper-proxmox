@@ -104,6 +104,9 @@ Open that URL and you're done. Insert a disc to start ripping.
 | `CT_UNPRIVILEGED` | `0` | `0` = privileged (recommended for optical passthrough) |
 | `DISC_DEVICE` | first `/dev/sr*` | Optical device to pass through |
 | `MEDIA_HOST_PATH` | — | Host dir bind-mounted to `/opt/adr/completed` |
+| `NAS_URL` | — | `nfs://host/export/path` or `smb://host/share` — mounts a NAS for the finished files |
+| `NAS_USERNAME` / `NAS_PASSWORD` | — | SMB credentials (SMB only) |
+| `NAS_MOUNTPOINT` | `/mnt/adr-media` | Where the share is mounted on the host |
 | `TMDB_API_KEY` | — | TMDb API key |
 | `MAKEMKV_KEY` | `auto` | `auto` (fetch free beta key), a `T-…` key, or empty to skip |
 | `ADR_NONINTERACTIVE` | `0` | `1` = no prompts (use the `CT_*` defaults) |
@@ -192,8 +195,77 @@ suddenly fails with a key error.
 
 ## Plex / NFS integration
 
-To keep media after the container is destroyed, or to share it with a separate
-Plex host, bind-mount host storage into the container:
+### Ripping to a NAS (separate machine on the LAN)
+
+The common homelab setup: the optical drive is in the Proxmox host, the movies
+belong on a NAS. Ripping stays **local** (fast scratch on the container disk)
+and only the finished MP4s go to the NAS.
+
+```
+ Proxmox host                                  NAS (192.168.1.10)
+ ├─ /dev/sr0 ──► LXC ─ rip ─► /opt/adr/raw     ┌──────────────────┐
+ │                     │        (local, fast)  │ /volume1/media   │
+ │                     └─ transcode ─────────► │  Title (Year)/   │
+ └─ /mnt/adr-media ◄── NFS/SMB ────────────────┘  Title (Year).mp4│
+        (bind-mounted into the CT as /opt/adr/completed)
+```
+
+Run this **on the Proxmox host** — during install or any time afterwards:
+
+```bash
+# NFS
+NAS_URL=nfs://192.168.1.10/volume1/media adr-setup-nas <CTID>
+
+# SMB / CIFS
+NAS_URL=smb://192.168.1.10/media \
+NAS_USERNAME=plex NAS_PASSWORD=secret adr-setup-nas <CTID>
+```
+
+Or pass `NAS_URL=…` to the installer and it is done as part of the install.
+
+It mounts the share on the host (persisted in `/etc/fstab`), bind-mounts it
+into the container as `/opt/adr/completed`, then **proves the container's `adr`
+user can actually write there** — and if it can't, prints the exact NFS export
+or SMB permission to change.
+
+**Why the mount lives on the host** — one mount serves any number of
+containers, the container needs no mount privileges, and it is the documented
+Proxmox pattern.
+
+#### Permissions: the one thing that usually bites
+
+The service user is created with a **pinned uid/gid `8420`** precisely so this
+is documentable. NFS authorises writes by numeric uid, so the export must
+accept 8420:
+
+| NAS | What to set |
+|---|---|
+| Synology | Shared Folder → Edit → NFS Permissions → *Squash: Map all users to admin*, **or** give uid 8420 write access |
+| TrueNAS | Sharing → NFS → Edit → **Mapall User/Group** |
+| Linux `/etc/exports` | `/volume1/media <proxmox-ip>(rw,sync,all_squash,anonuid=8420,anongid=8420,no_subtree_check)` then `exportfs -ra` |
+
+SMB is simpler: the share is mounted with `uid=8420,gid=8420`, so you only need
+the SMB user to have write access to the share.
+
+#### Two behaviours worth knowing
+
+- **`hard` NFS mounts, on purpose.** With `soft`, a network hiccup aborts the
+  in-flight write and HandBrake can produce a silently truncated MP4. `hard`
+  blocks until the NAS answers instead of corrupting a multi-GB file.
+- **Restart the container after a NAS outage.** A bind-mount captures whatever
+  the source resolves to when the container *starts*. If the NAS is remounted
+  later, a running container will not see it and keeps writing to the host
+  disk. `adr-setup-nas` guards against this two ways: it makes the bare
+  mountpoint immutable while unmounted (so a missing NAS becomes a loud error
+  instead of a silently filled host disk), and it makes Proxmox's guest
+  autostart wait for the mount. After any outage:
+  ```bash
+  pct reboot <CTID>
+  ```
+
+### Local or already-mounted storage
+
+If the host already has the storage mounted, bind-mount it directly:
 
 ```bash
 pct set <CTID> -mp0 /tank/media/Movies,mp=/opt/adr/completed
@@ -275,7 +347,7 @@ ruff check .       # lint
 ```
 adr/        Core package (config, disc, ripper, encoder, identify, pipeline, watcher, makemkv_key)
 web/        Flask app, templates, static assets
-scripts/    install.sh (host), install-container.sh, update.sh, uninstall.sh
+scripts/    install.sh (host), install-container.sh, setup-nas.sh, update.sh, uninstall.sh
 systemd/    adr.service unit
 config/     adr.yaml.example
 presets/    HandBrake JSON presets
