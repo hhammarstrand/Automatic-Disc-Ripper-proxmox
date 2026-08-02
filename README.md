@@ -99,7 +99,7 @@ Open that URL and you're done. Insert a disc to start ripping.
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `CT_ID` | next free | Container ID |
-| `CT_CORES` / `CT_RAM` / `CT_DISK` | `4` / `2048` / `32` | CPU cores / RAM (MiB) / disk (GiB) |
+| `CT_CORES` / `CT_RAM` / `CT_DISK` | `4` / `2048` / `100` | CPU cores / RAM (MiB) / disk (GiB) |
 | `CT_STORAGE` / `CT_BRIDGE` | `local-lvm` / `vmbr0` | Container storage / network bridge |
 | `CT_UNPRIVILEGED` | `0` | `0` = privileged (recommended for optical passthrough) |
 | `DISC_DEVICE` | first `/dev/sr*` | Optical device to pass through |
@@ -139,7 +139,7 @@ in this browser tab. Please install "Automatic Disc Ripper" for me by:
 3. Watching the installer output. When it prompts me for:
       - container ID (CTID)   -> suggest the number it shows as default
       - hostname              -> suggest "adr"
-      - disk / RAM / cores    -> accept defaults (32 / 2048 / 4)
+      - disk / RAM / cores    -> accept defaults (100 / 2048 / 4)
       - CT_UNPRIVILEGED       -> answer "0" (privileged)
       - DISC_DEVICE           -> accept the default it found (e.g. /dev/sr0)
       - TMDB_API_KEY          -> leave empty for now, I will add it later

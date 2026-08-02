@@ -28,11 +28,12 @@ CT_HOSTNAME="${CT_HOSTNAME:-adr}"
 CT_CORES="${CT_CORES:-4}"
 CT_RAM="${CT_RAM:-2048}"
 CT_SWAP="${CT_SWAP:-512}"
-# A dual-layer DVD rips to ~8.5 GB of raw MKV before HandBrake produces the
-# MP4, and both live on the rootfs unless MEDIA_HOST_PATH is set — so 8 GiB
-# fills up mid-rip. 32 GiB comfortably fits a DVD; Blu-ray needs more or a
-# bind-mount (see MEDIA_HOST_PATH).
-CT_DISK="${CT_DISK:-32}"
+# Ripping and encoding both happen on this disk. Peak usage during one job is
+# the raw MKV plus the encoded MP4 at the same time: ~8.5 + ~3 GB for a
+# dual-layer DVD, but 25-50 + ~10 GB for a Blu-ray. 100 GiB leaves room for a
+# Blu-ray and for a couple of jobs queued behind each other. Thin-provisioned
+# storage only consumes what is actually written, so this is cheap to allow.
+CT_DISK="${CT_DISK:-100}"
 CT_BRIDGE="${CT_BRIDGE:-vmbr0}"
 CT_STORAGE="${CT_STORAGE:-local-lvm}"
 CT_TEMPLATE_STORAGE="${CT_TEMPLATE_STORAGE:-local}"
