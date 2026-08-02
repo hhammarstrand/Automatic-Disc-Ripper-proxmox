@@ -267,7 +267,8 @@ else
 fi
 
 # Keep the NAS helper on the host so a share can be attached now or later
-# without re-downloading anything.
+# without re-downloading anything. (If the host clone failed we retrieve it
+# from the container instead, further down.)
 if [[ -f "$TMP_SRC/adr/scripts/setup-nas.sh" ]]; then
     install -m 0755 "$TMP_SRC/adr/scripts/setup-nas.sh" /usr/local/sbin/adr-setup-nas
     msg_ok "NAS helper installed: adr-setup-nas"
@@ -308,6 +309,19 @@ pct exec "$CT_ID" -- env \
         fi
     '
 msg_ok "In-container installation finished"
+
+# If the host clone failed (private repo fetched only inside the container),
+# the NAS helper is not on the host yet — pull it out of the container so
+# 'adr-setup-nas' works either way.
+if [[ ! -x /usr/local/sbin/adr-setup-nas ]]; then
+    if pct pull "$CT_ID" /opt/adr/scripts/setup-nas.sh /usr/local/sbin/adr-setup-nas 2>/dev/null; then
+        chmod 0755 /usr/local/sbin/adr-setup-nas
+        msg_ok "NAS helper installed from the container: adr-setup-nas"
+    else
+        msg_warn "NAS helper unavailable — to attach a NAS later, run inside the CT:"
+        msg_warn "    pct exec $CT_ID -- cat /opt/adr/scripts/setup-nas.sh > /usr/local/sbin/adr-setup-nas"
+    fi
+fi
 
 # ----------------------------------------------------------------------------- #
 # Optional: attach a NAS share for the finished files
