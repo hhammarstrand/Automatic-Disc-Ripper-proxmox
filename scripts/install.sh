@@ -41,7 +41,8 @@ CT_UNPRIVILEGED="${CT_UNPRIVILEGED:-0}"     # 0 = privileged (simplest for optic
 CT_PASSWORD="${CT_PASSWORD:-}"             # default: random, printed at the end
 
 DISC_DEVICE="${DISC_DEVICE:-}"             # default: first /dev/sr* found
-MEDIA_HOST_PATH="${MEDIA_HOST_PATH:-}"     # optional host dir bind-mounted to /opt/adr/completed
+MEDIA_HOST_PATH="${MEDIA_HOST_PATH:-}"     # optional host dir bind-mounted to /mnt/media in the CT
+CT_MEDIA_PATH="${CT_MEDIA_PATH:-/mnt/media}"  # where that mount appears inside the container
 TMDB_API_KEY="${TMDB_API_KEY:-}"           # optional
 MAKEMKV_KEY="${MAKEMKV_KEY:-auto}"         # auto | T-xxxx | (empty to skip)
 
@@ -136,7 +137,7 @@ ask DISC_DEVICE  "Primary optical device"  "$DISC_DEVICE"
 
 ask TMDB_API_KEY "TMDb API key (optional, blank to skip)" "$TMDB_API_KEY"
 ask MAKEMKV_KEY  "MakeMKV key ('auto' fetches free beta key)" "$MAKEMKV_KEY"
-ask MEDIA_HOST_PATH "Host dir to bind-mount as /opt/adr/completed (blank=none)" "$MEDIA_HOST_PATH"
+ask MEDIA_HOST_PATH "Host dir holding your film library, mounted at ${CT_MEDIA_PATH} (blank=none)" "$MEDIA_HOST_PATH"
 
 if [[ -z "$CT_PASSWORD" ]]; then
     CT_PASSWORD="$(openssl rand -base64 18 2>/dev/null | tr -d '/+=' | cut -c1-20 || echo "adr-$(date +%s)")"
@@ -245,11 +246,17 @@ EOF
 fi
 msg_ok "Passthrough configured ($CONF)"
 
-# Optional media bind-mount for persistence / Plex sharing
+# Optional media bind-mount for persistence / Plex sharing.
+#
+# It lands on /mnt/media, NOT on /opt/adr/completed. Everything under /opt/adr
+# is the application's own — code, database, scratch — and stays on the
+# container's disk; your library is a separate filesystem mounted beside it.
+# Shadowing half of the app's directory with someone else's storage is the kind
+# of thing that is obvious the day you set it up and baffling six months later.
 if [[ -n "$MEDIA_HOST_PATH" ]]; then
     mkdir -p "$MEDIA_HOST_PATH"
-    pct set "$CT_ID" -mp0 "${MEDIA_HOST_PATH},mp=/opt/adr/completed" >/dev/null
-    msg_ok "Bind-mounted $MEDIA_HOST_PATH -> /opt/adr/completed"
+    pct set "$CT_ID" -mp0 "${MEDIA_HOST_PATH},mp=${CT_MEDIA_PATH}" >/dev/null
+    msg_ok "Bind-mounted $MEDIA_HOST_PATH -> ${CT_MEDIA_PATH}"
 fi
 
 # ----------------------------------------------------------------------------- #
@@ -302,6 +309,12 @@ if [[ -f "$TMP_SRC/adr/scripts/setup-nas.sh" ]]; then
     install -m 0755 "$TMP_SRC/adr/scripts/setup-nas.sh" /usr/local/sbin/adr-setup-nas
     msg_ok "NAS helper installed: adr-setup-nas"
 fi
+# adr-doctor checks the things that are only visible from the host: the device
+# cgroup, the passthrough entries, and the boot ordering.
+if [[ -f "$TMP_SRC/adr/scripts/adr-doctor.sh" ]]; then
+    install -m 0755 "$TMP_SRC/adr/scripts/adr-doctor.sh" /usr/local/sbin/adr-doctor
+    msg_ok "Diagnostic tool installed: adr-doctor"
+fi
 rm -rf "$TMP_SRC"
 
 # ----------------------------------------------------------------------------- #
@@ -319,6 +332,7 @@ pct exec "$CT_ID" -- env \
     RAW_BASE="$RAW_BASE" \
     TMDB_API_KEY="$TMDB_API_KEY" \
     ADR_MAKEMKV_KEY_MODE="$MAKEMKV_KEY" \
+    ADR_COMPLETED_PATH="${MEDIA_HOST_PATH:+$CT_MEDIA_PATH}" \
     ADR_CTID="$CT_ID" \
     bash -c '
         # pipefail matters here: without it a 404 from curl is masked by the
@@ -341,17 +355,22 @@ pct exec "$CT_ID" -- env \
 msg_ok "In-container installation finished"
 
 # If the host clone failed (private repo fetched only inside the container),
-# the NAS helper is not on the host yet — pull it out of the container so
-# 'adr-setup-nas' works either way.
-if [[ ! -x /usr/local/sbin/adr-setup-nas ]]; then
-    if pct pull "$CT_ID" /opt/adr/scripts/setup-nas.sh /usr/local/sbin/adr-setup-nas 2>/dev/null; then
-        chmod 0755 /usr/local/sbin/adr-setup-nas
-        msg_ok "NAS helper installed from the container: adr-setup-nas"
+# the host-side helpers are not installed yet — pull them out of the container
+# so 'adr-setup-nas' and 'adr-doctor' work either way.
+pull_host_helper() {   # <in-container path> <host path> <label>
+    if [[ -x "$2" ]]; then return 0; fi
+    # pct pull can exit 0 having produced nothing, so check the file too.
+    if pct pull "$CT_ID" "$1" "$2" 2>/dev/null && [[ -s "$2" ]]; then
+        chmod 0755 "$2"
+        msg_ok "$3 installed from the container: $(basename "$2")"
     else
-        msg_warn "NAS helper unavailable — to attach a NAS later, run inside the CT:"
-        msg_warn "    pct exec $CT_ID -- cat /opt/adr/scripts/setup-nas.sh > /usr/local/sbin/adr-setup-nas"
+        rm -f "$2"
+        msg_warn "$3 unavailable — to install it later, run on this host:"
+        msg_warn "    pct exec $CT_ID -- cat $1 > $2 && chmod +x $2"
     fi
-fi
+}
+pull_host_helper /opt/adr/scripts/setup-nas.sh  /usr/local/sbin/adr-setup-nas "NAS helper"
+pull_host_helper /opt/adr/scripts/adr-doctor.sh /usr/local/sbin/adr-doctor    "Diagnostic tool"
 
 # ----------------------------------------------------------------------------- #
 # Optional: attach a NAS share for the finished files
@@ -396,5 +415,21 @@ fi
 echo "  │  CTID   : ${CT_ID}"
 echo "  └────────────────────────────────────────────────────────"
 echo
+echo "  Where things live:"
+echo "    /opt/adr/raw        raw MKVs from the disc   (local, deleted after encode)"
+echo "    /opt/adr/staging    HandBrake writes here    (local, always)"
+if [[ -n "$MEDIA_HOST_PATH" ]]; then
+echo "    ${CT_MEDIA_PATH}         finished films          (${MEDIA_HOST_PATH} on the host)"
+else
+echo "    /opt/adr/completed  finished films          (local — run 'adr-setup-nas ${CT_ID}'"
+echo "                                                 to send them to a NAS instead)"
+fi
+echo
+echo "  Nothing outside /opt/adr is touched, and nothing inside it is a mount:"
+echo "  the app's directory stays the app's."
+echo
 echo "  Next: open the web UI and (optionally) add your TMDb API key under Settings."
+echo
+echo "  If the drive ever stops being seen — classically after a host reboot —"
+echo "  run on this host:   adr-doctor --fix ${CT_ID}"
 echo

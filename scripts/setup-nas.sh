@@ -6,9 +6,14 @@
 #   NAS_URL=nfs://192.168.1.10/volume1/media  ./setup-nas.sh <CTID>
 #   NAS_URL=smb://192.168.1.10/media NAS_USERNAME=plex NAS_PASSWORD=secret ./setup-nas.sh <CTID>
 #
-# The share is mounted on the HOST and bind-mounted into the container as
-# /opt/adr/completed, which is the recommended Proxmox pattern: one mount
-# serves any number of containers and the container needs no mount privileges.
+# The share is mounted on the HOST and bind-mounted into the container at
+# /mnt/media, which is the recommended Proxmox pattern: one mount serves any
+# number of containers and the container needs no mount privileges.
+#
+# /mnt/media is deliberately OUTSIDE /opt/adr. Everything under /opt/adr belongs
+# to the application — code, database, scratch space — and stays on the
+# container's own disk. Your library is a separate thing mounted next to it, not
+# a folder of the app's that happens to be hijacked by a bind-mount.
 #
 # Ripping stays LOCAL (fast scratch in /opt/adr/raw on the container disk);
 # only the finished MP4s are written to the NAS.
@@ -19,6 +24,7 @@
 #   NAS_PASSWORD     SMB password (SMB only)
 #   NAS_DOMAIN       SMB domain/workgroup (SMB only, optional)
 #   NAS_MOUNTPOINT   host mountpoint          (default /mnt/adr-media)
+#   CT_MEDIA_PATH    path inside the container (default /mnt/media)
 #   ADR_UID/ADR_GID  uid/gid the container's 'adr' user runs as (default 8420)
 #   NAS_EXTRA_OPTS   extra mount options, appended verbatim
 #
@@ -30,6 +36,10 @@ NAS_USERNAME="${NAS_USERNAME:-}"
 NAS_PASSWORD="${NAS_PASSWORD:-}"
 NAS_DOMAIN="${NAS_DOMAIN:-}"
 NAS_MOUNTPOINT="${NAS_MOUNTPOINT:-/mnt/adr-media}"
+# Where the share appears INSIDE the container. Not under /opt/adr: that
+# directory is the application's own, and shadowing part of it with someone
+# else's filesystem is exactly the confusion this avoids.
+CT_MEDIA_PATH="${CT_MEDIA_PATH:-/mnt/media}"
 ADR_UID="${ADR_UID:-8420}"
 ADR_GID="${ADR_GID:-8420}"
 NAS_EXTRA_OPTS="${NAS_EXTRA_OPTS:-}"
@@ -298,12 +308,20 @@ msg_ok "Guest autostart now waits for ${NAS_MOUNTPOINT}"
 # ----------------------------------------------------------------------------- #
 # Bind-mount into the container
 # ----------------------------------------------------------------------------- #
-msg_info "Attaching ${NAS_MOUNTPOINT} to container ${CTID} as /opt/adr/completed…"
+msg_info "Attaching ${NAS_MOUNTPOINT} to container ${CTID} as ${CT_MEDIA_PATH}…"
 if pct config "$CTID" | grep -q "^mp0:"; then
+    OLD_MP0="$(pct config "$CTID" | grep '^mp0:' || true)"
     msg_warn "Container ${CTID} already has mp0 — replacing it:"
-    pct config "$CTID" | grep '^mp0:' | sed 's/^/      /'
+    echo "      ${OLD_MP0}"
+    # Installs from before 1.0 mounted the share over /opt/adr/completed.
+    # Moving it out of the app's directory is the whole point of this change,
+    # so say plainly that it is happening.
+    if [[ "$OLD_MP0" == *"mp=/opt/adr/completed"* ]]; then
+        msg_info "Moving the share out of /opt/adr/completed and onto ${CT_MEDIA_PATH}."
+        msg_info "/opt/adr stays the application's own directory from now on."
+    fi
 fi
-pct set "$CTID" -mp0 "${NAS_MOUNTPOINT},mp=/opt/adr/completed" >/dev/null
+pct set "$CTID" -mp0 "${NAS_MOUNTPOINT},mp=${CT_MEDIA_PATH}" >/dev/null
 msg_ok "Bind-mount configured"
 
 WAS_RUNNING=0
@@ -322,36 +340,44 @@ fi
 # ----------------------------------------------------------------------------- #
 if [[ "$WAS_RUNNING" -eq 1 ]]; then
     msg_info "Checking the mount from inside the container…"
-    if pct exec "$CTID" -- mountpoint -q /opt/adr/completed 2>/dev/null; then
-        msg_ok "/opt/adr/completed is the NAS share inside CT ${CTID}"
-        # From now on a rip refuses to start unless the share is really
-        # mounted, instead of quietly filling the container disk.
+    if pct exec "$CTID" -- mountpoint -q "$CT_MEDIA_PATH" 2>/dev/null; then
+        msg_ok "${CT_MEDIA_PATH} is the NAS share inside CT ${CTID}"
+        # Point the app at it, and from now on refuse to start a rip unless the
+        # share is really mounted rather than quietly filling the container disk.
+        # $f/$m belong to the shell running INSIDE the container, so the body is
+        # single-quoted on purpose; the path is passed as a positional argument.
         # shellcheck disable=SC2016
-        # Single quotes are intended: $f is a variable of the shell running
-        # INSIDE the container, not of this host script.
         if pct exec "$CTID" -- sh -c '
             f=/opt/adr/config/adr.yaml
+            m="$1"
             [ -f "$f" ] || exit 1
+            if grep -q "^completed_path:" "$f"; then
+                sed -i "s|^completed_path:.*|completed_path: $m|" "$f"
+            else
+                echo "completed_path: $m" >> "$f"
+            fi
             if grep -q "^require_completed_mount:" "$f"; then
                 sed -i "s/^require_completed_mount:.*/require_completed_mount: true/" "$f"
             else
                 echo "require_completed_mount: true" >> "$f"
             fi
             chown adr:adr "$f" 2>/dev/null || true
-        ' 2>/dev/null; then
+        ' sh "$CT_MEDIA_PATH" 2>/dev/null; then
             pct exec "$CTID" -- systemctl restart adr >/dev/null 2>&1 || true
+            msg_ok "Finished films will be written to ${CT_MEDIA_PATH}"
             msg_ok "Rips will now refuse to start if the NAS is not mounted"
         else
-            msg_warn "Could not enable the mount check — set 'require_completed_mount: true'"
-            msg_warn "in /opt/adr/config/adr.yaml to guard against an unmounted NAS."
+            msg_warn "Could not update /opt/adr/config/adr.yaml. Set these two keys by hand:"
+            msg_warn "    completed_path: ${CT_MEDIA_PATH}"
+            msg_warn "    require_completed_mount: true"
         fi
-        if pct exec "$CTID" -- sudo -u adr test -w /opt/adr/completed 2>/dev/null; then
+        if pct exec "$CTID" -- sudo -u adr test -w "$CT_MEDIA_PATH" 2>/dev/null; then
             msg_ok "The 'adr' service user can write to it"
         else
             msg_warn "The 'adr' user cannot write to it yet — see the NFS/SMB guidance above."
         fi
     else
-        msg_warn "/opt/adr/completed is not a mount point inside the container."
+        msg_warn "${CT_MEDIA_PATH} is not a mount point inside the container."
         msg_warn "Check:  pct config ${CTID} | grep mp0"
     fi
 fi
@@ -360,15 +386,16 @@ echo
 echo "  ┌────────────────────────────────────────────────────────"
 echo "  │  NAS      : ${SRC}"
 echo "  │  Host mount: ${NAS_MOUNTPOINT}"
-echo "  │  In CT     : /opt/adr/completed   (finished MP4s)"
+echo "  │  In CT     : ${CT_MEDIA_PATH}      (finished MP4s — your library)"
 echo "  │  Scratch   : /opt/adr/raw         (stays local — fast)"
+echo "  │  Encoding  : /opt/adr/staging     (stays local — one transfer at the end)"
 echo "  │  Writable  : $([[ "${WRITE_OK}" -eq 1 ]] && echo yes || echo 'NO — fix permissions above')"
 echo "  └────────────────────────────────────────────────────────"
 echo
-echo "  In the web UI under Settings, 'Completed MP4 folder' should stay"
-echo "  /opt/adr/completed — it now points at the NAS. Leave 'Plex movie"
-echo "  library path' empty: output is already Plex-shaped as"
-echo "  'Title (Year)/Title (Year).mp4'."
+echo "  Settings → 'Completed MP4 folder' is now ${CT_MEDIA_PATH}. Everything"
+echo "  under /opt/adr stays on the container's own disk and is the app's"
+echo "  business, not yours. Leave 'Plex movie library path' empty: the output"
+echo "  is already Plex-shaped as 'Title (Year)/Title (Year).mp4'."
 echo
 echo "  ${YW}If the NAS is ever offline and remounted, restart the container:${CL}"
 echo "      pct reboot ${CTID}"

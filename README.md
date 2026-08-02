@@ -103,7 +103,8 @@ Open that URL and you're done. Insert a disc to start ripping.
 | `CT_STORAGE` / `CT_BRIDGE` | `local-lvm` / `vmbr0` | Container storage / network bridge |
 | `CT_UNPRIVILEGED` | `0` | `0` = privileged (recommended for optical passthrough) |
 | `DISC_DEVICE` | first `/dev/sr*` | Optical device to pass through |
-| `MEDIA_HOST_PATH` | — | Host dir already mounted, bind-mounted to `/opt/adr/completed` (e.g. `/mnt/pve/<storage-id>`) |
+| `MEDIA_HOST_PATH` | — | Host dir already mounted, bind-mounted into the container (e.g. `/mnt/pve/<storage-id>`) |
+| `CT_MEDIA_PATH` | `/mnt/media` | Where that mount appears **inside** the container |
 | `NAS_URL` | — | `nfs://host/export/path` or `smb://host/share` — mounts a NAS for the finished files |
 | `NAS_USERNAME` / `NAS_PASSWORD` | — | SMB credentials (SMB only) |
 | `NAS_MOUNTPOINT` | `/mnt/adr-media` | Where the share is mounted on the host |
@@ -174,7 +175,8 @@ UI under **Settings**. Key options:
 |---------|---------|-------|
 | `makemkv_path` | `/usr/bin/makemkvcon` | MakeMKV CLI |
 | `handbrake_path` | `/usr/bin/HandBrakeCLI` | HandBrake CLI |
-| `raw_path` / `completed_path` | `/opt/adr/raw` / `/opt/adr/completed` | Temp + final output |
+| `raw_path` | `/opt/adr/raw` | Raw MKVs from the disc — always local, deleted after encoding |
+| `completed_path` | `/opt/adr/completed`, or `/mnt/media` with a library attached | Where finished films end up |
 | `drives` | `auto` | Or a list like `["/dev/sr0", "/dev/sr1"]` |
 | `handbrake_preset` | `Fast 1080p30` | Any built-in or custom preset |
 | `tmdb_api_key` | — | Free key from [themoviedb.org](https://www.themoviedb.org/settings/api) |
@@ -182,6 +184,31 @@ UI under **Settings**. Key options:
 | `require_completed_mount` | `false` | Refuse to start a rip unless the destination is a real mount point — set automatically by `adr-setup-nas` |
 | `stage_locally` | `true` | Encode to local disk and transfer the finished film in one copy. Only applies when `completed_path` is network storage |
 | `staging_path` | `/opt/adr/staging` | Local scratch used while encoding to network storage |
+
+### Where things live
+
+```
+/opt/adr/            the application — code, database, venv, scratch space
+  ├─ raw/            raw MKVs straight off the disc   (local, deleted after encoding)
+  ├─ staging/        HandBrake writes here            (local, always)
+  └─ completed/      finished films, when you have no NAS
+/mnt/media/          finished films, when you do      (your NAS or host storage)
+```
+
+One rule, and it is the whole design: **nothing is ever mounted inside
+`/opt/adr`.** That directory belongs to the application. Your library is a
+separate filesystem mounted beside it at `/mnt/media`, and `completed_path`
+simply points at whichever of the two you are using.
+
+This matters for more than tidiness. A share mounted over `/opt/adr/completed`
+means a routine `chown -R /opt/adr` walks into your film library, and it means
+that when the NAS is offline you cannot tell "empty share" from "empty app
+directory". Installs made before 1.0 used that layout; `adr-doctor --fix
+<CTID>` migrates them.
+
+Ripping and encoding always happen on the container's own disk. Only the
+finished MP4 crosses the network, as a single sequential transfer — see
+[Local staging](#local-staging) below.
 
 ### MakeMKV key
 
@@ -276,9 +303,9 @@ NAS_USERNAME=plex NAS_PASSWORD=secret adr-setup-nas <CTID>
 Or pass `NAS_URL=…` to the installer and it is done as part of the install.
 
 It mounts the share on the host (persisted in `/etc/fstab`), bind-mounts it
-into the container as `/opt/adr/completed`, then **proves the container's `adr`
-user can actually write there** — and if it can't, prints the exact NFS export
-or SMB permission to change.
+into the container at `/mnt/media`, points `completed_path` there, then
+**proves the container's `adr` user can actually write there** — and if it
+can't, prints the exact NFS export or SMB permission to change.
 
 **Why the mount lives on the host** — one mount serves any number of
 containers, the container needs no mount privileges, and it is the documented
@@ -327,16 +354,34 @@ check aborts the job immediately and the reason appears in the job's error in
 the web UI. Without a NAS the setting stays `false` and local storage works
 exactly as before.
 
+#### Local staging
+
+HandBrake writing an encode straight onto a network share means hours of small
+random writes over the LAN, and any hiccup lands in the middle of the file.
+So it doesn't: encoding always happens in `/opt/adr/staging` on the container's
+own disk, and the finished folder is moved to `completed_path` in one sequential
+transfer at the end. Raw MKVs never touch the network at all.
+
+This kicks in automatically when `completed_path` is a network filesystem —
+staging to and from the same local disk would be a pointless extra copy, so it
+is skipped there. Set `stage_locally: false` to turn it off.
+
+If the transfer fails, the encoded files are **left in staging** and the job is
+marked failed with the reason. Nothing is deleted before the copy is known to
+have arrived.
+
 ### Local or already-mounted storage
 
 If the host already has the storage mounted, bind-mount it directly:
 
 ```bash
-pct set <CTID> -mp0 /tank/media/Movies,mp=/opt/adr/completed
+pct set <CTID> -mp0 /tank/media/Movies,mp=/mnt/media
 ```
 
-(Or set `MEDIA_HOST_PATH` during install.) Output uses the Plex layout
-`Title (Year)/Title (Year).mp4`, so you can point Plex straight at the host path.
+…and set `completed_path: /mnt/media` under **Settings**. (Or just set
+`MEDIA_HOST_PATH` during install and the installer does both.) Output uses the
+Plex layout `Title (Year)/Title (Year).mp4`, so you can point Plex straight at
+the host path.
 
 ---
 
@@ -366,14 +411,17 @@ For a **private** repo, pass the token through:
 pct exec <CTID> -- env GITHUB_TOKEN=github_pat_xxx /opt/adr/scripts/update.sh
 ```
 
-`update.sh` runs inside the container, so it cannot refresh the host-side NAS
-helper (`/usr/local/sbin/adr-setup-nas`). To update everything, run both on the
-Proxmox host:
+`update.sh` runs inside the container, so it cannot refresh the host-side
+helpers (`adr-setup-nas` and `adr-doctor`). To update everything, run this on
+the Proxmox host:
 
 ```bash
-pct exec <CTID> -- /opt/adr/scripts/update.sh \
-  && pct pull <CTID> /opt/adr/scripts/setup-nas.sh /usr/local/sbin/adr-setup-nas \
-  && chmod +x /usr/local/sbin/adr-setup-nas
+pct exec <CTID> -- /opt/adr/scripts/update.sh
+for f in setup-nas:adr-setup-nas adr-doctor:adr-doctor; do
+  pct pull <CTID> /opt/adr/scripts/${f%%:*}.sh /usr/local/sbin/${f##*:} \
+    && chmod +x /usr/local/sbin/${f##*:}
+done
+adr-doctor --fix <CTID>
 ```
 
 ---
@@ -394,6 +442,62 @@ Insert a disc and watch `journalctl -u adr -f` log `Disc inserted in /dev/sr0`.
 ---
 
 ## Troubleshooting
+
+### `adr-doctor` — start here
+
+Most problems with this setup are invisible from inside the container, because
+what is broken is the *host's* view of it. Run this on the **Proxmox host**:
+
+```bash
+adr-doctor <CTID>          # report only, changes nothing
+adr-doctor --fix <CTID>    # apply the repairs it found
+```
+
+It checks, and with `--fix` repairs:
+
+- the device cgroup rules (`b 11:* rwm` — see below),
+- a passthrough entry for every optical drive the host has, plus its `/dev/sg`
+  node,
+- guest-autostart ordering against the drive's device unit,
+- a media share still mounted over `/opt/adr/completed` (the pre-1.0 layout),
+
+then asks the container itself whether it can open each drive, using the same
+code the dashboard does.
+
+### The drive worked, then stopped after a reboot
+
+This one has a specific cause worth understanding.
+
+Passthrough entries are written with `optional`, so a device that does not
+exist *yet* is skipped — silently. When you install, the container is started
+by hand, long after udev has created `/dev/sr0`, and everything works. On the
+next host boot, `pve-guests.service` can start the container before udev gets
+there. The bind is skipped, and a device node **cannot** be added to a running
+container: it stays missing until the container restarts.
+
+`adr-doctor --fix` closes the race by ordering `pve-guests.service` after the
+drive's `.device` unit. Until then, `pct reboot <CTID>` gets the drive back.
+
+The dashboard also detects this state directly and says so, rather than showing
+an empty drive list. Inside an LXC `/sys` is the *host's* sysfs, so the app can
+see that the host has a drive it cannot open — which is exactly the difference
+between "no drive" and "passthrough is broken".
+
+### `/dev/sr0` is there but every read fails
+
+`/dev/sr*` are **block** devices with major 11. LXC's default policy denies
+everything and then re-allows `b *:* m`, which permits *creating* the node but
+not opening it — so the node appears and every `open()` returns `EPERM`. The
+config needs an explicit:
+
+```
+lxc.cgroup2.devices.allow: b 11:* rwm
+```
+
+A `c 11:*` rule does not help; char major 11 is something else entirely.
+`adr-doctor --fix` adds the correct rule.
+
+### Everything else
 
 - **No drive detected:** confirm the host sees it (`ls /dev/sr*`) and that the
   passthrough lines exist in `/etc/pve/lxc/<CTID>.conf`. Restart the container
@@ -421,7 +525,7 @@ ruff check .       # lint
 ```
 adr/        Core package (config, disc, ripper, encoder, identify, pipeline, watcher, makemkv_key)
 web/        Flask app (dashboard, history, storage, settings), templates, static assets
-scripts/    install.sh (host), install-container.sh, setup-nas.sh, update.sh, uninstall.sh
+scripts/    install.sh (host), install-container.sh, setup-nas.sh, adr-doctor.sh, update.sh, uninstall.sh
 systemd/    adr.service unit
 config/     adr.yaml.example
 presets/    HandBrake JSON presets

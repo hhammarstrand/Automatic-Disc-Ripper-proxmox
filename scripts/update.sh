@@ -60,9 +60,19 @@ msg_info "Replacing application code (preserving config, database and media)…"
 # paths the repo does not ship, a plain overlay copy leaves them untouched.
 cp -a "$TMP/src/." "$INSTALL_DIR/"
 
-# Re-assert ownership on everything except the preserved media dirs, which may
-# be a bind-mount owned by the host.
-chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR" 2>/dev/null || true
+# Re-assert ownership — but never recurse into 'completed'. On installs made
+# before 1.0 that directory is a bind-mount of the user's media library, and a
+# recursive chown would rewrite the ownership of every film they own.
+find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name completed \
+    -exec chown -R "$RUN_USER:$RUN_USER" {} + 2>/dev/null || true
+chown "$RUN_USER:$RUN_USER" "$INSTALL_DIR" 2>/dev/null || true
+if mountpoint -q "$INSTALL_DIR/completed" 2>/dev/null; then
+    msg_warn "$INSTALL_DIR/completed is a bind-mount — ownership left to the host."
+    msg_warn "1.0 moves that mount to /mnt/media. On the Proxmox host, run:"
+    msg_warn "    adr-doctor --fix <CTID>"
+else
+    chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR/completed" 2>/dev/null || true
+fi
 msg_ok "Code updated"
 
 msg_info "Updating Python dependencies…"
@@ -94,13 +104,24 @@ else
     exit 1
 fi
 
-# The NAS helper is a copy of scripts/setup-nas.sh living on the Proxmox HOST
-# (as /usr/local/sbin/adr-setup-nas). This script runs inside the container and
-# cannot reach it, so say so rather than leaving a stale copy behind.
+# adr-setup-nas and adr-doctor are copies of scripts/ living on the Proxmox
+# HOST, because they use pct. This script runs inside the container and cannot
+# reach them, so say so rather than leaving stale copies behind.
+CTID_HINT="<CTID>"
+if [[ -r /etc/default/adr ]]; then
+    # shellcheck disable=SC1091
+    . /etc/default/adr 2>/dev/null || true
+fi
+[[ -n "${ADR_CTID:-}" ]] && CTID_HINT="$ADR_CTID"
+
 echo
-msg_info "The host-side NAS helper is not updated by this script."
-msg_info "To refresh it, run this on the Proxmox host:"
+msg_info "The host-side helpers are not updated by this script."
+msg_info "To refresh them, run this on the Proxmox host:"
 echo
-echo "    pct pull <CTID> /opt/adr/scripts/setup-nas.sh /usr/local/sbin/adr-setup-nas \\"
-echo "      && chmod +x /usr/local/sbin/adr-setup-nas"
+echo "    for f in setup-nas:adr-setup-nas adr-doctor:adr-doctor; do"
+echo "      pct pull ${CTID_HINT} /opt/adr/scripts/\${f%%:*}.sh /usr/local/sbin/\${f##*:} \\"
+echo "        && chmod +x /usr/local/sbin/\${f##*:}"
+echo "    done"
+echo
+msg_info "Then check the container over with:  adr-doctor --fix ${CTID_HINT}"
 echo

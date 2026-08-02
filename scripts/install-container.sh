@@ -13,6 +13,8 @@
 #   GITHUB_TOKEN          token for cloning a private repo (optional)
 #   TMDB_API_KEY          written into config/adr.yaml (optional)
 #   ADR_MAKEMKV_KEY_MODE  'auto' | 'T-xxxx' | '' (skip)
+#   ADR_COMPLETED_PATH    where finished films go (default /opt/adr/completed;
+#                         the host installer sets /mnt/media when it mounts one)
 #
 set -euo pipefail
 
@@ -155,10 +157,33 @@ if [[ -n "$TMDB_API_KEY" ]]; then
     msg_ok "TMDb API key written to config"
 fi
 
-# Ownership before we run anything as the service user
-# NOTE: 'completed' may be a bind-mount of a host media library (MEDIA_HOST_PATH
-# / mp0). A recursive chown would walk into it and rewrite ownership of every
-# file in the user's Plex library, so it is excluded deliberately.
+# Where finished films land. Empty means "keep them on the container's own disk"
+# ($INSTALL_DIR/completed); the host installer sets this to /mnt/media when it
+# bind-mounts a library, so the app writes to the mount instead of to a
+# directory of its own that happens to be shadowed by one.
+if [[ -n "${ADR_COMPLETED_PATH:-}" ]]; then
+    esc_dest="$(printf '%s' "$ADR_COMPLETED_PATH" | sed -e 's/[\/&|]/\\&/g')"
+    if grep -q "^completed_path:" "$INSTALL_DIR/config/adr.yaml"; then
+        sed -i "s|^completed_path:.*|completed_path: ${esc_dest}|" "$INSTALL_DIR/config/adr.yaml"
+    else
+        echo "completed_path: ${ADR_COMPLETED_PATH}" >> "$INSTALL_DIR/config/adr.yaml"
+    fi
+    msg_ok "Finished films will be written to ${ADR_COMPLETED_PATH}"
+    mkdir -p "$ADR_COMPLETED_PATH" 2>/dev/null || true
+    # Only take ownership of a directory we own. A bind-mounted library belongs
+    # to the host, and chowning it would rewrite every file the user already has.
+    if mountpoint -q "$ADR_COMPLETED_PATH" 2>/dev/null; then
+        msg_info "${ADR_COMPLETED_PATH} is a mount — its ownership stays with the host."
+    else
+        chown "$RUN_USER:$RUN_USER" "$ADR_COMPLETED_PATH" 2>/dev/null || true
+    fi
+fi
+
+# Ownership before we run anything as the service user.
+# NOTE: 'completed' may be a bind-mount of a host media library on installs
+# made before 1.0 moved that mount to /mnt/media. A recursive chown would walk
+# into it and rewrite ownership of every file in the user's library, so it is
+# excluded deliberately — the app only ever needs to write new files there.
 find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name completed \
     -exec chown -R "$RUN_USER:$RUN_USER" {} +
 chown "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
