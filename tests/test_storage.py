@@ -148,7 +148,24 @@ class TestCheckDestination:
         assert "restart the container" in msg
 
     def test_require_mount_accepts_a_real_mount_point(self):
-        ok, msg = check_destination("/", require_mount=True)
+        """A genuine mount point passes — provided we can also write to it.
+
+        '/' is a mount point but is not writable by an ordinary user, and
+        check_destination rightly rejects it for that reason. Use a tmpfs that
+        is world-writable so this exercises the mount check rather than the
+        permission check.
+        """
+        import os.path
+
+        writable_mount = next(
+            (p for p in ("/dev/shm", "/tmp", "/run/shm")
+             if os.path.ismount(p) and os.access(p, os.W_OK | os.X_OK)),
+            None,
+        )
+        if writable_mount is None:
+            pytest.skip("no writable mount point available on this machine")
+
+        ok, msg = check_destination(writable_mount, require_mount=True)
         assert ok is True, msg
 
     @pytest.mark.skipif(os.getuid() == 0, reason="root bypasses permission bits")
