@@ -127,7 +127,20 @@ if [[ -n "$TMDB_API_KEY" ]]; then
 fi
 
 # Ownership before we run anything as the service user
-chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
+# NOTE: 'completed' may be a bind-mount of a host media library (MEDIA_HOST_PATH
+# / mp0). A recursive chown would walk into it and rewrite ownership of every
+# file in the user's Plex library, so it is excluded deliberately.
+find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name completed \
+    -exec chown -R "$RUN_USER:$RUN_USER" {} +
+chown "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
+
+if mountpoint -q "$INSTALL_DIR/completed" 2>/dev/null; then
+    msg_warn "$INSTALL_DIR/completed is a bind-mount — its ownership is left to the host."
+    msg_warn "Make sure uid $(id -u "$RUN_USER") can write there, e.g. on the Proxmox host:"
+    msg_warn "    chown -R $(id -u "$RUN_USER"):$(id -g "$RUN_USER") <your media path>"
+else
+    chown -R "$RUN_USER:$RUN_USER" "$INSTALL_DIR/completed"
+fi
 
 # ----------------------------------------------------------------------------- #
 # MakeMKV registration key

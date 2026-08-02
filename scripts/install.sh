@@ -180,13 +180,18 @@ for dev in "${HOST_SR[@]:-$DISC_DEVICE}" "$DISC_DEVICE"; do
     base="${dev#/dev/}"
     echo "lxc.mount.entry: ${dev} dev/${base} none bind,optional,create=file" >> "$CONF"
 done
-# Bind every generic-SCSI node the host has (MakeMKV issues SG_IO ioctls).
-# Hardcoding sg0 is wrong on hosts where the optical drive is not the first
-# SCSI device, so enumerate instead and fall back to sg0 if none are present.
-mapfile -t HOST_SG < <(ls -1 /dev/sg[0-9]* 2>/dev/null || true)
-for sg in "${HOST_SG[@]:-/dev/sg0}"; do
-    [[ -n "$sg" ]] || continue
-    echo "lxc.mount.entry: ${sg} dev/${sg#/dev/} none bind,optional,create=file" >> "$CONF"
+# MakeMKV issues SG_IO ioctls, so the drive's generic-SCSI node has to come
+# along too. Resolve it from sysfs per optical device — NEVER bind every
+# /dev/sg* on the host, as those also address the system's SATA/SAS disks and
+# handing raw SG_IO on the boot disk to a privileged container is dangerous.
+for dev in "${!_seen[@]}"; do
+    sg_dir="/sys/block/${dev#/dev/}/device/scsi_generic"
+    [[ -d "$sg_dir" ]] || continue
+    for sg_node in "$sg_dir"/sg[0-9]*; do
+        [[ -e "$sg_node" ]] || continue
+        sg="/dev/$(basename "$sg_node")"
+        echo "lxc.mount.entry: ${sg} dev/${sg#/dev/} none bind,optional,create=file" >> "$CONF"
+    done
 done
 echo "lxc.mount.entry: /dev/cdrom dev/cdrom none bind,optional,create=file" >> "$CONF"
 msg_ok "Passthrough configured ($CONF)"
@@ -273,8 +278,11 @@ msg_ok "In-container installation finished"
 # ----------------------------------------------------------------------------- #
 # Done
 # ----------------------------------------------------------------------------- #
-CT_IP="$(pct exec "$CT_ID" -- hostname -I 2>/dev/null | awk '{print $1}')"
+# Clear the failure trap first: from here on the install has succeeded, and an
+# error while merely looking up the IP must not abort before we have printed the
+# generated root password — that is the user's only copy of it.
 trap - EXIT
+CT_IP="$(pct exec "$CT_ID" -- hostname -I 2>/dev/null | awk '{print $1}' || true)"
 echo
 msg_ok "Installation complete!"
 echo
