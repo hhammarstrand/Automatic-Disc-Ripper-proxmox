@@ -26,11 +26,17 @@
                 <label class="form-label">Raw MKV folder (temporary)</label>
                 <input type="text" class="form-control"
                        name="raw_path" value="{{ config.raw_path }}">
+                <div class="form-text">Stays on the container's own disk. Cleared after each encode.</div>
             </div>
             <div class="mb-3">
                 <label class="form-label">Completed MP4 folder</label>
                 <input type="text" class="form-control"
                        name="completed_path" value="{{ config.completed_path }}">
+                <div class="form-text">
+                    Where finished films end up. <code>/opt/adr/completed</code> keeps them
+                    on the container; <code>/mnt/media</code> is where a NAS or host
+                    storage is mounted — see <a href="/storage">Storage</a>.
+                </div>
             </div>
         </div>
     </div>

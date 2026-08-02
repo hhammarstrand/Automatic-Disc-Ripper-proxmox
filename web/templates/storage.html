@@ -10,6 +10,23 @@
 <div id="storageWarnings"></div>
 <div id="flowNote" class="alert alert-secondary small"></div>
 
+<details class="mb-4">
+  <summary class="text-secondary small" style="cursor:pointer">
+    <i class="bi bi-diagram-3 me-1"></i>How the folders fit together
+  </summary>
+  <div class="small text-secondary mt-2 ps-3 border-start">
+    <pre class="mb-2 small">/opt/adr/            the application — code, database, scratch space
+  ├─ raw/            raw MKVs off the disc   (local, deleted after encoding)
+  ├─ staging/        HandBrake writes here   (local, always)
+  └─ completed/      finished films, if you have no NAS
+/mnt/media/          finished films, if you do</pre>
+    Nothing is ever mounted inside <code>/opt/adr</code> — that directory belongs to
+    the app. Your library is a separate filesystem mounted beside it, and
+    <em>Completed MP4 folder</em> under Settings points at whichever of the two
+    you are using.
+  </div>
+</details>
+
 <!-- ------------------------------------------------------------------ -->
 <!-- Current state                                                       -->
 <!-- ------------------------------------------------------------------ -->

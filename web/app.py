@@ -828,13 +828,21 @@ def _register_api_routes(app: Flask) -> None:
             paths["plex"] = _storage.describe_path(_config.plex_path)
 
         completed = paths["completed"]
-        # The failure mode worth shouting about: completed_path looks perfectly
-        # normal but is really the container disk, so rips silently fill it.
         warnings = []
-        if completed["exists"] and not completed["is_mount"]:
+
+        # Keeping films on the container's own disk is a perfectly good setup,
+        # so it is not a warning by itself — nagging about a valid choice trains
+        # people to ignore the banner. It only becomes a problem once the user
+        # has attached network storage (which is what require_completed_mount
+        # records) and it is no longer there: then rips would quietly fill the
+        # container disk instead of reaching the NAS.
+        if _config.require_completed_mount and completed["exists"] and not completed["is_mount"]:
             warnings.append(
-                "Finished files are being written to the container disk, not to "
-                "network storage. If you meant to use a NAS, attach it below."
+                f"{completed['path']} is not a mounted filesystem. The share "
+                "is detached, so rips will refuse to start rather than fill "
+                "the container disk. A bind-mount is captured when the "
+                "container starts — if it was mounted afterwards, restart "
+                "the container."
             )
         if completed["exists"] and not completed["writable"]:
             warnings.append(
@@ -853,6 +861,7 @@ def _register_api_routes(app: Flask) -> None:
             "staging": staging,
             "service_uid": _storage.SERVICE_UID,
             "ctid": os.environ.get("ADR_CTID", "").strip() or None,
+            "require_mount": _config.require_completed_mount,
         })
 
     @app.route("/api/storage/probe", methods=["POST"])
