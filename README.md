@@ -30,26 +30,51 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 
 ## Quick Start (one command)
 
-On your **Proxmox host** (as root — via SSH or the node **Shell** in the Proxmox web UI):
+On your **Proxmox host**, as root — via SSH or the node **Shell** in the Proxmox web UI.
+
+### If this repository is public
 
 ```bash
 bash -c "$(curl -fsSL https://raw.githubusercontent.com/hhammarstrand/Automatic-Disc-Ripper-proxmox/main/scripts/install.sh)"
 ```
 
+### If this repository is private
+
+`raw.githubusercontent.com` returns **404** for private repositories unless the
+request carries a token, so the bootstrap `curl` needs an auth header too — not
+just the clone. Create a [fine-grained token](https://github.com/settings/tokens)
+with *Contents: read* on this repo, then:
+
+```bash
+export GITHUB_TOKEN=github_pat_xxx
+bash -c "$(curl -fsSL -H "Authorization: Bearer $GITHUB_TOKEN" \
+  https://raw.githubusercontent.com/hhammarstrand/Automatic-Disc-Ripper-proxmox/main/scripts/install.sh)"
+```
+
+The exported `GITHUB_TOKEN` is picked up automatically by the installer for the
+subsequent `git clone` and for the in-container fetch — you only set it once.
+
+> **Tip:** making the repo public (*Settings → General → Danger Zone → Change
+> visibility*) lets you and anyone else use the short form above. The installer
+> works either way.
+
+### What you'll see
+
 You'll be asked for a few values (container ID, disk size, the optical device,
 an optional TMDb key) — press Enter to accept the sensible defaults. When it
-finishes you'll see something like:
+finishes:
 
 ```
  ✓ Installation complete!
-   Web UI : http://192.168.1.42:8080
-   Root pw: ••••••••••••  (generated — save it now)
+   ┌────────────────────────────────────────────────────────
+   │  Web UI : http://192.168.1.42:8080
+   │  SSH    : ssh root@192.168.1.42
+   │  Root pw: ••••••••••••   (generated — save it now)
+   │  CTID   : 200
+   └────────────────────────────────────────────────────────
 ```
 
 Open that URL and you're done. Insert a disc to start ripping.
-
-> **Private repo?** If you forked this into a private repository, pass a token:
-> `GITHUB_TOKEN=ghp_xxx ADR_REPO_URL=https://github.com/you/adr-proxmox.git bash -c "$(curl ...)"`
 
 ### What the installer does
 
@@ -117,6 +142,10 @@ immediately if any step fails — report the error instead of retrying.
 
 **Step 4.** Approve each command when Claude asks. When the web UI opens, you're done.
 
+> If the repository is **private**, replace the command in step 2 of the prompt
+> with the token form from [Quick Start](#if-this-repository-is-private) —
+> the plain URL returns 404 and Claude will report the install as failed.
+
 > The container web UI has **no authentication** and is reachable by anyone on
 > your LAN. Keep it on a trusted network and don't port-forward it to the internet.
 
@@ -167,10 +196,27 @@ pct set <CTID> -mp0 /tank/media/Movies,mp=/opt/adr/completed
 ## Managing the service
 
 ```bash
-pct exec <CTID> -- systemctl status adr        # status
+pct exec <CTID> -- systemctl status adr         # status
 pct exec <CTID> -- journalctl -u adr -f         # live logs
-pct exec <CTID> -- /opt/adr/scripts/update.sh   # update to the latest code
+pct exec <CTID> -- systemctl restart adr        # restart
 bash scripts/uninstall.sh <CTID>                # destroy the whole container (host)
+```
+
+### Updating
+
+`update.sh` re-fetches the source, reinstalls dependencies, reinstalls the unit
+if it changed, and restarts — then waits for the web UI to answer before
+reporting success. Your `config/adr.yaml`, database, and everything in
+`raw/`, `completed/` and `watch/` are preserved.
+
+```bash
+pct exec <CTID> -- /opt/adr/scripts/update.sh
+```
+
+For a **private** repo, pass the token through:
+
+```bash
+pct exec <CTID> -- env GITHUB_TOKEN=github_pat_xxx /opt/adr/scripts/update.sh
 ```
 
 ---

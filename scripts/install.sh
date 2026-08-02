@@ -42,6 +42,10 @@ MAKEMKV_KEY="${MAKEMKV_KEY:-auto}"         # auto | T-xxxx | (empty to skip)
 
 ADR_NONINTERACTIVE="${ADR_NONINTERACTIVE:-0}"
 
+# raw.githubusercontent base for this repo/branch, used for the in-container
+# fallback fetch and for the error message shown when a private repo has no token.
+RAW_BASE="https://raw.githubusercontent.com/$(echo "$ADR_REPO_URL" | sed -E 's#https://github.com/##; s#\.git$##')/${ADR_BRANCH}"
+
 # ----------------------------------------------------------------------------- #
 # Pretty output
 # ----------------------------------------------------------------------------- #
@@ -157,7 +161,12 @@ msg_ok "Container created"
 msg_info "Configuring optical-drive passthrough…"
 CONF="/etc/pve/lxc/${CT_ID}.conf"
 {
-    echo "lxc.cgroup2.devices.allow: c 11:* rwm"   # sr* (block major 11)
+    # /dev/sr* are BLOCK devices with major 11 — the rule must use type 'b',
+    # not 'c', or the container is denied access and no disc is ever seen.
+    # The 'c 11:*' line is kept as well because some kernels expose the
+    # cdrom ioctl interface as a character device of the same major.
+    echo "lxc.cgroup2.devices.allow: b 11:* rwm"   # sr*  SCSI CD-ROM  (block major 11)
+    echo "lxc.cgroup2.devices.allow: c 11:* rwm"   # sr*  cdrom ioctls (char  major 11)
     echo "lxc.cgroup2.devices.allow: c 21:* rwm"   # sg*  generic SCSI (MakeMKV uses SG_IO)
 } >> "$CONF"
 
@@ -171,7 +180,14 @@ for dev in "${HOST_SR[@]:-$DISC_DEVICE}" "$DISC_DEVICE"; do
     base="${dev#/dev/}"
     echo "lxc.mount.entry: ${dev} dev/${base} none bind,optional,create=file" >> "$CONF"
 done
-echo "lxc.mount.entry: /dev/sg0 dev/sg0 none bind,optional,create=file"  >> "$CONF"
+# Bind every generic-SCSI node the host has (MakeMKV issues SG_IO ioctls).
+# Hardcoding sg0 is wrong on hosts where the optical drive is not the first
+# SCSI device, so enumerate instead and fall back to sg0 if none are present.
+mapfile -t HOST_SG < <(ls -1 /dev/sg[0-9]* 2>/dev/null || true)
+for sg in "${HOST_SG[@]:-/dev/sg0}"; do
+    [[ -n "$sg" ]] || continue
+    echo "lxc.mount.entry: ${sg} dev/${sg#/dev/} none bind,optional,create=file" >> "$CONF"
+done
 echo "lxc.mount.entry: /dev/cdrom dev/cdrom none bind,optional,create=file" >> "$CONF"
 msg_ok "Passthrough configured ($CONF)"
 
@@ -213,9 +229,16 @@ if git clone --depth 1 --branch "$ADR_BRANCH" "$CLONE_URL" "$TMP_SRC/adr" >/dev/
     pct push "$CT_ID" "$TARBALL" /tmp/adr-src.tar.gz
     pct exec "$CT_ID" -- tar -xzf /tmp/adr-src.tar.gz -C /opt/adr
     pct exec "$CT_ID" -- rm -f /tmp/adr-src.tar.gz
+elif [[ -z "$GITHUB_TOKEN" ]]; then
+    rm -rf "$TMP_SRC"
+    die "Could not clone $ADR_REPO_URL.
+     If the repository is PRIVATE you must supply a token, e.g.:
+       export GITHUB_TOKEN=ghp_xxx
+       bash -c \"\$(curl -fsSL -H \"Authorization: Bearer \$GITHUB_TOKEN\" $RAW_BASE/scripts/install.sh)\"
+     If it is public, check this host's network/DNS access to github.com."
 else
-    msg_warn "Could not clone $ADR_REPO_URL on the host."
-    msg_warn "The in-container installer will try to clone it instead (set GITHUB_TOKEN for a private repo)."
+    msg_warn "Could not clone $ADR_REPO_URL on the host despite a token being set."
+    msg_warn "Falling back to an in-container clone."
 fi
 rm -rf "$TMP_SRC"
 
@@ -223,11 +246,11 @@ rm -rf "$TMP_SRC"
 # Run the in-container installer
 # ----------------------------------------------------------------------------- #
 msg_info "Running in-container installation (this can take a few minutes)…"
-RAW_BASE="https://raw.githubusercontent.com/$(echo "$ADR_REPO_URL" | sed -E 's#https://github.com/##; s#\.git$##')/${ADR_BRANCH}"
 pct exec "$CT_ID" -- env \
     ADR_REPO_URL="$ADR_REPO_URL" \
     ADR_BRANCH="$ADR_BRANCH" \
     GITHUB_TOKEN="$GITHUB_TOKEN" \
+    RAW_BASE="$RAW_BASE" \
     TMDB_API_KEY="$TMDB_API_KEY" \
     ADR_MAKEMKV_KEY_MODE="$MAKEMKV_KEY" \
     bash -c '
@@ -235,9 +258,14 @@ pct exec "$CT_ID" -- env \
         if [[ -f /opt/adr/scripts/install-container.sh ]]; then
             bash /opt/adr/scripts/install-container.sh
         else
-            # Source was not pushed from the host (e.g. private repo, no token):
-            # the in-container script will clone it itself.
-            curl -fsSL "'"$RAW_BASE"'/scripts/install-container.sh" | bash
+            # Source was not pushed from the host. Fetch just the bootstrap
+            # script; it clones the rest itself (with the token if private).
+            if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+                curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                    "${RAW_BASE}/scripts/install-container.sh" | bash
+            else
+                curl -fsSL "${RAW_BASE}/scripts/install-container.sh" | bash
+            fi
         fi
     '
 msg_ok "In-container installation finished"

@@ -42,10 +42,19 @@ msg_info "Updating apt and installing base packages…"
 apt-get update -qq
 apt-get install -y -qq \
     ca-certificates curl wget gnupg software-properties-common \
-    git eject util-linux \
-    python3 python3-venv python3-pip \
-    handbrake-cli >/dev/null
-msg_ok "Base packages installed"
+    git sudo eject util-linux \
+    python3 python3-venv python3-pip >/dev/null
+
+# HandBrakeCLI lives in 'universe'. It is enabled by default in the standard
+# Ubuntu images, but enable it explicitly so a minimal template also works.
+add-apt-repository -y universe >/dev/null 2>&1 || true
+apt-get update -qq
+if ! apt-get install -y -qq handbrake-cli >/dev/null 2>&1; then
+    msg_error "Could not install handbrake-cli — transcoding will not work."
+    msg_error "Check that the 'universe' component is enabled and apt can reach the archive."
+    exit 1
+fi
+msg_ok "Base packages installed (HandBrakeCLI: $(HandBrakeCLI --version 2>&1 | head -1 || echo present))"
 
 # ----------------------------------------------------------------------------- #
 # MakeMKV from the Heyarne PPA (no compilation)
