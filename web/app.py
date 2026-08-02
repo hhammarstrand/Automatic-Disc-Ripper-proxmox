@@ -800,6 +800,18 @@ def _register_api_routes(app: Flask) -> None:
     # files are actually landing and generate the command to run on the host.
     # ------------------------------------------------------------------ #
 
+    @app.route("/api/drives/health")
+    def api_drive_health():
+        """Report whether the optical drives are actually usable in here.
+
+        Distinguishes "the host has a drive this container cannot see" from
+        "the node exists but the device cgroup denies it" — two problems that
+        otherwise look identical from the dashboard.
+        """
+        from adr.disc import diagnose_passthrough
+
+        return jsonify(diagnose_passthrough())
+
     @app.route("/api/storage")
     def api_storage():
         """Report the real state of the configured storage paths."""

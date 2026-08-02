@@ -136,6 +136,87 @@ def list_optical_drives() -> list[dict]:
     return drives
 
 
+def diagnose_passthrough() -> dict:
+    """Explain why optical drives are or are not usable in this container.
+
+    Inside an LXC, /sys is the HOST's sysfs, so /sys/block/sr* lists the host's
+    optical drives whether or not the device was passed through. /dev/sr* only
+    exists if the passthrough actually applied at container start. Comparing the
+    two separates the two failure modes that otherwise look identical:
+
+      * a drive the host has but the container cannot see — the bind-mount did
+        not apply (typically the container autostarted before udev created the
+        node), and only a container restart will fix it;
+      * a node that exists but cannot be opened — the device cgroup is denying
+        access, so the UI happily shows a disc while MakeMKV gets EPERM.
+
+    Returns {"drives": [...], "problems": [...], "ok": bool}.
+    """
+    import errno as _errno
+
+    drives: list[dict] = []
+    problems: list[str] = []
+
+    sys_block = Path("/sys/block")
+    host_names: list[str] = []
+    if sys_block.exists():
+        with contextlib.suppress(OSError):
+            host_names = sorted(
+                p.name for p in sys_block.iterdir()
+                if p.name.startswith("sr") and p.name[2:].isdigit()
+            )
+
+    for name in host_names:
+        dev = f"/dev/{name}"
+        entry: dict = {
+            "device": dev,
+            "model": _drive_model(dev),
+            "node_present": os.path.exists(dev),
+            "openable": False,
+            "error": None,
+            "has_media": _device_capacity(dev) > 0,
+        }
+        if entry["node_present"]:
+            fd = None
+            try:
+                fd = os.open(dev, os.O_RDONLY | os.O_NONBLOCK)
+                entry["openable"] = True
+            except OSError as exc:
+                # No disc in the tray is not a fault — the drive is reachable.
+                if exc.errno in (_errno.ENOMEDIUM, _errno.ENXIO, _errno.EIO, _errno.EBUSY):
+                    entry["openable"] = True
+                else:
+                    entry["error"] = f"{_errno.errorcode.get(exc.errno, exc.errno)}: {exc.strerror}"
+            finally:
+                if fd is not None:
+                    with contextlib.suppress(OSError):
+                        os.close(fd)
+        drives.append(entry)
+
+        if not entry["node_present"]:
+            problems.append(
+                f"The host has {dev} ({entry['model']}) but it is not present in this "
+                f"container. The device passthrough did not apply at start — this "
+                f"usually happens when the container autostarts before the drive is "
+                f"ready. Restart the container on the Proxmox host: pct reboot <CTID>"
+            )
+        elif not entry["openable"]:
+            problems.append(
+                f"{dev} exists but cannot be opened ({entry['error']}). The container's "
+                f"device cgroup is denying access. On the Proxmox host, check that "
+                f"/etc/pve/lxc/<CTID>.conf contains 'lxc.cgroup2.devices.allow: b 11:* rwm' "
+                f"(block, not char), then restart the container."
+            )
+
+    if not host_names:
+        problems.append(
+            "No optical drive is visible even on the Proxmox host (nothing matching "
+            "/sys/block/sr*). Check the drive is connected and powered."
+        )
+
+    return {"drives": drives, "problems": problems, "ok": not problems}
+
+
 def get_drive_models() -> dict[str, str]:
     """Return a mapping of device path -> hardware model string.
 

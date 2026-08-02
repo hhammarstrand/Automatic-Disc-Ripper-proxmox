@@ -636,6 +636,31 @@ function updateElapsedTimers() {
 // Init
 // ------------------------------------------------------------------ //
 
+// ------------------------------------------------------------------ //
+// Optical-drive health
+//
+// The host's drives are always visible through /sys, but the device node only
+// exists in here if the passthrough applied at container start. When it did
+// not, the dashboard would otherwise show no drives and no reason why.
+// ------------------------------------------------------------------ //
+
+function refreshDriveHealth() {
+    const box = document.getElementById('driveHealth');
+    if (!box) return;
+    fetch('/api/drives/health')
+        .then(r => r.json())
+        .then(d => {
+            if (!d.problems || d.problems.length === 0) { box.innerHTML = ''; return; }
+            box.innerHTML = d.problems.map(p =>
+                `<div class="alert alert-danger d-flex align-items-start">
+                   <i class="bi bi-exclamation-octagon-fill me-2 mt-1"></i>
+                   <div>${escapeHtml(p)}</div>
+                 </div>`
+            ).join('');
+        })
+        .catch(() => {});
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     // Start auto-refresh if on dashboard
     if (window.location.pathname === '/') {
@@ -643,6 +668,9 @@ document.addEventListener('DOMContentLoaded', () => {
         // Start elapsed timers — tick every second
         updateElapsedTimers();
         setInterval(updateElapsedTimers, 1000);
+        // Optical-drive passthrough health
+        refreshDriveHealth();
+        setInterval(refreshDriveHealth, 15000);
     }
 
     // System stats — poll every 5 seconds on all pages

@@ -215,6 +215,34 @@ for dev in "${!_seen[@]}"; do
     done
 done
 echo "lxc.mount.entry: /dev/cdrom dev/cdrom none bind,optional,create=file" >> "$CONF"
+
+# Make guest autostart wait for the optical drive.
+#
+# 'optional' above means a device that is not there yet at container start is
+# skipped SILENTLY — and a device node cannot be bind-mounted into a container
+# that is already running. So a boot where pve-guests wins the race against
+# udev leaves the container permanently without a drive until it is restarted.
+# That is exactly why passthrough works right after installing (the container is
+# started by hand, long after udev) and then breaks on the next reboot.
+#
+# systemd names the device unit after the node, e.g. dev-sr0.device. Ordering
+# guest startup after it closes the race. 'Wants' rather than 'Requires' so a
+# host with the drive unplugged still boots its guests normally.
+if [[ -n "$DISC_DEVICE" ]]; then
+    _dev_unit="$(systemd-escape --path --suffix=device "$DISC_DEVICE" 2>/dev/null || true)"
+    if [[ -n "$_dev_unit" ]]; then
+        mkdir -p /etc/systemd/system/pve-guests.service.d
+        cat > /etc/systemd/system/pve-guests.service.d/adr-optical.conf <<EOF
+[Unit]
+# Added by the Automatic Disc Ripper installer: do not autostart guests before
+# ${DISC_DEVICE} exists, or the container silently starts without the drive.
+After=${_dev_unit}
+Wants=${_dev_unit}
+EOF
+        systemctl daemon-reload 2>/dev/null || true
+        msg_ok "Guest autostart now waits for ${DISC_DEVICE} (${_dev_unit})"
+    fi
+fi
 msg_ok "Passthrough configured ($CONF)"
 
 # Optional media bind-mount for persistence / Plex sharing
