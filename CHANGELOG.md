@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.2
+
+- **A failed update no longer leaves the application stopped.** `update.sh`
+  stops the service partway through, and everything between then and the
+  restart runs under `set -e` — so a failing `pip install`, a full disk or an
+  unwritable file aborted the script with nothing running. That presents as
+  "the web UI is gone" with no clue why. The exit trap now always brings the
+  service back: a failed update that leaves the previous version running is a
+  bad afternoon, one that leaves nothing running is a broken appliance.
+- **pip's output is no longer swallowed.** It was run with `--quiet`, which
+  hid the reason for the step most likely to fail. Its output is captured and
+  shown.
+- **The startup banner reports the real version.** It was hardcoded to
+  `v1.0.0`, so the log disagreed with what was installed — which makes every
+  "which version is this?" question worse.
+
+---
+
 ## 1.2.1
 
 ### "Have I already ripped this?"

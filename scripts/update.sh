@@ -38,7 +38,32 @@ msg_error() { echo -e " ${RD}✗${CL} $*" >&2; }
 
 msg_info "Fetching latest source from ${ADR_REPO_URL} (${ADR_BRANCH})…"
 TMP="$(mktemp -d)"
-cleanup() { rm -rf "$TMP"; }
+
+# The service is stopped partway through this script, and everything between
+# then and the restart runs under `set -e`. A failing pip install, a full disk,
+# an unwritable file — any of them aborts the script with the application
+# STOPPED, which presents as "the web UI is gone" with no clue why.
+#
+# So the exit trap always tries to bring it back. A failed update that leaves
+# the previous version running is a bad afternoon; one that leaves nothing
+# running is a broken appliance.
+SERVICE_STOPPED=0
+cleanup() {
+    local status=$?
+    rm -rf "$TMP"
+    if [[ "$SERVICE_STOPPED" -eq 1 && "$status" -ne 0 ]]; then
+        echo
+        msg_error "The update failed partway through (exit ${status})."
+        msg_info "Restarting the service so the previous version keeps running…"
+        if systemctl start adr 2>/dev/null; then
+            msg_ok "adr is running again. Nothing was lost — retry the update once"
+            msg_ok "the cause above is fixed."
+        else
+            msg_error "Could not restart adr. Look at:  journalctl -u adr -e"
+        fi
+    fi
+    exit "$status"
+}
 trap cleanup EXIT
 
 clone_url="$ADR_REPO_URL"
@@ -62,6 +87,7 @@ fi
 
 msg_info "Stopping service…"
 systemctl stop adr || true
+SERVICE_STOPPED=1
 
 msg_info "Replacing application code (preserving config, database and media)…"
 # Copy the new tree over the old one. Because everything in PRESERVE lives in
@@ -84,8 +110,20 @@ fi
 msg_ok "Code updated"
 
 msg_info "Updating Python dependencies…"
-sudo -u "$RUN_USER" "$INSTALL_DIR/.venv/bin/pip" install --quiet --upgrade pip wheel
-sudo -u "$RUN_USER" "$INSTALL_DIR/.venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt"
+# --quiet hides the reason when this fails, and this is the step most likely to
+# fail: no network, a proxy, a half-built venv. Capture it and show it.
+if ! pip_log="$(sudo -u "$RUN_USER" "$INSTALL_DIR/.venv/bin/pip" \
+        install --upgrade pip wheel 2>&1)"; then
+    msg_error "Could not update pip/wheel:"
+    echo "$pip_log" | tail -15
+    exit 1
+fi
+if ! pip_log="$(sudo -u "$RUN_USER" "$INSTALL_DIR/.venv/bin/pip" \
+        install -r "$INSTALL_DIR/requirements.txt" 2>&1)"; then
+    msg_error "Could not install requirements:"
+    echo "$pip_log" | tail -15
+    exit 1
+fi
 msg_ok "Dependencies updated"
 
 # Unit files may have changed between versions — and adr-update.* may not exist
@@ -115,6 +153,7 @@ fi
 
 msg_info "Restarting service…"
 systemctl start adr
+SERVICE_STOPPED=0
 
 # Confirm it actually came back up rather than claiming success blindly.
 ok=0

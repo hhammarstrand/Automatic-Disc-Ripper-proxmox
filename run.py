@@ -35,7 +35,10 @@ def main() -> None:
     setup_logging(config.log_level)
 
     logger.info("=" * 60)
-    logger.info("Automatic Disc Ripper v1.0.0 starting")
+    # From the package, not a literal: a startup banner that disagrees with
+    # what is installed makes every "which version is this?" question worse.
+    from adr import __version__
+    logger.info("Automatic Disc Ripper v%s starting", __version__)
     logger.info("=" * 60)
     logger.info("Config: %s", config)
     logger.info("MakeMKV: %s", config.makemkv_path)
