@@ -26,7 +26,15 @@ import os
 import subprocess
 from pathlib import Path
 
+from adr.ripper import MakeMKVRipper
+
 logger = logging.getLogger(__name__)
+
+# Spawning goes through this name so a test can substitute the process without
+# patching subprocess.Popen itself. Patching the stdlib module reaches every
+# other module in the process — including type annotations evaluated by a later
+# import, which fail with a baffling error a long way from the test.
+_popen = subprocess.Popen
 
 # <linux/cdrom.h>
 CDROM_DRIVE_STATUS = 0x5326
@@ -54,6 +62,12 @@ _DISC_TYPE = {
 # <scsi/sg.h> — MakeMKV talks to the drive through this interface, so its
 # presence is the single most predictive thing we can cheaply check.
 SG_GET_VERSION_NUM = 0x2282
+
+# How long to let a MakeMKV scan run. Matched to adr.ripper.scan_disc, which is
+# what a real rip uses: a diagnostic that gives up sooner than the operation it
+# is diagnosing will fail discs that rip perfectly well, and send someone off to
+# debug a drive that was never broken.
+SCAN_TIMEOUT = 300
 
 # Sector 16 is where ISO 9660 and UDF put their volume descriptor, so it is
 # both a real read and one that means something if it succeeds.
@@ -227,13 +241,25 @@ def _read_sector(fd: int, device: str) -> dict:
     )
 
 
-def _makemkv_scan(device: str, has_disc: bool, timeout: int = 90) -> dict:
+def _makemkv_scan(device: str, has_disc: bool, timeout: int | None = None) -> dict:
     """Ask MakeMKV to open the disc — the only check that proves ripping works.
 
     It exercises the registration key, SG_IO and the read path in one go, which
     is exactly why it is slow and opt-in.
+
+    The output is read as it arrives rather than waited for in one lump. That
+    is what makes a timeout informative: a drive scanning title 7 of 34 and a
+    drive that has said nothing at all are completely different problems, and
+    only one is worth acting on. Waiting blind cannot tell them apart.
     """
     import shutil
+    import threading
+
+    # Read the module global at call time, not as a default bound at import.
+    # A default argument is evaluated once, which makes the limit impossible to
+    # change afterwards — including from a test.
+    if timeout is None:
+        timeout = SCAN_TIMEOUT
 
     binary = shutil.which("makemkvcon")
     if not binary:
@@ -242,31 +268,61 @@ def _makemkv_scan(device: str, has_disc: bool, timeout: int = 90) -> dict:
         return _step("MakeMKV scan", "skip", "No disc loaded — nothing to scan.")
 
     try:
-        result = subprocess.run(
+        proc = _popen(
             [binary, "-r", "--cache=1", "info", f"dev:{device}"],
-            capture_output=True, text=True, timeout=timeout,
-        )
-    except subprocess.TimeoutExpired:
-        return _step(
-            "MakeMKV scan", "fail",
-            f"MakeMKV did not finish within {timeout}s. A scratched disc can take "
-            "this long; a drive that never answers looks the same.",
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
         )
     except OSError as exc:
         return _step("MakeMKV scan", "fail", f"Could not run makemkvcon: {exc}")
 
-    output = f"{result.stdout}\n{result.stderr}"
+    lines: list[str] = []
+
+    def _read() -> None:
+        try:
+            for line in proc.stdout:          # type: ignore[union-attr]
+                lines.append(line.rstrip())
+        except (OSError, ValueError):
+            pass
+
+    reader = threading.Thread(target=_read, daemon=True)
+    reader.start()
+    reader.join(timeout)
+
+    if reader.is_alive() or proc.poll() is None:
+        with contextlib.suppress(OSError):
+            proc.kill()
+        reader.join(timeout=5)
+
+        if lines:
+            # It was working. Slow is not broken, and saying "failed" sends
+            # someone off to debug a drive that is doing its job.
+            progress = _last_progress(lines)
+            return _step(
+                "MakeMKV scan", "warn",
+                f"Still scanning after {timeout}s, so the check was stopped — but "
+                f"the drive is answering ({len(lines)} lines of output"
+                f"{', last: ' + progress if progress else ''}). A Blu-ray with many "
+                "playlists genuinely takes this long. Nothing here says the drive "
+                "or the disc is faulty.",
+            )
+        return _step(
+            "MakeMKV scan", "fail",
+            f"MakeMKV produced no output at all in {timeout}s. The drive is not "
+            "answering — not merely slow.",
+        )
+
+    output = "\n".join(lines)
     titles = output.count("TINFO:")
     if "registration key" in output.lower() or "app_KeyExpired" in output:
         return _step(
             "MakeMKV scan", "fail",
             "MakeMKV rejected its registration key. Refresh it under Settings.",
         )
-    if result.returncode != 0:
-        last = [ln for ln in output.splitlines() if ln.strip()]
+    if proc.returncode != 0:
+        last = [ln for ln in lines if ln.strip()]
         return _step(
             "MakeMKV scan", "fail",
-            f"MakeMKV exited {result.returncode}: {last[-1] if last else 'no output'}",
+            f"MakeMKV exited {proc.returncode}: {last[-1] if last else 'no output'}",
         )
     return _step(
         "MakeMKV scan", "ok",
@@ -274,6 +330,20 @@ def _makemkv_scan(device: str, has_disc: bool, timeout: int = 90) -> dict:
         "Ripping from this drive will work.",
     )
 
+
+def _last_progress(lines: list[str]) -> str:
+    """The most recent thing MakeMKV said it was doing, for a timeout message."""
+    for line in reversed(lines):
+        if line.startswith("MSG:"):
+            parsed = MakeMKVRipper.parse_message(line)
+            if parsed and parsed[0]:
+                return parsed[0][:120]
+        if line.startswith(("PRGC:", "PRGT:")):
+            # PRGC:code,id,"name" — the trailing quoted field names the step.
+            parts = line.rsplit(",", 1)
+            if len(parts) == 2:
+                return parts[1].strip().strip('"')[:120]
+    return ""
 
 def _finish(device: str, steps: list[dict]) -> dict:
     failed = [s for s in steps if s["status"] == "fail"]

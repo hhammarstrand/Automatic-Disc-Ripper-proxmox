@@ -185,7 +185,7 @@ function loadDrives() {
                 <i class="bi bi-activity me-1"></i>Test
               </button>
               <button class="btn btn-outline-secondary" onclick="testDrive('${drv.device}', true, this)"
-                      title="Also asks MakeMKV to open the disc — takes up to 90 seconds">
+                      title="Also asks MakeMKV to open the disc — takes up to five minutes">
                 <i class="bi bi-disc me-1"></i>Test with MakeMKV
               </button>
             </div>
@@ -206,7 +206,7 @@ function testDrive(device, deep, btn) {
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testing…';
   box.innerHTML = deep
     ? '<div class="small text-secondary">Asking MakeMKV to open the disc — this can '
-      + 'take up to 90 seconds while the drive spins up and reads the title map.</div>'
+      + 'take up to five minutes while the drive spins up and reads the title map.</div>'
     : '';
 
   fetch('/api/drives/test', {

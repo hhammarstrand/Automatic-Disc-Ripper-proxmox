@@ -7,9 +7,10 @@ matter most — the cgroup denial and SG_IO — say what to do about it.
 """
 
 import array
+import contextlib
 import errno
 import os
-import subprocess
+import time
 
 import pytest
 
@@ -22,10 +23,20 @@ def _steps(result):
 
 @pytest.fixture
 def openable(monkeypatch):
-    """A drive whose node exists and opens cleanly."""
+    """A drive whose node exists and opens cleanly.
+
+    The fake open returns a *real* descriptor on /dev/null rather than a made-up
+    number, so os.close is left alone. Stubbing os.close globally breaks
+    subprocess.Popen — it needs it to close its pipe ends, and without that the
+    child's output never reaches EOF and any reader blocks for ever. That cost
+    an afternoon once; a real fd costs nothing.
+    """
     monkeypatch.setattr(os.path, "exists", lambda p: True)
-    monkeypatch.setattr(os, "open", lambda p, f: 42)
-    monkeypatch.setattr(os, "close", lambda fd: None)
+    fd = os.open(os.devnull, os.O_RDONLY)
+    monkeypatch.setattr(os, "open", lambda p, f: fd)
+    yield
+    with contextlib.suppress(OSError):
+        os.close(fd)
 
 
 def _ioctl(monkeypatch, drive_status=4, sg_ok=True):
@@ -162,12 +173,45 @@ class TestRead:
         assert step["status"] == "skip"
 
 
+class FakePopen:
+    """Stands in for a makemkvcon process, streaming *lines* then exiting.
+
+    ``linger`` keeps stdout open after the lines are exhausted, which is what a
+    scan still working when the clock runs out looks like.
+    """
+
+    def __init__(self, lines, returncode=0, linger=False):
+        self._lines = list(lines)
+        self._linger = linger
+        self.returncode = None
+        self._final = returncode
+        self.stdout = self
+        self.killed = False
+
+    def __iter__(self):
+        yield from self._lines
+        if self._linger:
+            time.sleep(30)          # longer than any test's timeout
+        self.returncode = self._final
+
+    def poll(self):
+        return self.returncode
+
+    def kill(self):
+        self.killed = True
+        self.returncode = -9
+
+
 class TestMakeMkvScan:
-    def _run(self, monkeypatch, stdout="", returncode=0):
-        monkeypatch.setattr(drivetest.subprocess, "run",
-                            lambda *a, **k: subprocess.CompletedProcess(a, returncode, stdout, ""))
+    def _run(self, monkeypatch, stdout="", returncode=0, linger=False):
+        lines = [ln + "\n" for ln in stdout.splitlines()]
+        fake = FakePopen(lines, returncode, linger)
+        # Narrow on purpose: patching subprocess.Popen itself reaches every
+        # module in the process and breaks annotations on later imports.
+        monkeypatch.setattr(drivetest, "_popen", lambda *a, **k: fake)
         import shutil
         monkeypatch.setattr(shutil, "which", lambda n: "/usr/bin/makemkvcon")
+        return fake
 
     def test_a_successful_scan_counts_titles(self, openable, monkeypatch):
         _ioctl(monkeypatch)
@@ -188,19 +232,52 @@ class TestMakeMkvScan:
         assert step["status"] == "fail"
         assert "Settings" in step["detail"], "the fix is one click away; say where"
 
-    def test_a_timeout_is_reported_not_hung(self, openable, monkeypatch):
+    def test_a_slow_but_answering_drive_is_a_warning_not_a_failure(
+        self, openable, monkeypatch,
+    ):
+        """The bug this replaced: a Blu-ray that simply takes a while was
+        reported as a failure, sending the user off to debug a working drive.
+
+        Output arriving at all is the evidence that separates the two cases.
+        """
         _ioctl(monkeypatch)
         monkeypatch.setattr(os, "pread", lambda *a: b"\x01CD001" + b"\x00" * 2042)
-        import shutil
-        monkeypatch.setattr(shutil, "which", lambda n: "/usr/bin/makemkvcon")
+        fake = self._run(
+            monkeypatch,
+            stdout='MSG:3007,0,2,"Scanning title 7"\nPRGC:5017,1,"Analyzing"',
+            linger=True,
+        )
+        monkeypatch.setattr(drivetest, "SCAN_TIMEOUT", 1)
 
-        def _timeout(*a, **k):
-            raise subprocess.TimeoutExpired("makemkvcon", 90)
-        monkeypatch.setattr(drivetest.subprocess, "run", _timeout)
+        step = _steps(
+            drivetest.probe_drive("/dev/sr0", deep=True))["MakeMKV scan"]
+        assert step["status"] == "warn", "answering-but-slow is not a fault"
+        assert "drive is answering" in step["detail"]
+        assert "Analyzing" in step["detail"] or "Scanning title 7" in step["detail"]
+        assert fake.killed, "the scan must be stopped, not left running"
+
+    def test_a_silent_drive_is_still_a_failure(self, openable, monkeypatch):
+        """No output at all is the case that really is broken."""
+        _ioctl(monkeypatch)
+        monkeypatch.setattr(os, "pread", lambda *a: b"\x01CD001" + b"\x00" * 2042)
+        self._run(monkeypatch, stdout="", linger=True)
+        monkeypatch.setattr(drivetest, "SCAN_TIMEOUT", 1)
 
         step = _steps(drivetest.probe_drive("/dev/sr0", deep=True))["MakeMKV scan"]
         assert step["status"] == "fail"
-        assert "90s" in step["detail"]
+        assert "no output at all" in step["detail"]
+        assert "not merely slow" in step["detail"]
+
+    def test_the_limit_is_not_stricter_than_a_real_rip(self):
+        """A diagnostic that gives up sooner than the operation it diagnoses
+        will fail discs that rip perfectly well."""
+        import inspect
+
+        from adr.ripper import MakeMKVRipper
+
+        source = inspect.getsource(MakeMKVRipper.scan_disc)
+        assert "timeout=300" in source, "scan_disc's timeout changed"
+        assert drivetest.SCAN_TIMEOUT >= 300
 
     def test_no_disc_skips_the_scan(self, openable, monkeypatch):
         _ioctl(monkeypatch, drive_status=1)

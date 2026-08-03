@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.2.4
+
+**The MakeMKV scan gave up sooner than a real rip does.** The diagnostic used a
+90-second limit; `ripper.scan_disc`, which an actual rip uses, allows 300. A
+Blu-ray with many playlists routinely needs minutes, so the check reported a
+perfectly good disc as a failure — and a diagnostic that fails where the real
+operation succeeds is worse than none, because it sends you off to debug
+something that was never broken.
+
+The limit now matches the real path, with a test that fails if the two drift
+apart. More importantly, the output is read as it arrives, so a timeout can
+tell the two cases apart: output still arriving is "slow, and answering" (a
+warning, naming what it was last doing), while nothing at all in five minutes
+is "the drive is not answering" (a failure). The old message admitted it could
+not distinguish them; it did not have to.
+
+Two test-hygiene bugs surfaced while fixing it, both the same shape — patching
+a shared stdlib attribute reaches far outside the code under test. Stubbing
+`os.close` broke `subprocess.Popen`'s pipe handling and hung the suite;
+patching `subprocess.Popen` broke a type annotation evaluated by a later
+import. Both now use narrow seams.
+
+---
+
 ## 1.2.3
 
 **`update.sh` overwrote itself while running.** Bash reads a script
