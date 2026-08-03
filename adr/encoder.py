@@ -47,6 +47,9 @@ class HandBrakeEncoder:
 
         self._active_proc: subprocess.Popen | None = None
         self._process_registry = None  # set by pipeline for cancellation
+        # Optional one-argument callable that receives HandBrake's stderr, so a
+        # preset or codec failure can be read from the UI, not journalctl.
+        self.log_sink: Callable[[str], None] | None = None
 
         if not os.path.isfile(self._exe):
             logger.warning("HandBrakeCLI not found at %s", self._exe)
@@ -195,6 +198,10 @@ class HandBrakeEncoder:
                                 logger.debug("HandBrake stderr #%d: %s", stderr_line_count, stripped[:150])
                             elif not stripped.startswith("[h2") and "Warning during" not in stripped:
                                 logger.debug("HandBrake: %s", stripped[:200])
+                            # Per-frame codec chatter would bury the useful
+                            # lines and blow through the log's size cap.
+                            if self.log_sink and not stripped.startswith("[h2"):
+                                self.log_sink(stripped[:500])
                 except OSError:
                     pass
 

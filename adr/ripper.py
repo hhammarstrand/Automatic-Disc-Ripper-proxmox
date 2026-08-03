@@ -49,6 +49,9 @@ class MakeMKVRipper:
         self._raw_path = config.raw_path
         self._active_proc: subprocess.Popen | None = None
         self._process_registry = process_registry
+        # Optional one-argument callable that receives MakeMKV's own messages,
+        # so a failure can be diagnosed from the UI instead of journalctl.
+        self.log_sink: Callable[[str], None] | None = None
 
         if not os.path.isfile(self._exe):
             logger.warning("MakeMKV not found at %s", self._exe)
@@ -483,18 +486,31 @@ class MakeMKVRipper:
             logger.debug("Failed to parse CINFO line: %s", line[:80], exc_info=True)
 
     @staticmethod
-    def _log_message(line: str) -> None:
-        """Log a MSG: line from MakeMKV."""
+    def parse_message(line: str) -> tuple[str, bool] | None:
+        """Extract the human text from a MSG: line.
+
+        Returns ``(message, is_error)``, or None if the line is not parseable.
+        MakeMKV codes at 2000 and above are errors and warnings.
+        """
         try:
             parts = MakeMKVRipper._parse_csv_line(line[4:])
-            # parts[3] is typically the human-readable message
             if len(parts) > 3:
-                msg_text = parts[3].strip('"')
-                # MakeMKV error codes >= 2000 are errors, 3000+ are warnings
-                code = int(parts[0])
-                if code >= 2000:
-                    logger.warning("MakeMKV: %s", msg_text)
-                else:
-                    logger.debug("MakeMKV: %s", msg_text)
+                return parts[3].strip('"'), int(parts[0]) >= 2000
         except (IndexError, ValueError):
+            return None
+        return None
+
+    def _log_message(self, line: str) -> None:
+        """Log a MSG: line, and pass it to the job log if one is attached."""
+        parsed = self.parse_message(line)
+        if parsed is None:
             logger.debug("MakeMKV raw: %s", line[:120])
+            return
+        msg_text, is_error = parsed
+        if is_error:
+            logger.warning("MakeMKV: %s", msg_text)
+        else:
+            logger.debug("MakeMKV: %s", msg_text)
+        if self.log_sink:
+            # MakeMKV's own words are the most useful thing in a failed rip.
+            self.log_sink(msg_text)

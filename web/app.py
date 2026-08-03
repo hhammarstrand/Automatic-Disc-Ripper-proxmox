@@ -12,6 +12,7 @@ import psutil
 from flask import Flask, abort, jsonify, render_template, request, send_file
 from sqlalchemy.exc import SQLAlchemyError
 
+from adr import joblog
 from adr.config import Config
 from adr.disc import eject_drive, get_drive_models
 from adr.identify import TMDB_DETAIL_URL, TMDB_IMAGE_BASE, TMDB_IMAGE_BASE_SMALL, TMDB_SEARCH_URL
@@ -396,6 +397,10 @@ def _register_api_routes(app: Flask) -> None:
             for job in jobs:
                 session.delete(job)  # ORM cascade deletes related tracks
             session.commit()
+            # Sweep the logs of everything that just went, plus anything left
+            # over from an earlier delete that predates job logs.
+            remaining = {row[0] for row in session.query(Job.id).all()}
+            joblog.prune(_config, keep_job_ids=remaining)
             return jsonify({"ok": True, "deleted": deleted})
         except SQLAlchemyError as exc:
             session.rollback()
@@ -416,6 +421,9 @@ def _register_api_routes(app: Flask) -> None:
                 return jsonify({"error": "Can only delete finished jobs"}), 400
             session.delete(job)
             session.commit()
+            # The log belongs to the job; leaving it behind would accumulate
+            # files for jobs that no longer exist.
+            joblog.delete(_config, job_id)
             return jsonify({"ok": True})
         except SQLAlchemyError as exc:
             session.rollback()
@@ -423,6 +431,27 @@ def _register_api_routes(app: Flask) -> None:
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+
+    @app.route("/api/jobs/<int:job_id>/log")
+    def api_job_log(job_id: int):
+        """MakeMKV's and HandBrake's own output for this job.
+
+        A failed rip otherwise shows one error string, with the tool's actual
+        complaint sitting in journalctl behind two levels of shell.
+        """
+        session = get_session()
+        try:
+            if not session.get(Job, job_id):
+                return jsonify({"error": "Job not found"}), 404
+        finally:
+            session.close()
+
+        text = joblog.read(_config, job_id)
+        return jsonify({
+            "job_id": job_id,
+            "log": text,
+            "empty": not text.strip(),
+        })
 
     @app.route("/api/jobs/<int:job_id>/files")
     def api_job_files(job_id: int):

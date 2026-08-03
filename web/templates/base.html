@@ -105,6 +105,13 @@
                     <p class="mb-1"><strong>Job:</strong> <span id="errorModalJob"></span></p>
                     <p class="mb-3"><strong>Title:</strong> <span id="errorModalTitle"></span></p>
                     <pre id="errorModalText" style="white-space: pre-wrap; word-break: break-word; background: #0d1117; padding: 1rem; border-radius: 6px; border: 1px solid var(--adr-border); color: #f85149; font-size: 0.85rem; max-height: 400px; overflow-y: auto;"></pre>
+
+                    <!-- What MakeMKV and HandBrake actually said. The error
+                         above is our summary; this is the tool's own words,
+                         which is usually the part that identifies the cause. -->
+                    <p class="mb-1 mt-3"><strong>Tool output</strong>
+                        <span class="text-secondary small">— MakeMKV and HandBrake, for this job</span></p>
+                    <pre id="errorModalLog" style="white-space: pre-wrap; word-break: break-word; background: #0d1117; padding: 1rem; border-radius: 6px; border: 1px solid var(--adr-border); color: var(--adr-text); font-size: 0.8rem; max-height: 300px; overflow-y: auto;">Loading…</pre>
                 </div>
                 <div class="modal-footer" style="border-top-color: var(--adr-border);">
                     <button type="button" class="btn btn-outline-light btn-sm" onclick="copyErrorText()"><i class="bi bi-clipboard me-1"></i>Copy</button>

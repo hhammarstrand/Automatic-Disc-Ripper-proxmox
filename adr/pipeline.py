@@ -19,10 +19,12 @@ from typing import Any
 import requests
 from sqlalchemy.exc import OperationalError as SAOperationalError
 
+from adr import joblog
 from adr.config import Config
 from adr.disc import DiscWatcher, eject_drive
 from adr.encoder import HandBrakeEncoder
 from adr.identify import identify_disc
+from adr.joblog import JobLog
 from adr.models import Job, JobStatus, Track, TrackStatus, get_session, init_db
 from adr.notify import Notifier
 from adr.plex import PlexNotifier
@@ -459,12 +461,26 @@ class EncoderWorker(threading.Thread):
                     except Exception:
                         logger.debug("Rollback failed during encode progress recovery", exc_info=True)
 
-            result = self._encoder.encode(
-                input_path=task.input_path,
-                output_dir=task.output_dir,
-                output_filename=task.output_filename,
-                progress_callback=on_progress,
-                job_id=task.job_id,
+            # Capture HandBrake's own output against this job, so a preset or
+            # codec failure is readable from the UI rather than journalctl.
+            job_log = JobLog(self._config, task.job_id)
+            job_log.append("encode", f"Encoding {task.input_path.name} -> {task.output_filename}")
+            self._encoder.log_sink = job_log.sink("encode")
+            try:
+                result = self._encoder.encode(
+                    input_path=task.input_path,
+                    output_dir=task.output_dir,
+                    output_filename=task.output_filename,
+                    progress_callback=on_progress,
+                    job_id=task.job_id,
+                )
+            finally:
+                # Workers are shared between jobs; a stale sink would write one
+                # job's output into another job's log.
+                self._encoder.log_sink = None
+            job_log.append(
+                "encode",
+                "Encode finished." if result.success else f"Encode failed: {result.error}",
             )
 
             # Check if cancelled during encode
@@ -791,11 +807,22 @@ class DrivePipeline:
                                 job.id, attempt + 1, _rip_commit_fails[0], exc,
                             )
 
-            rip_result = self._ripper.rip(
-                drive_letter=self.drive,
-                job_id=job.id,
-                progress_callback=on_rip_progress,
-                title_index=selected_title_index,
+            job_log = JobLog(self._config, job.id)
+            job_log.append("rip", f"Ripping from {self.drive} (title {selected_title_index})")
+            self._ripper.log_sink = job_log.sink("rip")
+            try:
+                rip_result = self._ripper.rip(
+                    drive_letter=self.drive,
+                    job_id=job.id,
+                    progress_callback=on_rip_progress,
+                    title_index=selected_title_index,
+                )
+            finally:
+                self._ripper.log_sink = None
+            job_log.append(
+                "rip",
+                f"Rip finished: {len(rip_result.mkv_files)} file(s)."
+                if rip_result.success else f"Rip failed: {rip_result.error}",
             )
 
             # Check if cancelled during rip
@@ -939,6 +966,18 @@ class PipelineManager:
     def start(self) -> None:
         """Initialise database and start all background threads."""
         init_db()
+
+        # Sweep job logs for jobs that no longer exist, and anything past the
+        # retention window. Doing it at startup means it happens without a
+        # timer and without ever running mid-rip.
+        try:
+            session = get_session()
+            try:
+                joblog.prune(self.config, keep_job_ids={row[0] for row in session.query(Job.id).all()})
+            finally:
+                session.close()
+        except Exception:
+            logger.warning("Could not prune job logs at startup", exc_info=True)
 
         # Discover drives
         from adr.disc import list_optical_drives

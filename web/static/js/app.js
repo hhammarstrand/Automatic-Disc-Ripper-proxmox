@@ -555,13 +555,36 @@ document.addEventListener('DOMContentLoaded', () => {
 function showError(jobId, title, errorText) {
     document.getElementById('errorModalJob').textContent = '#' + jobId;
     document.getElementById('errorModalTitle').textContent = title;
-    document.getElementById('errorModalText').textContent = errorText || 'No error message stored.';
+    document.getElementById('errorModalText').textContent =
+        errorText || 'No error recorded — this job did not fail.';
+
+    // The stored error is our summary of the failure. What MakeMKV or
+    // HandBrake actually said is usually what identifies the cause, and it
+    // used to live only in journalctl.
+    const logBox = document.getElementById('errorModalLog');
+    if (logBox) {
+        logBox.textContent = 'Loading…';
+        fetch('/api/jobs/' + jobId + '/log')
+            .then(r => r.json())
+            .then(d => {
+                logBox.textContent = d.empty
+                    ? 'No tool output was captured for this job. Jobs that ran before '
+                      + 'per-job logging was added have none.'
+                    : d.log;
+                logBox.scrollTop = logBox.scrollHeight;
+            })
+            .catch(err => { logBox.textContent = 'Could not load the log: ' + err.message; });
+    }
+
     const modal = new bootstrap.Modal(document.getElementById('errorModal'));
     modal.show();
 }
 
 function copyErrorText() {
-    const text = document.getElementById('errorModalText').textContent;
+    // Both halves: the summary is what we concluded, the log is the evidence.
+    const text = document.getElementById('errorModalText').textContent
+        + '\n\n--- tool output ---\n'
+        + (document.getElementById('errorModalLog')?.textContent || '');
     navigator.clipboard.writeText(text).then(() => {
         const btn = event.target.closest('button');
         const orig = btn.innerHTML;

@@ -217,19 +217,30 @@ class TestParseCinfo:
 
 
 # ------------------------------------------------------------------ #
-# _log_message (MSG lines)
+# parse_message (MSG lines)
+#
+# MakeMKV's own words are the most useful thing in a failed rip, so these are
+# what reaches the per-job log the UI shows.
 # ------------------------------------------------------------------ #
 
-class TestLogMessage:
-    def test_does_not_crash_on_valid_msg(self):
-        # Should not raise
-        MakeMKVRipper._log_message('MSG:1000,0,1,"Normal message"')
+class TestParseMessage:
+    def test_a_normal_message_is_extracted(self):
+        assert MakeMKVRipper.parse_message('MSG:1000,0,1,"Normal message"') == (
+            "Normal message", False,
+        )
 
-    def test_does_not_crash_on_warning(self):
-        MakeMKVRipper._log_message('MSG:2001,0,1,"Warning message"')
+    def test_codes_from_2000_are_errors(self):
+        """MakeMKV uses 2000+ for errors and warnings."""
+        assert MakeMKVRipper.parse_message('MSG:2001,0,1,"Read error"') == (
+            "Read error", True,
+        )
 
-    def test_does_not_crash_on_empty(self):
-        MakeMKVRipper._log_message("MSG:")
+    def test_a_malformed_line_is_none_not_a_crash(self):
+        assert MakeMKVRipper.parse_message("MSG:") is None
+        assert MakeMKVRipper.parse_message("MSG:not,a,number,\"x\"") is None
+
+    def test_a_truncated_line_is_none(self):
+        assert MakeMKVRipper.parse_message('MSG:1000,0') is None
 
 
 # ------------------------------------------------------------------ #

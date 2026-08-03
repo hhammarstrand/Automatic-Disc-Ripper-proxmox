@@ -50,3 +50,4 @@ build/
 .commit
 .update-requested
 update.log
+logs/

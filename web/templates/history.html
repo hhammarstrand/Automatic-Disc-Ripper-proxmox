@@ -100,6 +100,14 @@
                             <i class="bi bi-play-circle"></i>
                         </button>
                         {% endif %}
+                        <!-- Available for every job, not just failures: a rip that
+                             "worked" but produced the wrong title is diagnosed the
+                             same way, from what the tools actually said. -->
+                        <button class="btn btn-outline-secondary btn-sm"
+                                onclick="showError({{ job.id }}, '{{ job.display_title | e }}', {{ (job.error_message or '') | tojson }})"
+                                title="Tool output for this job">
+                            <i class="bi bi-terminal"></i>
+                        </button>
                         {% if not job.plex_path and plex_path and job.tmdb_id and job.status and job.status.value == 'done' and job.output_path %}
                         <button class="btn btn-outline-info btn-sm" onclick="moveToPlexManual({{ job.id }})" title="Move to Plex">
                             <i class="bi bi-collection-play"></i>
