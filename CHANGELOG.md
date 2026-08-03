@@ -1,5 +1,53 @@
 # Changelog
 
+## 1.1.0
+
+Everything from the Windows version was already here — verified module by
+module, route by route, and setting by setting; the only Windows-exclusive file
+was a Tkinter setup wizard whose job the installer and Settings page already
+do. So this release is about what a disc ripper should have and did not.
+
+### Television discs
+
+A box-set disc is six episodes of similar length with no "main feature", and
+main-feature selection would have ripped the longest and silently discarded the
+rest. Discs are now recognised as television from their title durations, and
+named `Show (2019)/Season 02/Show (2019) - S02E05.mp4` under a separate
+`tv_path`. Detection only annotates — the user confirms the season and starting
+episode before encoding, since calling a film a series renames it into a season
+folder and that is much worse to undo than the reverse.
+
+### Notifications, and telling Plex
+
+ntfy, Gotify, Discord or a raw JSON webhook, on a disc finishing, a rip
+failing, or a disc being inserted. Plex is told to scan the moment a film lands
+instead of it staying invisible until the next scheduled scan. Both are
+best-effort: a service being down never fails a rip.
+
+### Diagnosing and recovering
+
+Per-job logs capture what MakeMKV and HandBrake actually said, shown in the UI
+rather than living in `journalctl` behind `pct exec`.
+
+Retry resumes a failed job from the furthest point that still has its files —
+the encoded files intact means redo only the transfer, raw MKVs intact means
+redo only the encode, neither means say so. A rip is forty minutes; losing all
+of it to an unmounted NAS was the difference between an annoyance and finding
+the disc again.
+
+Discs that were ripped before are flagged in the history, without blocking.
+
+### Also
+
+- `tests/conftest.py`: every test that touched the database shared one
+  `adr.db` in the checkout, so rows leaked between tests and the suite failed
+  for anyone who could not write there. Each test now gets its own.
+- `adr.yaml.example` is generated from the defaults, with a test that they
+  cannot drift — the example is what a fresh install copies, so a key missing
+  from it is a setting no new user can discover.
+
+---
+
 ## 1.0.0
 
 The first release meant to be run by someone other than its author. Two things

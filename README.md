@@ -24,6 +24,11 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Automatic MakeMKV key:** fetches the current free beta key, or accepts your own.
 - **Web dashboard** (port 8080) with live progress, job history, a Storage page for NAS setup, settings, and in-browser playback.
 - **Doctor page** that self-diagnoses drives, tools, keys and storage — and updates the app from GitHub with one button.
+- **Television discs**: box sets are recognised from title durations and named `Show (Year)/Season 02/Show (Year) - S02E05.mp4`.
+- **Notifications** to ntfy, Gotify, Discord or a webhook when a disc finishes or fails — the pipeline is unattended, so it tells you.
+- **Plex library refresh** the moment a film lands, instead of waiting for the next scheduled scan.
+- **Per-job logs** in the UI: what MakeMKV and HandBrake actually said, without SSH.
+- **Retry** a failed job from whatever is still on disk — a broken NAS should not cost you a 40-minute rip.
 - **Multi-drive** support and a **watch folder** for batch encoding of existing video files.
 - **Install via Claude for Chrome** — paste one prompt and it does the whole thing for you.
 
@@ -181,7 +186,11 @@ UI under **Settings**. Key options:
 | `drives` | `auto` | Or a list like `["/dev/sr0", "/dev/sr1"]` |
 | `handbrake_preset` | `Fast 1080p30` | Any built-in or custom preset |
 | `tmdb_api_key` | — | Free key from [themoviedb.org](https://www.themoviedb.org/settings/api) |
-| `plex_path` | — | Plex library folder. When set (with `auto_move_to_plex`) films are written **directly** here and never pass through `completed_path` |
+| `plex_path` | — | Plex **movie** library. When set (with `auto_move_to_plex`) films are written **directly** here and never pass through `completed_path` |
+| `tv_path` | — | Plex **TV** library. Series go here; they never go to `plex_path`, which has different naming rules |
+| `notify_enabled` / `notify_provider` / `notify_url` / `notify_token` | off / `ntfy` | Where to send notifications |
+| `notify_events` | `job_done`, `job_failed` | Which events to send |
+| `plex_refresh_enabled` / `plex_url` / `plex_token` / `plex_section` | off | Ask Plex to scan when a film lands |
 | `require_completed_mount` | `false` | Refuse to start a rip unless the destination is a real mount point — set automatically by `adr-setup-nas` |
 | `stage_locally` | `true` | Encode to local disk and transfer the finished film in one copy. Only applies when `completed_path` is network storage |
 | `staging_path` | `/opt/adr/staging` | Local scratch used while encoding to network storage |
@@ -210,6 +219,93 @@ directory". Installs made before 1.0 used that layout; `adr-doctor --fix
 Ripping and encoding always happen on the container's own disk. Only the
 finished MP4 crosses the network, as a single sequential transfer — see
 [Local staging](#local-staging) below.
+
+### Television discs
+
+A box-set disc is not a film with extras: six episodes of similar length, none
+of them a "main feature". Left alone, main-feature selection would rip the
+longest and silently discard the other five.
+
+So a disc is recognised as television from its **title durations** — three or
+more titles of similar length between 15 and 75 minutes — because that is all
+that is known before anything is ripped. Grouping is real clustering: every
+title in the group must be close to every other, not merely to whichever one
+the scan started from, or a 16-minute featurette bridges into four 22-minute
+episodes.
+
+Detection only ever **annotates**. The dashboard shows the guess with its
+reasoning and you confirm the season and starting episode before encoding
+begins, because calling a film a series renames it into a season folder, and
+that is much more annoying to undo than the reverse. Any job can also be marked
+as a TV disc by hand while it is still ripping.
+
+Output follows Plex's TV layout:
+
+```
+Show Name (2019)/Season 02/Show Name (2019) - S02E05.mp4
+```
+
+Set `tv_path` to your Plex **TV** library. Series never go to `plex_path`:
+Plex keeps films and shows in separate libraries with different naming rules,
+and a season folder in the movie library is not something it can make sense of.
+
+### Notifications
+
+The pipeline is meant to be unattended — put a disc in, walk away. Without
+notifications the only way to learn a rip failed forty minutes ago is to open
+the dashboard and look.
+
+| Service | URL to give it |
+|---|---|
+| **ntfy** | `https://ntfy.sh/your-secret-topic` — pick a topic nobody would guess; anyone who knows it can read your notifications |
+| **Gotify** | the server root, e.g. `http://192.168.1.10:8080`, with the application token |
+| **Discord** | a channel webhook from *Channel settings → Integrations → Webhooks* |
+| **Webhook** | anything that accepts a JSON POST of `{event, title, message}` |
+
+Events are opt-in per type: a disc finished, a rip failed, a disc was inserted.
+**Send a test notification** under Settings uses the values on the form rather
+than the saved ones, since testing before saving is the only moment a test is
+useful.
+
+Delivery is best-effort with a short timeout. A notification service being down
+never fails a rip — the film is on disk either way.
+
+### Plex library refresh
+
+Set `plex_url`, `plex_token` and pick a library, and Plex is told to scan the
+folder as soon as a film lands there. Without it the film exists on disk and is
+invisible in Plex until the next scheduled scan, which reads as the ripper
+having failed.
+
+The token: in Plex, open any item → *Get Info* → *View XML*, and copy
+`X-Plex-Token` out of the URL. **Fetch libraries** then lists them so you pick
+one instead of guessing a section key.
+
+### When something fails
+
+**Per-job logs.** Every job records what MakeMKV and HandBrake actually said —
+the read error on title 3, the complaint about the preset. Open it from the
+history page. Previously that lived only in `journalctl`, behind `pct exec`,
+mixed in with every other job that week.
+
+**Retry.** A rip is forty minutes and several GB, and most failures happen
+*after* the expensive part. Retry looks at what is still on disk and resumes
+from the furthest point it can:
+
+| What survived | What retry does |
+|---|---|
+| The encoded files | Moves them to the destination. No re-encoding. |
+| The raw MKVs | Re-encodes them. The disc is not needed. |
+| Neither | Says so, instead of pretending. Put the disc back in. |
+
+It tells you which before you commit, and re-checks the destination first —
+retrying into the same unmounted share fails identically, and saying so up
+front beats a second identical error twenty seconds later.
+
+**Duplicate discs.** A disc whose label matches an earlier completed rip is
+flagged in the history. It never blocks: a disc label is not a unique
+identifier, re-ripping is legitimate, and generic labels like `DVD_VIDEO` are
+excluded so every unlabelled disc does not become a duplicate of the last one.
 
 ### MakeMKV key
 
