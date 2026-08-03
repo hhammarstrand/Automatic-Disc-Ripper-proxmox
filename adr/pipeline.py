@@ -673,11 +673,21 @@ class DrivePipeline:
         self._ripper = MakeMKVRipper(config, process_registry=process_registry)
         self._lock = threading.Lock()  # Prevent concurrent rips on same drive
 
-    def handle_disc_inserted(self, drive: str, volume_name: str | None) -> None:
+    @property
+    def is_busy(self) -> bool:
+        """Whether a rip is running on this drive right now."""
+        return self._lock.locked()
+
+    def handle_disc_inserted(self, drive: str, volume_name: str | None,
+                             manual: bool = False) -> None:
         """Callback invoked by DiscWatcher when a disc is inserted.
 
         Only processes if the event is for our drive. Runs the full pipeline
         in a new thread so the watcher isn't blocked.
+
+        *manual* means someone pressed a button rather than a disc appearing.
+        The pipeline is identical; only the "disc inserted" notification is
+        skipped, since whoever asked for it is already standing there.
         """
         if normalize_drive(drive) != normalize_drive(self.drive):
             return
@@ -685,7 +695,8 @@ class DrivePipeline:
         if normalize_drive(drive) in self._config.disabled_drives:
             logger.info("Drive %s is disabled — ignoring disc event", drive)
             return
-        Notifier(self._config).disc_inserted(drive, volume_name)
+        if not manual:
+            Notifier(self._config).disc_inserted(drive, volume_name)
         thread = threading.Thread(
             target=self._run_pipeline,
             args=(volume_name,),
@@ -1209,6 +1220,35 @@ class PipelineManager:
         self.drive_pipelines[drive_letter] = pipeline
         self.disc_watcher.on_disc_inserted(pipeline.handle_disc_inserted)
         logger.info("Pipeline registered for hot-added drive %s", drive_letter)
+
+    def rip_now(self, drive: str) -> tuple[bool, str]:
+        """Rip the disc that is already sitting in the drive.
+
+        The watcher only fires on the *transition* from empty to loaded, which
+        is right for unattended use and useless after a failure: the disc is
+        still there, nothing changes, and no amount of waiting starts it again.
+        Ejecting and reinserting works — but asking someone to walk to the
+        machine to re-trigger software is not a fix.
+        """
+        from adr.disc import _blkid_label, _has_media
+
+        pipeline = self.drive_pipelines.get(drive)
+        if pipeline is None:
+            return False, f"{drive} is not a drive this instance watches."
+        if normalize_drive(drive) in self.config.disabled_drives:
+            return False, f"{drive} is disabled under Settings."
+        if pipeline.is_busy:
+            return False, f"{drive} is already ripping."
+        if not _has_media(drive):
+            return False, (
+                f"No readable disc in {drive}. If one is loaded, the container "
+                "may not be able to open the drive — see the Doctor page."
+            )
+
+        label = _blkid_label(drive)
+        logger.info("Manual rip requested for %s (label=%s)", drive, label)
+        pipeline.handle_disc_inserted(drive, label, manual=True)
+        return True, f"Started ripping {label or 'the disc'} in {drive}."
 
     def rescan_drives(self) -> dict:
         """Re-detect optical drives now, and hot-add any that are new.

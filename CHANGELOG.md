@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.2.6
+
+**A disc that failed had no way to be tried again without ejecting it.**
+Ripping only ever started on the empty→loaded transition, so once a job failed
+the disc sitting in the drive was inert: the only way to retry was to open the
+tray and close it again. Every idle drive card now has a **Rip** button that
+starts a rip on the disc already loaded.
+
+It refuses rather than misbehaves — an unknown drive, a drive already ripping,
+a drive disabled under Settings, and an empty drive each get a specific reason
+instead of a silently queued job. The "disc inserted" notification is
+suppressed for a manual start, since you are the one who started it.
+
+---
+
 ## 1.2.5
 
 **`adr-setup-nas` wrote an empty SMB password and let the mount fail.**

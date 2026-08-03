@@ -1140,6 +1140,20 @@ def _register_api_routes(app: Flask) -> None:
 
         return jsonify(drivetest.probe_drive(device, deep=bool(data.get("deep"))))
 
+    @app.route("/api/drives/<path:drive_letter>/rip", methods=["POST"])
+    def api_drive_rip(drive_letter: str):
+        """Rip the disc already in this drive.
+
+        The watcher fires on insertion only, so after a failed job the disc
+        sits there and nothing restarts it. This is the "try that again" the
+        drive card was missing.
+        """
+        if not _pipeline_manager:
+            return jsonify({"ok": False, "message": "The pipeline is not running."}), 503
+
+        ok, message = _pipeline_manager.rip_now(normalize_drive(drive_letter))
+        return jsonify({"ok": ok, "message": message}), (200 if ok else 409)
+
     @app.route("/api/drives/rescan", methods=["POST"])
     def api_drive_rescan():
         """Re-detect optical drives now, hot-adding anything new."""

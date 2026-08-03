@@ -57,6 +57,15 @@
                             </div>
                             <!-- Action buttons -->
                             <div class="d-flex gap-1 flex-shrink-0">
+                                {% if d.status == 'idle' %}
+                                <!-- The watcher only fires when a disc appears. After a
+                                     failed job the disc is still sitting there and
+                                     nothing restarts it — this is that button. -->
+                                <button class="btn btn-outline-success btn-sm" onclick="ripNow('{{ d.letter }}')"
+                                        title="Rip the disc that is already in this drive">
+                                    <i class="bi bi-play-fill"></i> Rip
+                                </button>
+                                {% endif %}
                                 <button class="btn btn-outline-info btn-sm" onclick="ejectDrive('{{ d.letter }}')" title="Eject disc">
                                     <i class="bi bi-eject-fill"></i>
                                 </button>

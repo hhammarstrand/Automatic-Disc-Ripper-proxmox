@@ -146,6 +146,25 @@ function toggleDrive(driveLetter, disable) {
 }
 
 // ------------------------------------------------------------------ //
+// Rip the disc that is already loaded
+//
+// Insertion is an event; a disc sitting in a drive is a state. The watcher
+// only sees the former, so after a failure nothing re-triggers however long
+// you wait. Ejecting and reinserting works, but walking to the machine to
+// restart software is not a fix.
+// ------------------------------------------------------------------ //
+
+function ripNow(driveLetter) {
+    fetch(`/api/drives/${encodeURIComponent(driveLetter)}/rip`, { method: 'POST' })
+        .then(r => r.json().then(d => ({ ok: r.ok, d })))
+        .then(({ ok, d }) => {
+            if (!ok) { alert(d.message || 'Could not start the rip.'); return; }
+            setTimeout(() => location.reload(), 800);
+        })
+        .catch(err => alert('Error: ' + err.message));
+}
+
+// ------------------------------------------------------------------ //
 // Drive eject toggle
 // ------------------------------------------------------------------ //
 
