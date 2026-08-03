@@ -44,6 +44,11 @@ _drive_models: dict[str, str] = {}
 _preset_cache: dict | None = None
 _preset_cache_time: float = 0.0
 
+#: Rows per page of history. Large enough that most people never see a second
+#: page, small enough that a machine which has worked through a whole shelf
+#: still renders instantly.
+HISTORY_PAGE_SIZE = 100
+
 
 def create_app(config: Config, pipeline_manager=None) -> Flask:
     """Create and configure the Flask application.
@@ -170,11 +175,46 @@ def _register_ui_routes(app: Flask) -> None:
 
     @app.route("/history")
     def history():
-        """Full job history page."""
+        """Job history, a page at a time.
+
+        This used to fetch every job ever run and let the template ask each one
+        for its tracks — one query per row. A machine that has worked through a
+        shelf of discs has thousands of rows, and the page got slower every
+        week. Filtering moved to the server for the same reason: filtering in
+        the browser can only hide rows that were already sent.
+        """
+        from sqlalchemy.orm import selectinload
+
+        status = (request.args.get("status") or "").strip().lower()
+        try:
+            page = max(1, int(request.args.get("page", 1)))
+        except (TypeError, ValueError):
+            page = 1
+
         session = get_session()
         try:
-            jobs = session.query(Job).order_by(Job.started_at.desc()).all()
-            return render_template("history.html", jobs=jobs, plex_path=_config.plex_path if _config else "")
+            query = session.query(Job)
+            if status:
+                try:
+                    query = query.filter(Job.status == JobStatus(status))
+                except ValueError:
+                    status = ""          # an unknown status filters nothing
+            total = query.count()
+            pages = max(1, (total + HISTORY_PAGE_SIZE - 1) // HISTORY_PAGE_SIZE)
+            page = min(page, pages)
+            jobs = (
+                query.options(selectinload(Job.tracks))
+                .order_by(Job.started_at.desc())
+                .limit(HISTORY_PAGE_SIZE)
+                .offset((page - 1) * HISTORY_PAGE_SIZE)
+                .all()
+            )
+            return render_template(
+                "history.html", jobs=jobs,
+                plex_path=_config.plex_path if _config else "",
+                page=page, pages=pages, total=total, status=status,
+                page_size=HISTORY_PAGE_SIZE,
+            )
         finally:
             session.close()
 

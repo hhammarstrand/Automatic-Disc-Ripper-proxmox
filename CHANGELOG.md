@@ -77,6 +77,22 @@ the service was restarted. Thirty minutes of *complete* silence — no progress,
 no messages, nothing — now ends the rip, with an error that names the one test
 that separates a bad disc from a bad drive: another disc in the same drive.
 
+**Two background threads could be killed by one bad moment.** Both had the same
+shape: a call outside the `try` block whose failure escaped past the cleanup.
+
+In the drive pipeline that call was opening the database session, and the
+cleanup it jumped over was releasing the drive's lock. A locked database for
+one moment meant the drive was busy for the life of the service — no disc in
+it, nothing running, and the dashboard offering no way to start again. In the
+encoder worker it meant the thread simply died, and every later encode queued
+up behind a consumer that no longer existed. Nothing said so: a dead daemon
+thread is silent, and the queue just grows.
+
+**The history page got slower every week.** It fetched every job ever run, and
+the template then asked each row for its tracks — one query per row. Both the
+paging and the status filter are now done by the database, so the page costs
+the same on the thousandth disc as on the first.
+
 Also fixed, found while testing the above: killing a timed-out tool killed only
 the process we started. Anything *it* had started kept the output pipe open, so
 the reader thread blocked on a read that would never return and closing the

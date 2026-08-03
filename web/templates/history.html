@@ -7,14 +7,24 @@
 <!-- Filter bar -->
 <div class="row mb-3 align-items-center">
     <div class="col-auto">
+        <!-- Filtering happens on the server. Doing it in the browser could only
+             hide rows that had already been fetched and rendered, which on a
+             machine with a few thousand jobs is the slow part. -->
         <select class="form-select form-select-sm" id="statusFilter" onchange="filterHistory()">
-            <option value="">All statuses</option>
-            <option value="done">Completed</option>
-            <option value="error">Error</option>
-            <option value="cancelled">Cancelled</option>
-            <option value="ripping">Ripping</option>
-            <option value="encoding">Encoding</option>
+            <option value="" {% if not status %}selected{% endif %}>All statuses</option>
+            <option value="done" {% if status == 'done' %}selected{% endif %}>Completed</option>
+            <option value="error" {% if status == 'error' %}selected{% endif %}>Error</option>
+            <option value="cancelled" {% if status == 'cancelled' %}selected{% endif %}>Cancelled</option>
+            <option value="ripping" {% if status == 'ripping' %}selected{% endif %}>Ripping</option>
+            <option value="encoding" {% if status == 'encoding' %}selected{% endif %}>Encoding</option>
         </select>
+    </div>
+    <div class="col-auto">
+        <span class="small text-secondary">
+            {% if total %}
+                {{ total }} job{{ 's' if total != 1 }}{% if pages > 1 %} · page {{ page }} of {{ pages }}{% endif %}
+            {% endif %}
+        </span>
     </div>
     <div class="col-auto ms-auto">
         <button class="btn btn-outline-danger btn-sm" onclick="clearHistory()" title="Clear all completed/error/cancelled jobs">
@@ -163,19 +173,28 @@
         </tbody>
     </table>
 </div>
+
+{% if pages > 1 %}
+<nav class="d-flex justify-content-between align-items-center mt-3">
+    <a class="btn btn-outline-secondary btn-sm {% if page <= 1 %}disabled{% endif %}"
+       href="?page={{ page - 1 }}{% if status %}&status={{ status }}{% endif %}">
+        <i class="bi bi-chevron-left me-1"></i>Newer
+    </a>
+    <span class="small text-secondary">Page {{ page }} of {{ pages }}</span>
+    <a class="btn btn-outline-secondary btn-sm {% if page >= pages %}disabled{% endif %}"
+       href="?page={{ page + 1 }}{% if status %}&status={{ status }}{% endif %}">
+        Older<i class="bi bi-chevron-right ms-1"></i>
+    </a>
+</nav>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
 <script>
 function filterHistory() {
+    // Server-side: the page it would filter is only the first hundred rows.
     const status = document.getElementById('statusFilter').value;
-    document.querySelectorAll('#historyTable tbody tr').forEach(row => {
-        if (!status || row.dataset.status === status) {
-            row.style.display = '';
-        } else {
-            row.style.display = 'none';
-        }
-    });
+    window.location = status ? ('?status=' + encodeURIComponent(status)) : '?';
 }
 </script>
 {% endblock %}

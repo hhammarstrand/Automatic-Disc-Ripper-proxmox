@@ -442,13 +442,25 @@ class EncoderWorker(threading.Thread):
             except queue.Empty:
                 continue
 
-            self._process_task(task)
-            self._queue.task_done()
+            # A worker that dies takes every future encode with it, silently:
+            # tasks keep arriving on the queue and nothing ever picks them up.
+            # _process_task handles its own errors, so reaching here means
+            # something outside it went wrong — and one bad task is not a
+            # reason to stop encoding for the life of the service.
+            try:
+                self._process_task(task)
+            except Exception:
+                logger.exception(
+                    "%s could not process job %s; carrying on", self.name, task.job_id,
+                )
+            finally:
+                self._queue.task_done()
         logger.info("%s stopped", self.name)
 
     def _process_task(self, task: EncodeTask) -> None:
-        session = get_session()
+        session = None
         try:
+            session = get_session()
             job = session.get(Job, task.job_id)
             track = session.get(Track, task.track_id)
             if not job or not track:
@@ -685,10 +697,14 @@ class EncoderWorker(threading.Thread):
 
             session.commit()
         except Exception:
-            session.rollback()
             logger.exception("Error processing encode task for job %s", task.job_id)
+            if session is not None:
+                with contextlib.suppress(Exception):
+                    session.rollback()
         finally:
-            session.close()
+            if session is not None:
+                with contextlib.suppress(Exception):
+                    session.close()
 
     @staticmethod
     def _passthrough(task: "EncodeTask"):
@@ -803,9 +819,15 @@ class DrivePipeline:
             logger.warning("Drive %s is already ripping — ignoring new disc event", self.drive)
             return
 
-        session = get_session()
+        # Opening the session is inside the try because it can fail — a locked
+        # or corrupt database — and outside it the exception would escape past
+        # the finally that releases the lock. The drive would then be busy for
+        # the life of the service, with no disc in it and nothing running.
+        session = None
         job: Job | None = None
         try:
+            session = get_session()
+
             # 1. Create job
             job = Job(
                 disc_label=volume_name,
@@ -1239,7 +1261,7 @@ class DrivePipeline:
             import traceback
             tb = traceback.format_exc()
             logger.exception("Pipeline error for drive %s", self.drive)
-            if job:
+            if job is not None and session is not None:
                 try:
                     job.status = JobStatus.ERROR
                     job.error_message = f"{exc}\n\n{tb}"
@@ -1247,10 +1269,16 @@ class DrivePipeline:
                     session.commit()
                     Notifier(self._config).job_failed(job)
                 except Exception:
-                    session.rollback()
+                    logger.warning("Could not record the failure of job %s", job.id, exc_info=True)
+                    with contextlib.suppress(Exception):
+                        session.rollback()
         finally:
+            # Releasing the lock is the one thing that must happen. Everything
+            # else here is cleanup; this is what keeps the drive usable.
             self._lock.release()
-            session.close()
+            if session is not None:
+                with contextlib.suppress(Exception):
+                    session.close()
 
     # -------------------------------------------------------------- #
     # Discs that are not video
