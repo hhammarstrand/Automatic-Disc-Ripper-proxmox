@@ -1,0 +1,24 @@
+[Unit]
+Description=Automatic Disc Ripper — apply update
+Documentation=https://github.com/hhammarstrand/Automatic-Disc-Ripper-proxmox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Repository and branch come from here, never from the web request. The most an
+# unauthenticated caller on the LAN can do is ask for the update this machine's
+# owner already configured.
+EnvironmentFile=-/etc/default/adr
+# Clear the request first: the path unit re-arms as soon as the flag is gone, so
+# removing it up front prevents a failed update from triggering itself for ever.
+ExecStartPre=-/bin/rm -f /opt/adr/.update-requested
+ExecStart=/opt/adr/scripts/update.sh
+# World-readable so the unprivileged web UI can show progress live. update.sh
+# prints no secrets; the token, when one is used, arrives via the environment.
+StandardOutput=truncate:/opt/adr/update.log
+StandardError=append:/opt/adr/update.log
+TimeoutStartSec=1800
+
+[Install]
+WantedBy=multi-user.target

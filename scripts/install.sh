@@ -430,6 +430,9 @@ echo "  the app's directory stays the app's."
 echo
 echo "  Next: open the web UI and (optionally) add your TMDb API key under Settings."
 echo
+echo "  The Doctor page in the web UI self-diagnoses drives, tools and storage,"
+echo "  and updates the app from GitHub with one button."
+echo
 echo "  If the drive ever stops being seen — classically after a host reboot —"
 echo "  run on this host:   adr-doctor --fix ${CT_ID}"
 echo

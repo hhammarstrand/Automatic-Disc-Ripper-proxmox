@@ -1,0 +1,13 @@
+[Unit]
+Description=Automatic Disc Ripper — watch for an update request
+Documentation=https://github.com/hhammarstrand/Automatic-Disc-Ripper-proxmox
+
+[Path]
+# The web UI runs unprivileged with NoNewPrivileges=yes and cannot escalate. It
+# touches this file; systemd does the privileged work. That keeps "can request
+# an update" and "can run code as root" as two separate things.
+PathExists=/opt/adr/.update-requested
+Unit=adr-update.service
+
+[Install]
+WantedBy=multi-user.target

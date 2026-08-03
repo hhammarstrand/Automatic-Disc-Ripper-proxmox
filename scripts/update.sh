@@ -49,8 +49,16 @@ if ! git clone --depth 1 --branch "$ADR_BRANCH" "$clone_url" "$TMP/src" >/dev/nu
     msg_error "For a private repo re-run with: GITHUB_TOKEN=ghp_xxx $0"
     exit 1
 fi
+# Record the commit before .git goes away — it is the only thing that can
+# answer "am I up to date?" from a working tree with no checkout.
+NEW_COMMIT="$(git -C "$TMP/src" rev-parse HEAD 2>/dev/null || true)"
 rm -rf "$TMP/src/.git"
-msg_ok "Source fetched"
+msg_ok "Source fetched (${NEW_COMMIT:0:8})"
+
+OLD_COMMIT="$(cat "$INSTALL_DIR/.commit" 2>/dev/null || true)"
+if [[ -n "$NEW_COMMIT" && "$NEW_COMMIT" == "$OLD_COMMIT" ]]; then
+    msg_ok "Already at the latest commit — reinstalling anyway to be sure."
+fi
 
 msg_info "Stopping service…"
 systemctl stop adr || true
@@ -80,11 +88,29 @@ sudo -u "$RUN_USER" "$INSTALL_DIR/.venv/bin/pip" install --quiet --upgrade pip w
 sudo -u "$RUN_USER" "$INSTALL_DIR/.venv/bin/pip" install --quiet -r "$INSTALL_DIR/requirements.txt"
 msg_ok "Dependencies updated"
 
-# The unit file may have changed between versions.
-if ! cmp -s "$INSTALL_DIR/systemd/adr.service" /etc/systemd/system/adr.service; then
-    msg_info "systemd unit changed — reinstalling…"
-    install -m 0644 "$INSTALL_DIR/systemd/adr.service" /etc/systemd/system/adr.service
+# Unit files may have changed between versions — and adr-update.* may not exist
+# at all on an install made before in-app updates.
+units_changed=0
+for unit in adr.service adr-update.service adr-update.path; do
+    src="$INSTALL_DIR/systemd/$unit"
+    [[ -f "$src" ]] || continue
+    if ! cmp -s "$src" "/etc/systemd/system/$unit"; then
+        install -m 0644 "$src" "/etc/systemd/system/$unit"
+        msg_info "Installed systemd unit: $unit"
+        units_changed=1
+    fi
+done
+if [[ "$units_changed" -eq 1 ]]; then
     systemctl daemon-reload
+    # Enabling is idempotent, and this is what turns on updating from the web UI
+    # for an install that predates it.
+    systemctl enable --now adr-update.path >/dev/null 2>&1 \
+        || msg_warn "Could not enable adr-update.path — updates stay host-side."
+fi
+
+if [[ -n "$NEW_COMMIT" ]]; then
+    echo "$NEW_COMMIT" > "$INSTALL_DIR/.commit"
+    chown "$RUN_USER:$RUN_USER" "$INSTALL_DIR/.commit" 2>/dev/null || true
 fi
 
 msg_info "Restarting service…"

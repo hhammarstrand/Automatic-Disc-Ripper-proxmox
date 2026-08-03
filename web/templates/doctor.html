@@ -1,0 +1,231 @@
+{% extends "base.html" %}
+{% block title %}Doctor — Automatic Disc Ripper{% endblock %}
+
+{% block content %}
+<h4 class="mb-1"><i class="bi bi-heart-pulse me-2"></i>Doctor</h4>
+<p class="text-secondary small mb-4">
+  What this container can check about itself — and the one command for what it can't.
+</p>
+
+<!-- ------------------------------------------------------------------ -->
+<!-- Update                                                              -->
+<!-- ------------------------------------------------------------------ -->
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-cloud-arrow-down me-1"></i>Version</span>
+    <button class="btn btn-sm btn-outline-secondary" id="checkBtn" onclick="checkUpdate()">
+      <i class="bi bi-arrow-repeat me-1"></i>Check GitHub
+    </button>
+  </div>
+  <div class="card-body">
+    <div id="updateBox" class="text-secondary small">
+      <span class="spinner-border spinner-border-sm me-2"></span>Checking for updates…
+    </div>
+    <pre id="updateLog" class="small mt-3 mb-0 d-none p-3 rounded"
+         style="background: var(--adr-bg-alt, #111); max-height: 320px; overflow:auto;"></pre>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------------------ -->
+<!-- Self-checks                                                         -->
+<!-- ------------------------------------------------------------------ -->
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-clipboard2-pulse me-1"></i>Self-checks</span>
+    <button class="btn btn-sm btn-outline-secondary" onclick="loadChecks()">
+      <i class="bi bi-arrow-repeat me-1"></i>Re-run
+    </button>
+  </div>
+  <ul class="list-group list-group-flush" id="checkList">
+    <li class="list-group-item text-secondary small">
+      <span class="spinner-border spinner-border-sm me-2"></span>Running checks…
+    </li>
+  </ul>
+</div>
+
+<!-- ------------------------------------------------------------------ -->
+<!-- Host-side                                                           -->
+<!-- ------------------------------------------------------------------ -->
+<div class="card">
+  <div class="card-header"><i class="bi bi-hdd-rack me-1"></i>Checks that need the Proxmox host</div>
+  <div class="card-body">
+    <p class="small text-secondary">
+      The device cgroup, the passthrough entries and guest-autostart ordering live in
+      <code>/etc/pve/lxc/{{ ctid or '&lt;CTID&gt;' }}.conf</code> on the host. This container
+      cannot read or change them — that is what container isolation is for — so it hands
+      you the command instead of guessing. <code>adr-doctor</code> reports by default and
+      only changes anything with <code>--fix</code>.
+    </p>
+    <div class="d-flex align-items-center gap-2">
+      <code class="flex-grow-1 p-2 rounded" style="background: var(--adr-bg-alt, #111);"
+            id="doctorCommand">adr-doctor --fix {{ ctid or '&lt;CTID&gt;' }}</code>
+      <button class="btn btn-sm btn-outline-secondary" onclick="copyText('doctorCommand', this)">
+        <i class="bi bi-clipboard"></i>
+      </button>
+    </div>
+    {% if not ctid %}
+    <div class="small text-secondary mt-2">
+      This container does not know its own CTID (nothing records it before 1.0). Find it
+      with <code>pct list</code> on the host.
+    </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+
+function copyText(id, btn) {
+  navigator.clipboard.writeText(document.getElementById(id).textContent.trim()).then(() => {
+    const o = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-check"></i>';
+    setTimeout(() => btn.innerHTML = o, 1500);
+  });
+}
+
+// ------------------------------------------------------------------ //
+// Self-checks
+// ------------------------------------------------------------------ //
+const BADGE = {
+  ok:   '<span class="badge bg-success">ok</span>',
+  warn: '<span class="badge bg-warning text-dark">warning</span>',
+  fail: '<span class="badge bg-danger">failed</span>',
+};
+
+function loadChecks() {
+  fetch('/api/doctor').then(r => r.json()).then(data => {
+    document.getElementById('checkList').innerHTML = data.checks.map(c => `
+      <li class="list-group-item">
+        <div class="d-flex justify-content-between align-items-start">
+          <strong>${escapeHtml(c.title)}</strong>
+          ${BADGE[c.status] || ''}
+        </div>
+        <div class="small text-secondary mt-1">${escapeHtml(c.detail)}</div>
+        ${c.fix ? `<div class="small mt-2"><i class="bi bi-wrench-adjustable me-1"></i>
+                     <code>${escapeHtml(c.fix)}</code></div>` : ''}
+      </li>`).join('');
+
+    const badge = document.getElementById('doctorBadge');
+    if (badge) {
+      badge.textContent = data.failing;
+      badge.classList.toggle('d-none', data.failing === 0);
+    }
+  }).catch(err => {
+    document.getElementById('checkList').innerHTML =
+      `<li class="list-group-item text-danger small">Could not run checks: ${escapeHtml(err.message)}</li>`;
+  });
+}
+
+// ------------------------------------------------------------------ //
+// Updates
+// ------------------------------------------------------------------ //
+function short(sha) { return sha ? sha.substring(0, 8) : '—'; }
+
+function checkUpdate() {
+  const box = document.getElementById('updateBox');
+  box.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Checking GitHub…';
+
+  fetch('/api/update/check').then(r => r.json()).then(d => {
+    const meta = `<div class="small text-secondary mt-2">
+        Installed <code>${short(d.current)}</code> ·
+        GitHub <code>${short(d.latest)}</code> ·
+        <code>${escapeHtml(d.branch)}</code></div>`;
+
+    if (d.error) {
+      box.innerHTML = `<div class="text-warning">
+          <i class="bi bi-exclamation-triangle me-1"></i>Could not reach GitHub:
+          ${escapeHtml(d.error)}</div>${meta}`;
+      return;
+    }
+    if (!d.known) {
+      // Never offer a phantom update: without a known local commit there is
+      // nothing to compare against.
+      box.innerHTML = `<div class="text-secondary">
+          <i class="bi bi-question-circle me-1"></i>This install did not record which
+          commit it was built from, so there is nothing to compare. The next update
+          fixes that.</div>${meta}
+        ${d.can_apply ? applyButton('Update anyway') : cannotApply(d)}`;
+      return;
+    }
+    if (!d.update_available) {
+      box.innerHTML = `<div class="text-success">
+          <i class="bi bi-check-circle me-1"></i>Up to date.</div>${meta}`;
+      return;
+    }
+    box.innerHTML = `<div class="text-info">
+        <i class="bi bi-arrow-up-circle me-1"></i>An update is available.</div>${meta}
+      ${d.can_apply ? applyButton('Update now') : cannotApply(d)}`;
+  }).catch(err => {
+    box.innerHTML = `<div class="text-danger small">Check failed: ${escapeHtml(err.message)}</div>`;
+  });
+}
+
+function applyButton(label) {
+  return `<button class="btn btn-sm btn-primary mt-3" onclick="startUpdate(this)">
+            <i class="bi bi-download me-1"></i>${escapeHtml(label)}</button>
+          <div class="small text-secondary mt-2">
+            The service restarts when it finishes; this page will reconnect on its own.
+          </div>`;
+}
+
+function cannotApply(d) {
+  return `<div class="alert alert-secondary small mt-3 mb-0">
+            <i class="bi bi-info-circle me-1"></i>${escapeHtml(d.cannot_apply_reason)}
+          </div>`;
+}
+
+function startUpdate(btn) {
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Starting…';
+  fetch('/api/update/start', {method: 'POST'})
+    .then(r => r.json().then(d => ({ok: r.ok, d})))
+    .then(({ok, d}) => {
+      if (!ok) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-download me-1"></i>Update now';
+        document.getElementById('updateBox').insertAdjacentHTML('beforeend',
+          `<div class="text-warning small mt-2">${escapeHtml(d.message)}</div>`);
+        return;
+      }
+      pollUpdate();
+    });
+}
+
+let pollTimer = null;
+function pollUpdate() {
+  const log = document.getElementById('updateLog');
+  log.classList.remove('d-none');
+
+  clearInterval(pollTimer);
+  pollTimer = setInterval(() => {
+    fetch('/api/update/status').then(r => r.json()).then(s => {
+      log.textContent = s.log || 'Waiting for the update to start…';
+      log.scrollTop = log.scrollHeight;
+      if (s.state === 'done' || s.state === 'failed') {
+        clearInterval(pollTimer);
+        const box = document.getElementById('updateBox');
+        box.innerHTML = s.state === 'done'
+          ? '<div class="text-success"><i class="bi bi-check-circle me-1"></i>Update finished. Reloading…</div>'
+          : '<div class="text-danger"><i class="bi bi-x-circle me-1"></i>Update failed — see the log below.</div>';
+        if (s.state === 'done') setTimeout(() => location.reload(), 2500);
+        else loadChecks();
+      }
+    }).catch(() => {
+      // Expected: update.sh restarts the service, so the API is briefly gone.
+      log.textContent += '\n(service restarting…)';
+    });
+  }, 2000);
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadChecks();
+  checkUpdate();
+});
+</script>
+{% endblock %}

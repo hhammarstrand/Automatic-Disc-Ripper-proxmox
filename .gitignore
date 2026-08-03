@@ -45,3 +45,8 @@ dist/
 build/
 *.egg-info/
 *.spec
+
+# Runtime state written into the install directory
+.commit
+.update-requested
+update.log

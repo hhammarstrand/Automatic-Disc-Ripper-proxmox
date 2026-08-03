@@ -661,6 +661,26 @@ function refreshDriveHealth() {
         .catch(() => {});
 }
 
+// ------------------------------------------------------------------ //
+// Doctor badge in the navbar.
+//
+// A problem you only see on the page that reports it is a problem you find
+// after the failed rip, so the count rides along on every page. The Doctor page
+// keeps its own list up to date and sets the badge itself.
+// ------------------------------------------------------------------ //
+
+function refreshDoctorBadge() {
+    const badge = document.getElementById('doctorBadge');
+    if (!badge || window.location.pathname === '/doctor') return;
+    fetch('/api/doctor')
+        .then(r => r.json())
+        .then(d => {
+            badge.textContent = d.failing;
+            badge.classList.toggle('d-none', d.failing === 0);
+        })
+        .catch(() => {});
+}
+
 document.addEventListener('DOMContentLoaded', () => {
     // Start auto-refresh if on dashboard
     if (window.location.pathname === '/') {
@@ -676,4 +696,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // System stats — poll every 5 seconds on all pages
     refreshSystemStats();
     setInterval(refreshSystemStats, 5000);
+
+    // Doctor badge — cheap local checks, no need to poll hard
+    refreshDoctorBadge();
+    setInterval(refreshDoctorBadge, 60000);
 });

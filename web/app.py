@@ -199,6 +199,14 @@ def _register_ui_routes(app: Flask) -> None:
             ctid=os.environ.get("ADR_CTID", "").strip() or "",
         )
 
+    @app.route("/doctor")
+    def doctor_page():
+        """Doctor page: self-checks, the host-side command, and updates."""
+        return render_template(
+            "doctor.html",
+            ctid=os.environ.get("ADR_CTID", "").strip() or "",
+        )
+
 
 # ------------------------------------------------------------------ #
 # REST API Routes
@@ -802,6 +810,54 @@ def _register_api_routes(app: Flask) -> None:
     # These endpoints are therefore strictly read-only — they report where
     # files are actually landing and generate the command to run on the host.
     # ------------------------------------------------------------------ #
+
+    # ------------------------------------------------------------------ #
+    # Doctor / updates
+    # ------------------------------------------------------------------ #
+
+    @app.route("/api/doctor")
+    def api_doctor():
+        """Everything the container can check about itself.
+
+        The host-side checks (device cgroup, passthrough entries, boot
+        ordering) need `pct` and are not reachable from in here; the page hands
+        over the `adr-doctor` command for those instead of guessing.
+        """
+        from adr import diagnostics
+
+        return jsonify(diagnostics.run_checks(_config))
+
+    @app.route("/api/update/check")
+    def api_update_check():
+        """Compare the installed commit with the branch head on GitHub."""
+        from adr import updater
+
+        result = updater.check_for_update()
+        supported, why = updater.updates_supported()
+        result["can_apply"] = supported
+        result["cannot_apply_reason"] = why
+        return jsonify(result)
+
+    @app.route("/api/update/start", methods=["POST"])
+    def api_update_start():
+        """Ask the root-side unit to apply the update.
+
+        Deliberately takes no parameters. Repository and branch live in the
+        systemd unit, so this endpoint cannot be talked into fetching code from
+        somewhere else — it can only ask for the update the machine's owner
+        already configured.
+        """
+        from adr import updater
+
+        ok, message = updater.request_update()
+        return jsonify({"ok": ok, "message": message}), (200 if ok else 409)
+
+    @app.route("/api/update/status")
+    def api_update_status():
+        """How far the update has got, and what it has printed."""
+        from adr import updater
+
+        return jsonify(updater.update_status())
 
     @app.route("/api/drives/health")
     def api_drive_health():

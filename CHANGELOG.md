@@ -88,6 +88,28 @@ free space, writability and mount state on the path films actually land in —
 previously it could show a healthy `completed_path` while the library it never
 looked at was full.
 
+### Doctor page, and updating from the browser
+
+**Doctor** in the web UI runs everything the container can check about itself —
+optical drives, MakeMKV and HandBrake, the registration key, the destination
+path, scratch space, the database — and says what to do about each failure. A
+count of failures rides along in the navbar on every page, so a problem finds
+you before the failed rip does. The checks the container *cannot* run need
+`pct`; the page hands over the `adr-doctor --fix <CTID>` command rather than
+guessing.
+
+The same page checks GitHub for a newer commit and applies it with one button,
+streaming the log. The app runs unprivileged with `NoNewPrivileges=yes` and
+cannot install its own update, which is deliberate: it *requests* one by
+touching a flag file, and `adr-update.path` starts the root-side
+`adr-update.service`. Repository and branch live in that unit, never in the HTTP
+request, so an unauthenticated caller on the LAN can only ask for the update the
+machine's owner already configured — not point it somewhere else.
+
+The installed commit is recorded in `/opt/adr/.commit`. An install made before
+1.0 has no such file; the page says "cannot tell" rather than offering a phantom
+update on every load.
+
 ### Other
 
 - `update.sh` no longer recursively chowns `$INSTALL_DIR`, which on a pre-1.0

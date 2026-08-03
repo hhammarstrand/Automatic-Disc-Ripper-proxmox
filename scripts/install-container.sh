@@ -128,8 +128,12 @@ else
     git clone --depth 1 --branch "$ADR_BRANCH" "$clone_url" "$tmp/src" >/dev/null
     mkdir -p "$INSTALL_DIR"
     cp -a "$tmp/src/." "$INSTALL_DIR/"
+    # Record which commit this is BEFORE .git goes away. What lands in
+    # $INSTALL_DIR is a working tree, not a checkout, so this file is the only
+    # thing that can answer "am I up to date?" later.
+    git -C "$tmp/src" rev-parse HEAD > "$INSTALL_DIR/.commit" 2>/dev/null || true
     rm -rf "$tmp" "$INSTALL_DIR/.git"
-    msg_ok "Source cloned into $INSTALL_DIR"
+    msg_ok "Source cloned into $INSTALL_DIR ($(cut -c1-8 "$INSTALL_DIR/.commit" 2>/dev/null || echo unknown))"
 fi
 
 mkdir -p "$INSTALL_DIR/raw" "$INSTALL_DIR/completed" "$INSTALL_DIR/watch" "$INSTALL_DIR/config"
@@ -240,9 +244,21 @@ if [[ -n "${ADR_CTID:-}" ]]; then
     echo "ADR_CTID=${ADR_CTID}" >> /etc/default/adr
 fi
 install -m 0644 "$INSTALL_DIR/systemd/adr.service" /etc/systemd/system/adr.service
+
+# In-app updates. The web UI runs unprivileged and cannot escalate; it touches a
+# flag file and this path unit starts the (root) update service. That keeps
+# "can request an update" and "can run code as root" as separate capabilities.
+install -m 0644 "$INSTALL_DIR/systemd/adr-update.service" /etc/systemd/system/adr-update.service
+install -m 0644 "$INSTALL_DIR/systemd/adr-update.path" /etc/systemd/system/adr-update.path
+
 systemctl daemon-reload
 systemctl enable --now adr.service >/dev/null 2>&1 || systemctl enable --now adr.service
-msg_ok "Service enabled"
+if systemctl enable --now adr-update.path >/dev/null 2>&1; then
+    msg_ok "Service enabled (in-app updates available)"
+else
+    msg_warn "Service enabled, but adr-update.path could not be started —"
+    msg_warn "updates will need to be run from the host with update.sh."
+fi
 
 # ----------------------------------------------------------------------------- #
 # Health check

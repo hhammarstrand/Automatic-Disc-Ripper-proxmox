@@ -23,6 +23,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **No compilation:** MakeMKV from the `heyarje/makemkv-beta` PPA, HandBrakeCLI from Ubuntu universe.
 - **Automatic MakeMKV key:** fetches the current free beta key, or accepts your own.
 - **Web dashboard** (port 8080) with live progress, job history, a Storage page for NAS setup, settings, and in-browser playback.
+- **Doctor page** that self-diagnoses drives, tools, keys and storage — and updates the app from GitHub with one button.
 - **Multi-drive** support and a **watch folder** for batch encoding of existing video files.
 - **Install via Claude for Chrome** — paste one prompt and it does the whole thing for you.
 
@@ -414,14 +415,36 @@ bash scripts/uninstall.sh <CTID>                # destroy the whole container (h
 
 ### Updating
 
-`update.sh` re-fetches the source, reinstalls dependencies, reinstalls the unit
-if it changed, and restarts — then waits for the web UI to answer before
-reporting success. Your `config/adr.yaml`, database, and everything in
-`raw/`, `completed/` and `watch/` are preserved.
+**From the web UI:** the **Doctor** page checks GitHub for a newer commit and
+applies it with one button, streaming the log as it goes. The service restarts
+itself at the end and the page reconnects.
+
+How that works is worth a paragraph, because a web page that can install code as
+root would be a much bigger thing than a web page that can rip a disc. The app
+runs unprivileged with `NoNewPrivileges=yes` and cannot escalate. It *requests*
+the update by touching a flag file; `adr-update.path` notices and starts
+`adr-update.service`, which runs `update.sh` as root. Repository and branch live
+in that unit, never in the HTTP request — so the endpoint cannot be talked into
+fetching code from somewhere else. The most an unauthenticated caller on your
+LAN can do is ask for the update you already configured.
+
+Running it as a separate unit also matters mechanically: `update.sh` stops and
+starts `adr.service`, so an update spawned as a child of the web app would kill
+itself halfway through.
+
+**From the host**, unchanged: `update.sh` re-fetches the source, reinstalls
+dependencies, reinstalls any unit that changed, and restarts — then waits for
+the web UI to answer before reporting success. Your `config/adr.yaml`, database,
+and everything in `raw/`, `completed/` and `watch/` are preserved.
 
 ```bash
 pct exec <CTID> -- /opt/adr/scripts/update.sh
 ```
+
+The installed commit is recorded in `/opt/adr/.commit` (the install is a working
+tree with no `.git`, so nothing else could answer "am I up to date?"). An
+install made before 1.0 has no such file; the Doctor page says "cannot tell"
+rather than offering a phantom update, and the next update writes it.
 
 For a **private** repo, pass the token through:
 
@@ -461,10 +484,29 @@ Insert a disc and watch `journalctl -u adr -f` log `Disc inserted in /dev/sr0`.
 
 ## Troubleshooting
 
-### `adr-doctor` — start here
+### The Doctor page — start here
 
-Most problems with this setup are invisible from inside the container, because
-what is broken is the *host's* view of it. Run this on the **Proxmox host**:
+Open **Doctor** in the web UI. It runs everything the container can check about
+itself and says what to do about each failure:
+
+| Check | Catches |
+|---|---|
+| Optical drives | Passthrough that did not apply, or a cgroup denying the device |
+| MakeMKV and HandBrake | A half-finished install where ripping or encoding cannot work |
+| MakeMKV key | The registration key that MakeMKV refuses to open a disc without |
+| Destination | The path films actually land in — missing, read-only, unmounted, or full |
+| Local scratch space | A container disk too small for a dual-layer DVD plus its encode |
+| Job database | An unwritable database, where nothing gets recorded |
+
+A count of failures rides along in the navbar on every page, so a problem finds
+you before the failed rip does.
+
+### `adr-doctor` — for what the container cannot see
+
+The device cgroup, the passthrough entries and guest-autostart ordering live in
+`/etc/pve/lxc/<CTID>.conf`. The container cannot read or change them — that is
+what container isolation is for — so the Doctor page hands over this command
+instead of guessing. Run it on the **Proxmox host**:
 
 ```bash
 adr-doctor <CTID>          # report only, changes nothing
@@ -541,10 +583,11 @@ ruff check .       # lint
 ### Project structure
 
 ```
-adr/        Core package (config, disc, ripper, encoder, identify, pipeline, watcher, makemkv_key)
-web/        Flask app (dashboard, history, storage, settings), templates, static assets
+adr/        Core package (config, disc, ripper, encoder, identify, pipeline, watcher,
+            makemkv_key, storage, diagnostics, updater)
+web/        Flask app (dashboard, history, storage, doctor, settings), templates, static assets
 scripts/    install.sh (host), install-container.sh, setup-nas.sh, adr-doctor.sh, update.sh, uninstall.sh
-systemd/    adr.service unit
+systemd/    adr.service, adr-update.service, adr-update.path
 config/     adr.yaml.example
 presets/    HandBrake JSON presets
 tests/      pytest suite
