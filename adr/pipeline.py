@@ -26,16 +26,17 @@ from adr.encoder import HandBrakeEncoder
 from adr.identify import identify_disc
 from adr.joblog import JobLog
 from adr.models import Job, JobStatus, Track, TrackStatus, get_session, init_db
+from adr.naming import plan_output, relative_folder
 from adr.notify import Notifier
 from adr.plex import PlexNotifier
 from adr.ripper import MakeMKVRipper
+from adr.series import looks_like_series, parse_series_label
 from adr.storage import check_destination, should_stage
 from adr.utils import (
     BYTES_PER_MB,
     make_plex_folder_name,
     normalize_drive,
     parse_duration,
-    sanitize_filename,
     unique_output_dir,
     utcnow,
 )
@@ -104,6 +105,15 @@ class ProcessRegistry:
 process_registry = ProcessRegistry()
 
 
+class _SeriesDisc(Exception):
+    """Internal: the disc holds episodes, so skip main-feature selection.
+
+    Control flow rather than an error — main-feature selection is a block of
+    nested logic and this is the clearest way out of it without restructuring
+    the whole method.
+    """
+
+
 def rename_job_output(job, session) -> None:
     """Rename output folder and MP4 files to Plex-style name.
 
@@ -111,6 +121,12 @@ def rename_job_output(job, session) -> None:
     an already-completed job from the web UI.
     """
     if not job.title:
+        return
+
+    # A series folder is Show/Season NN and its files are S02E05, none of which
+    # this flat rename understands. Renaming a season into a film folder is far
+    # worse than leaving the name TMDb already produced.
+    if (job.content_type or "movie") == "series":
         return
 
     new_plex_name = make_plex_folder_name(job.title, job.year)
@@ -193,6 +209,14 @@ def final_destination(job, config) -> tuple[Path, bool]:
     and if the two paths are on different mounts, a second full copy. The
     finished folder goes straight where it is going to live.
     """
+    # Plex keeps films and shows in separate libraries with different naming
+    # rules; a season folder in the movie library is not something Plex can
+    # make sense of, so a series never goes to plex_path.
+    if (job.content_type or "movie") == "series":
+        if config.tv_path:
+            return Path(config.tv_path), True
+        return Path(config.completed_path), False
+
     if config.plex_path and job.move_to_plex:
         return Path(config.plex_path), True
     return Path(config.completed_path), False
@@ -217,10 +241,14 @@ def transfer_to_destination(job, session, final_parent: Path) -> bool:
         job.error_message = f"Encoded files not found in staging ({src})."
         return False
 
-    dest = final_parent / src.name
+    # A series occupies two components below the root (Show/Season NN); taking
+    # only src.name would drop the show folder and scatter seasons across the
+    # library root.
+    relative = relative_folder(src, job)
+    dest = final_parent / relative
     if dest.exists():
         counter = 2
-        while (candidate := dest.parent / f"{src.name} ({counter})").exists():
+        while (candidate := dest.parent / f"{dest.name} ({counter})").exists():
             counter += 1
         dest = candidate
 
@@ -258,7 +286,8 @@ def move_to_plex(job, session, config) -> bool:
 
     Returns True if the move succeeded, False otherwise.
     """
-    if not config.plex_path:
+    library = config.tv_path if (job.content_type or "movie") == "series" else config.plex_path
+    if not library:
         return False
     if not job.move_to_plex:
         return False
@@ -272,19 +301,19 @@ def move_to_plex(job, session, config) -> bool:
 
     # Normally the transfer already delivered the folder here — see
     # final_destination(). Nothing to move, just record where it is.
-    if src.parent == Path(config.plex_path):
+    if src.parent == Path(library) or str(src).startswith(str(Path(library)) + "/"):
         if job.plex_path != str(src):
             job.plex_path = str(src)
             session.commit()
         return True
 
-    dest = Path(config.plex_path) / src.name
+    dest = Path(library) / relative_folder(src, job)
 
     # Handle collision — append (2), (3), etc.
     if dest.exists():
         counter = 2
         while True:
-            candidate = dest.parent / f"{src.name} ({counter})"
+            candidate = dest.parent / f"{dest.name} ({counter})"
             if not candidate.exists():
                 dest = candidate
                 break
@@ -779,6 +808,33 @@ class DrivePipeline:
                                 len(scan_titles),
                                 {idx: (t.get("duration", "?"), t.get("size", "?"))
                                  for idx, t in scan_titles.items()})
+                    # Before picking a "main feature", ask whether the disc
+                    # even has one. Six titles of 42 minutes is a box set, and
+                    # ripping only the longest would silently discard five
+                    # episodes. Detection only annotates — the user confirms,
+                    # because calling a film a series renames it into a season
+                    # folder and that is annoying to undo.
+                    verdict = looks_like_series(scan_titles)
+                    if verdict["is_series"]:
+                        job.content_type = "series"
+                        guess = parse_series_label(job.disc_label or "")
+                        job.series_season = guess["season"] or 1
+                        job.series_first_episode = 1
+                        session.commit()
+                        logger.info(
+                            "Job %s looks like a TV disc: %s", job.id, verdict["reason"],
+                        )
+                        job_log_early = JobLog(self._config, job.id)
+                        job_log_early.append("detect", verdict["reason"])
+                        job_log_early.append(
+                            "detect",
+                            f"Assuming season {job.series_season} starting at episode 1. "
+                            "Change it in the web UI before encoding starts.",
+                        )
+                        # Every episode is wanted, not just the longest.
+                        selected_title_index = None
+                        raise _SeriesDisc
+
                     if scan_titles:
                         # Parse durations and pick longest; break ties by size_bytes then lowest index
                         def _sort_key(item):
@@ -799,6 +855,8 @@ class DrivePipeline:
                         )
                     else:
                         logger.warning("Disc scan returned no titles — falling back to rip all")
+                except _SeriesDisc:
+                    logger.info("Ripping every episode from the TV disc in drive %s", self.drive)
                 except (subprocess.SubprocessError, OSError):
                     logger.warning("Main feature scan failed — falling back to rip all", exc_info=True)
             else:
@@ -907,21 +965,24 @@ class DrivePipeline:
             else:
                 logger.info("Auto-eject disabled for drive %s — skipping", self.drive)
 
-            # 5. Create track records and queue encoding
-            # Plex naming format: "Title (Year)/Title (Year).mp4"
-            # Same format as Radarr / *arr suite output.
+            # 5. Create track records and queue encoding.
+            # Naming lives in adr.naming: with television in the picture the
+            # decision has real branches, and inline branching in the middle of
+            # this method is where naming bugs live.
             if tmdb_confident:
-                plex_title = sanitize_filename(job.title or "Unknown")
-                plex_year = job.year
+                fallback_title, fallback_year = "", None
             else:
                 from adr.utils import parse_disc_label
-                parsed_label, parsed_yr = parse_disc_label(volume_name or "")
-                plex_title = sanitize_filename(parsed_label)
-                plex_year = parsed_yr
-                logger.info("Using disc label for Plex folder: %s (%s)", plex_title, plex_year)
+                fallback_title, fallback_year = parse_disc_label(volume_name or "")
+                logger.info("Using disc label for output name: %s (%s)", fallback_title, fallback_year)
 
-            # Build Plex-style folder and filename
-            plex_folder_name = make_plex_folder_name(plex_title, plex_year)
+            plan = plan_output(job, len(rip_result.mkv_files), fallback_title, fallback_year)
+            plex_folder_name = plan.folder
+            job_log.append(
+                "encode",
+                f"Output: {plan.folder} ({'series' if plan.is_series else 'film'}, "
+                f"{len(plan.filenames)} file(s))",
+            )
 
             # Encode to local disk when the destination is network storage, so
             # HandBrake is not writing over the network for the whole encode —
@@ -964,11 +1025,10 @@ class DrivePipeline:
                 session.add(track)
                 session.commit()
 
-                # Plex filename: "Title (Year).mp4" or "Title (Year) - pt2.mp4" for multi-track
-                out_name = (
-                    plex_folder_name if len(rip_result.mkv_files) == 1
-                    else f"{plex_folder_name} - pt{idx + 1}"
-                )
+                out_name = plan.filenames[idx] if idx < len(plan.filenames) else f"{plex_folder_name} - pt{idx + 1}"
+                if plan.episodes and idx < len(plan.episodes):
+                    track.episode_number = plan.episodes[idx]
+                    session.commit()
 
                 self._encode_queue.put(EncodeTask(
                     job_id=job.id,

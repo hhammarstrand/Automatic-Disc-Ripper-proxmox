@@ -249,3 +249,90 @@ def _search_tmdb(query: str, year: int | None, api_key: str) -> MovieInfo | None
         overview=overview,
         confidence=confidence,
     )
+
+
+# ------------------------------------------------------------------ #
+# Television
+#
+# TMDb keeps films and shows in separate namespaces with different field
+# names — 'name'/'first_air_date' rather than 'title'/'release_date' — so a
+# TV lookup cannot reuse the movie path, and using the movie endpoint for a
+# show returns confident nonsense.
+# ------------------------------------------------------------------ #
+
+TMDB_TV_SEARCH_URL = "https://api.themoviedb.org/3/search/tv"
+TMDB_TV_DETAIL_URL = "https://api.themoviedb.org/3/tv"  # append /{tmdb_id}
+
+
+def search_series(query: str, api_key: str, limit: int = 8) -> list[dict[str, Any]]:
+    """Search TMDb for shows matching *query*.
+
+    Returns a list rather than a single best guess: naming a whole season from
+    the wrong show is a worse outcome than one wrong film, so the user picks.
+    """
+    if not api_key or not (query or "").strip():
+        return []
+
+    try:
+        resp = requests.get(
+            TMDB_TV_SEARCH_URL,
+            params={
+                "api_key": api_key,
+                "query": query.strip(),
+                "include_adult": "false",
+                "language": "en-US",
+            },
+            timeout=10,
+        )
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+    except (requests.RequestException, ValueError, KeyError):
+        logger.warning("TMDb TV search failed for %r", query, exc_info=True)
+        return []
+
+    shows = []
+    for result in results[:limit]:
+        first_air = result.get("first_air_date") or ""
+        shows.append({
+            "tmdb_id": result.get("id"),
+            "name": result.get("name") or result.get("original_name") or "",
+            "year": int(first_air[:4]) if first_air[:4].isdigit() else None,
+            "overview": (result.get("overview") or "")[:300],
+            "poster_url": (
+                f"{TMDB_IMAGE_BASE}{result['poster_path']}"
+                if result.get("poster_path") else None
+            ),
+        })
+    return [s for s in shows if s["name"]]
+
+
+def get_season_episodes(tmdb_id: int, season: int, api_key: str) -> list[dict[str, Any]]:
+    """Episode list for one season, so the UI can show real titles.
+
+    Best-effort: without it the user still gets correctly numbered files, which
+    is all Plex needs. Titles just make the mapping checkable by eye, which is
+    how an off-by-one gets caught before forty minutes of encoding.
+    """
+    if not api_key or not tmdb_id:
+        return []
+    try:
+        resp = requests.get(
+            f"{TMDB_TV_DETAIL_URL}/{int(tmdb_id)}/season/{int(season)}",
+            params={"api_key": api_key, "language": "en-US"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        episodes = resp.json().get("episodes", [])
+    except (requests.RequestException, ValueError, KeyError):
+        logger.debug("TMDb season lookup failed for %s S%s", tmdb_id, season, exc_info=True)
+        return []
+
+    return [
+        {
+            "episode_number": ep.get("episode_number"),
+            "name": ep.get("name") or "",
+            "air_date": ep.get("air_date") or "",
+        }
+        for ep in episodes
+        if ep.get("episode_number") is not None
+    ]

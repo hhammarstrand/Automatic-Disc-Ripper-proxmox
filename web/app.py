@@ -432,6 +432,81 @@ def _register_api_routes(app: Flask) -> None:
         finally:
             session.close()
 
+    @app.route("/api/jobs/<int:job_id>/content-type", methods=["POST"])
+    def api_job_content_type(job_id: int):
+        """Mark a job as a film or a series, with the season and first episode.
+
+        Only meaningful before the tracks are queued for encoding; afterwards
+        the filenames are already decided. Rejected rather than silently
+        ignored in that case, because a setting that appears to take and does
+        nothing is worse than an error.
+        """
+        from adr.series import episode_numbers
+
+        data = request.get_json() or {}
+        content_type = str(data.get("content_type", "")).strip().lower()
+        if content_type not in ("movie", "series"):
+            return jsonify({"error": "content_type must be 'movie' or 'series'"}), 400
+
+        session = get_session()
+        try:
+            job = session.get(Job, job_id)
+            if not job:
+                return jsonify({"error": "Job not found"}), 404
+            if job.status in (JobStatus.ENCODING, JobStatus.DONE):
+                return jsonify({
+                    "error": "Encoding has already started, so the filenames are set. "
+                             "Cancel and retry the job to change this.",
+                }), 409
+
+            job.content_type = content_type
+            if content_type == "series":
+                try:
+                    job.series_season = max(0, int(data.get("season", 1)))
+                    job.series_first_episode = max(1, int(data.get("first_episode", 1)))
+                except (TypeError, ValueError):
+                    return jsonify({"error": "season and first_episode must be numbers"}), 400
+            else:
+                job.series_season = None
+                job.series_first_episode = None
+            session.commit()
+
+            preview = []
+            if content_type == "series":
+                from adr.naming import plan_output
+                count = max(1, len(job.tracks))
+                preview = plan_output(job, count).filenames
+                episode_numbers(count, job.series_first_episode or 1)
+
+            return jsonify({
+                "ok": True,
+                "content_type": job.content_type,
+                "season": job.series_season,
+                "first_episode": job.series_first_episode,
+                "preview": preview,
+            })
+        except SQLAlchemyError as exc:
+            session.rollback()
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @app.route("/api/tmdb/search-tv")
+    def api_tmdb_search_tv():
+        """Search TMDb for a show, so the user picks rather than the app guessing.
+
+        Naming a whole season from the wrong show is a worse outcome than one
+        wrong film, so there is no auto-accept here.
+        """
+        from adr.identify import search_series
+
+        query = request.args.get("query", "").strip()
+        if not query:
+            return jsonify({"error": "query is required"}), 400
+        if not _config.tmdb_api_key:
+            return jsonify({"error": "No TMDb API key configured."}), 400
+        return jsonify({"results": search_series(query, _config.tmdb_api_key)})
+
     @app.route("/api/jobs/<int:job_id>/retry", methods=["GET", "POST"])
     def api_job_retry(job_id: int):
         """Resume a failed job from the furthest point that still has its files.
@@ -1158,7 +1233,7 @@ def _register_api_routes(app: Flask) -> None:
         "handbrake_extra_args", "max_encode_jobs", "drives", "tmdb_api_key",
         "watch_path", "watch_output_path", "watch_interval", "web_host",
         "web_port", "log_level", "disabled_drives", "eject_after_rip",
-        "no_eject_drives", "main_feature_only", "plex_path",
+        "no_eject_drives", "main_feature_only", "plex_path", "tv_path",
         "auto_move_to_plex", "drive_labels",
         "notify_enabled", "notify_provider", "notify_url", "notify_token",
         "notify_events",

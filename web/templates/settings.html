@@ -251,6 +251,16 @@
                 </div>
             </div>
             <div class="mb-3">
+                <label class="form-label">Plex TV library path</label>
+                <input type="text" class="form-control"
+                       name="tv_path" value="{{ config.tv_path }}">
+                <div class="form-text">
+                    Plex keeps films and shows in separate libraries with different
+                    naming rules, so a season folder cannot go in the movie folder.
+                    Leave empty and series land in the completed folder instead.
+                </div>
+            </div>
+            <div class="mb-3">
                 <div class="form-check form-switch">
                     <input class="form-check-input" type="checkbox" id="autoMoveToPlex"
                            name="auto_move_to_plex" {% if config.auto_move_to_plex %}checked{% endif %}>

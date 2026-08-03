@@ -97,6 +97,13 @@ class Job(Base):
     # this never blocks a rip.
     duplicate_of = Column(Integer, nullable=True)
 
+    # Television. A disc is a film unless told otherwise: that is the common
+    # case, and guessing wrong towards "series" would rename a film into a
+    # season folder, which is far more annoying to undo than the reverse.
+    content_type = Column(String(16), nullable=False, default="movie")  # movie | series
+    series_season = Column(Integer, nullable=True)
+    series_first_episode = Column(Integer, nullable=True)
+
     tracks = relationship("Track", back_populates="job", cascade="all, delete-orphan")
 
     # -------------------------------------------------------------- #
@@ -209,6 +216,9 @@ class Track(Base):
     duration_seconds = Column(Integer, nullable=True)
     status = Column(Enum(TrackStatus), nullable=False, default=TrackStatus.PENDING)
     output_path = Column(String(1024), nullable=True)
+    # Which episode this track holds, for a series job. Stored rather than
+    # recomputed so the mapping survives a restart mid-encode.
+    episode_number = Column(Integer, nullable=True)
 
     job = relationship("Job", back_populates="tracks")
 
@@ -222,6 +232,7 @@ class Track(Base):
             "duration_seconds": self.duration_seconds,
             "status": self.status.value if self.status else "unknown",
             "output_path": self.output_path,
+            "episode_number": self.episode_number,
         }
 
     def __repr__(self) -> str:
@@ -275,11 +286,20 @@ def _migrate_db(engine) -> None:
                 ("move_to_plex", "BOOLEAN"),
                 ("plex_path", "VARCHAR(1024)"),
                 ("duplicate_of", "INTEGER"),
+                ("content_type", "VARCHAR(16) DEFAULT 'movie'"),
+                ("series_season", "INTEGER"),
+                ("series_first_episode", "INTEGER"),
             ]
             for col_name, col_type in _new_cols:
                 if col_name not in cols:
                     cur.execute(f"ALTER TABLE jobs ADD COLUMN {col_name} {col_type}")
                     _log.info("Migration: added '%s' column to jobs table", col_name)
+
+            track_cols = {row[1] for row in cur.execute("PRAGMA table_info(tracks)").fetchall()}
+            for col_name, col_type in [("episode_number", "INTEGER")]:
+                if col_name not in track_cols:
+                    cur.execute(f"ALTER TABLE tracks ADD COLUMN {col_name} {col_type}")
+                    _log.info("Migration: added '%s' column to tracks table", col_name)
             raw.commit()
         finally:
             raw.close()

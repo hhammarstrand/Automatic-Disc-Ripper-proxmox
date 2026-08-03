@@ -101,6 +101,35 @@
                                     Drive: {{ job.drive }} &middot; Job #{{ job.id }}
                                     &middot; <i class="bi bi-clock me-1"></i><span class="elapsed-timer" data-start="{{ job.started_at.isoformat() if job.started_at else '' }}">--:--</span>
                                 </small>
+
+                                {% if job.content_type == 'series' %}
+                                <!-- The disc looked like episodes. It is a guess from
+                                     durations, and the numbering is about to be baked
+                                     into filenames, so it is offered for correction
+                                     here rather than announced afterwards. -->
+                                <div class="alert alert-info py-2 px-3 mt-2 mb-0 small">
+                                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                        <span>
+                                            <i class="bi bi-collection-play me-1"></i>
+                                            Detected as a <strong>TV disc</strong> —
+                                            season {{ job.series_season or 1 }},
+                                            from episode {{ job.series_first_episode or 1 }}.
+                                        </span>
+                                        <button class="btn btn-sm btn-outline-light"
+                                                onclick="editSeries({{ job.id }}, {{ job.series_season or 1 }}, {{ job.series_first_episode or 1 }})">
+                                            <i class="bi bi-pencil me-1"></i>Change
+                                        </button>
+                                    </div>
+                                </div>
+                                {% elif job.status and job.status.value in ('identifying', 'ripping', 'ripped') %}
+                                <div class="mt-2">
+                                    <button class="btn btn-sm btn-outline-secondary py-0 px-2"
+                                            onclick="editSeries({{ job.id }}, 1, 1)"
+                                            title="Name the output as episodes instead of a film">
+                                        <i class="bi bi-collection-play me-1"></i>This is a TV disc
+                                    </button>
+                                </div>
+                                {% endif %}
                                 {% if job.status and job.status.value == 'ripped' %}
                                 <!-- Queued for encoding: no progress bar, just a badge -->
                                 <div class="mt-2">

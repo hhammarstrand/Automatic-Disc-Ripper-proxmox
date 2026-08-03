@@ -581,6 +581,45 @@ function showError(jobId, title, errorText) {
 }
 
 // ------------------------------------------------------------------ //
+// Television
+//
+// The season and starting episode get baked into filenames the moment
+// encoding is queued, and an off-by-one silently mislabels a whole season
+// that Plex then displays as the wrong episodes. So this is offered while it
+// is still cheap to change, and refused once it is not.
+// ------------------------------------------------------------------ //
+
+function editSeries(jobId, season, firstEpisode) {
+    const seasonInput = prompt(
+        'Season number (0 for specials):', season);
+    if (seasonInput === null) return;
+    const episodeInput = prompt(
+        'Episode number of the FIRST title on this disc:', firstEpisode);
+    if (episodeInput === null) return;
+
+    fetch('/api/jobs/' + jobId + '/content-type', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            content_type: 'series',
+            season: parseInt(seasonInput, 10),
+            first_episode: parseInt(episodeInput, 10),
+        }),
+    })
+    .then(r => r.json().then(d => ({ok: r.ok, d})))
+    .then(({ok, d}) => {
+        if (!ok) { alert(d.error || 'Could not change this job.'); return; }
+        if (d.preview && d.preview.length) {
+            const shown = d.preview.slice(0, 6).join('\n');
+            const more = d.preview.length > 6 ? `\n… and ${d.preview.length - 6} more` : '';
+            alert('Files will be named:\n\n' + shown + more);
+        }
+        location.reload();
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+// ------------------------------------------------------------------ //
 // Retry
 //
 // A rip is forty minutes and several GB. Most failures happen after the

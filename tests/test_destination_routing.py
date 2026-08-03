@@ -22,6 +22,7 @@ def _config(tmp_path, plex="", **overrides):
     data = {
         "completed_path": tmp_path / "completed",
         "plex_path": str(plex) if plex else "",
+        "tv_path": "",
         "staging_path": tmp_path / "staging",
         "stage_locally": True,
         "require_completed_mount": False,
@@ -58,7 +59,7 @@ def finished_job(tmp_path):
 class TestFinalDestination:
     def test_plex_job_goes_straight_to_the_library(self, tmp_path):
         plex = tmp_path / "plex"
-        job = types.SimpleNamespace(move_to_plex=True)
+        job = types.SimpleNamespace(move_to_plex=True, content_type="movie")
         parent, is_plex = final_destination(job, _config(tmp_path, plex=plex))
 
         assert parent == plex, "completed_path is not a waypoint on the way to Plex"
@@ -66,14 +67,14 @@ class TestFinalDestination:
 
     def test_unflagged_job_uses_completed_path(self, tmp_path):
         plex = tmp_path / "plex"
-        job = types.SimpleNamespace(move_to_plex=False)
+        job = types.SimpleNamespace(move_to_plex=False, content_type="movie")
         parent, is_plex = final_destination(job, _config(tmp_path, plex=plex))
 
         assert parent == tmp_path / "completed"
         assert is_plex is False
 
     def test_no_plex_configured_uses_completed_path(self, tmp_path):
-        job = types.SimpleNamespace(move_to_plex=True)
+        job = types.SimpleNamespace(move_to_plex=True, content_type="movie")
         parent, is_plex = final_destination(job, _config(tmp_path))
 
         assert parent == tmp_path / "completed"

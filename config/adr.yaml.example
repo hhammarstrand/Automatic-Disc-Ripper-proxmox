@@ -36,6 +36,7 @@ require_completed_mount: false
 stage_locally: true
 staging_path: /opt/adr/staging
 tmdb_api_key: ''
+tv_path: ''
 watch_interval: 5
 watch_output_path: ''
 watch_path: ''

@@ -59,6 +59,10 @@ _DEFAULTS: dict[str, Any] = {
     "stage_locally": True,
     "staging_path": "/opt/adr/staging",
     "plex_path": "",
+    # Plex keeps films and shows in separate libraries with different naming
+    # rules, so a series cannot land in the movie folder. Empty means series
+    # go to completed_path like anything else.
+    "tv_path": "",
     "auto_move_to_plex": True,
     "drive_labels": {},
     # Notifications. The pipeline is meant to be unattended, so "it failed
@@ -270,6 +274,11 @@ class Config:
     def plex_path(self) -> str:
         """Path to Plex movie library folder (empty = disabled)."""
         return self._data.get("plex_path", "")
+
+    @property
+    def tv_path(self) -> str:
+        """Plex TV library folder (empty = series go to completed_path)."""
+        return self._data.get("tv_path", "")
 
     @property
     def auto_move_to_plex(self) -> bool:
