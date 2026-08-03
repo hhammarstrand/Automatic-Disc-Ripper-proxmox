@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.2.3
+
+**`update.sh` overwrote itself while running.** Bash reads a script
+incrementally by byte offset; the copy step replaces the whole of `/opt/adr`
+including `update.sh`, so bash carried on reading at its old offset inside a
+different file. The result was a syntax error on an arbitrary line — with the
+service already stopped:
+
+```
+/opt/adr/scripts/update.sh: line 81: syntax error near unexpected token `('
+```
+
+It had survived on luck: as long as the file's length happened not to shift the
+following bytes into something unparseable, nothing went wrong. Any change to
+the script could break the *previous* version's update.
+
+The script now re-executes from a private copy in `/tmp` before doing anything,
+so the bytes bash is reading can never change underneath it.
+
+---
+
 ## 1.2.2
 
 - **A failed update no longer leaves the application stopped.** `update.sh`

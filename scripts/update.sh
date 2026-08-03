@@ -17,6 +17,32 @@
 #
 set -euo pipefail
 
+# --------------------------------------------------------------------------- #
+# Run from a private copy of this file, always.
+#
+# Bash reads a script incrementally, by byte offset. Further down, this script
+# replaces the whole of /opt/adr with a fresh checkout — including this file.
+# The moment that copy lands, bash carries on reading at its old offset inside a
+# *different* file, and the result is a syntax error on an arbitrary line with
+# the service already stopped:
+#
+#     /opt/adr/scripts/update.sh: line 81: syntax error near unexpected token `('
+#
+# Re-executing from a copy in /tmp means the bytes bash is reading can never
+# change underneath it. This has to happen before anything else.
+# --------------------------------------------------------------------------- #
+if [[ "${ADR_UPDATE_REEXEC:-}" != "1" ]]; then
+    _self_copy="$(mktemp /tmp/adr-update-XXXXXX.sh)"
+    cat "$0" > "$_self_copy"
+    chmod 0700 "$_self_copy"
+    export ADR_UPDATE_REEXEC=1
+    export ADR_UPDATE_SELF_COPY="$_self_copy"
+    export ADR_UPDATE_ORIGINAL="$0"
+    exec bash "$_self_copy" "$@"
+fi
+SELF_COPY="${ADR_UPDATE_SELF_COPY:-}"
+SELF_NAME="${ADR_UPDATE_ORIGINAL:-$0}"
+
 INSTALL_DIR="${INSTALL_DIR:-/opt/adr}"
 RUN_USER="${RUN_USER:-adr}"
 ADR_REPO_URL="${ADR_REPO_URL:-https://github.com/hhammarstrand/Automatic-Disc-Ripper-proxmox.git}"
@@ -51,6 +77,7 @@ SERVICE_STOPPED=0
 cleanup() {
     local status=$?
     rm -rf "$TMP"
+    [[ -n "$SELF_COPY" ]] && rm -f "$SELF_COPY"
     if [[ "$SERVICE_STOPPED" -eq 1 && "$status" -ne 0 ]]; then
         echo
         msg_error "The update failed partway through (exit ${status})."
@@ -71,7 +98,7 @@ clone_url="$ADR_REPO_URL"
 
 if ! git clone --depth 1 --branch "$ADR_BRANCH" "$clone_url" "$TMP/src" >/dev/null 2>&1; then
     msg_error "Could not clone ${ADR_REPO_URL}."
-    msg_error "For a private repo re-run with: GITHUB_TOKEN=ghp_xxx $0"
+    msg_error "For a private repo re-run with: GITHUB_TOKEN=ghp_xxx $SELF_NAME"
     exit 1
 fi
 # Record the commit before .git goes away — it is the only thing that can
