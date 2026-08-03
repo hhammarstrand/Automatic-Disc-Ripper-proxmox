@@ -871,6 +871,40 @@ def _register_api_routes(app: Flask) -> None:
 
         return jsonify(diagnose_passthrough())
 
+    @app.route("/api/drives/test", methods=["POST"])
+    def api_drive_test():
+        """Actively poke a drive and report every probe separately.
+
+        The dashboard's passive view answers "is a disc loaded"; this answers
+        "does this drive work", which is a different question and the one people
+        actually have. ``deep`` additionally asks MakeMKV to open the disc —
+        slow, and the only check that exercises the registration key.
+        """
+        from adr import drivetest
+        from adr.disc import _sr_devices
+
+        data = request.get_json() or {}
+        device = str(data.get("device", "")).strip()
+
+        # Only devices this container can actually see. The endpoint takes a
+        # path and opens it, so it must not accept an arbitrary one.
+        if device not in _sr_devices():
+            return jsonify({"error": f"Unknown optical device '{device}'."}), 400
+
+        return jsonify(drivetest.probe_drive(device, deep=bool(data.get("deep"))))
+
+    @app.route("/api/drives/rescan", methods=["POST"])
+    def api_drive_rescan():
+        """Re-detect optical drives now, hot-adding anything new."""
+        from adr import drivetest
+
+        if _pipeline_manager:
+            return jsonify(_pipeline_manager.rescan_drives())
+        result = drivetest.rescan_drives()
+        result["added"] = []
+        result["known"] = result["devices"]
+        return jsonify(result)
+
     @app.route("/api/storage")
     def api_storage():
         """Report the real state of the configured storage paths."""

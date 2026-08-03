@@ -501,6 +501,36 @@ itself and says what to do about each failure:
 A count of failures rides along in the navbar on every page, so a problem finds
 you before the failed rip does.
 
+### Testing a drive
+
+The dashboard tells you whether a disc is loaded. **Doctor → Optical drives**
+tells you whether the drive *works*, by poking it:
+
+| Probe | Answers |
+|---|---|
+| Device node | Did the passthrough apply at all? |
+| Open device | Does the container's device cgroup allow access? |
+| Drive status | What does the drive itself say — empty, tray open, spinning up, disc ready, and what kind of disc? |
+| Generic SCSI (SG_IO) | Can MakeMKV talk to it? This is the interface it rips through |
+| Read from disc | Do reads work, not just `open()`? Reads the ISO 9660/UDF volume descriptor |
+
+They run in that order and stop at the first failure, because everything after
+it is a consequence rather than a separate problem.
+
+The SG_IO probe is the one worth knowing about: a drive can open cleanly, report
+a disc, and still refuse SG_IO — at which point the dashboard looks perfectly
+healthy and every rip fails. Nothing else in the app exercises that path until
+MakeMKV does.
+
+**Test with MakeMKV** goes further and asks MakeMKV to open the disc for real.
+It is the only check that exercises the registration key end to end, and the
+only one slow enough (up to 90 s) to be worth a separate button.
+
+**Scan for drives** re-reads sysfs and hot-adds anything new, rather than
+waiting out the watcher's 30-second cache. If the host has a drive this
+container did not get, it says so and points at the host — scanning cannot fix
+that, because a device node cannot be added to a running container.
+
 ### `adr-doctor` — for what the container cannot see
 
 The device cgroup, the passthrough entries and guest-autostart ordering live in
@@ -584,7 +614,7 @@ ruff check .       # lint
 
 ```
 adr/        Core package (config, disc, ripper, encoder, identify, pipeline, watcher,
-            makemkv_key, storage, diagnostics, updater)
+            makemkv_key, storage, diagnostics, drivetest, updater)
 web/        Flask app (dashboard, history, storage, doctor, settings), templates, static assets
 scripts/    install.sh (host), install-container.sh, setup-nas.sh, adr-doctor.sh, update.sh, uninstall.sh
 systemd/    adr.service, adr-update.service, adr-update.path

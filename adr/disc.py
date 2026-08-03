@@ -366,6 +366,18 @@ class DiscWatcher:
     # Internal
     # -------------------------------------------------------------- #
 
+    def refresh_drives(self) -> list[str]:
+        """Drop the auto-mode cache so the next poll re-reads sysfs.
+
+        Without this, a drive plugged in a moment ago stays invisible for up to
+        30 seconds and nothing says why. The 'Rescan' button in the web UI calls
+        this so the answer it gives is the current one.
+        """
+        self._drives_cache_time = 0.0
+        drives = self._resolve_drives()
+        logger.info("Drive list refreshed on request: %s", drives or "none")
+        return drives
+
     def _resolve_drives(self) -> list[str]:
         """Determine which device paths to monitor (cached 30s in auto mode)."""
         if isinstance(self._drives_config, list):

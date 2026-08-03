@@ -27,6 +27,31 @@
 </div>
 
 <!-- ------------------------------------------------------------------ -->
+<!-- Drive test                                                          -->
+<!-- ------------------------------------------------------------------ -->
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center">
+    <span><i class="bi bi-disc me-1"></i>Optical drives</span>
+    <button class="btn btn-sm btn-outline-secondary" id="rescanBtn" onclick="rescanDrives()">
+      <i class="bi bi-search me-1"></i>Scan for drives
+    </button>
+  </div>
+  <div class="card-body">
+    <p class="small text-secondary">
+      The dashboard tells you whether a disc is loaded. This tells you whether the
+      drive <em>works</em> — it opens the device, asks the drive for its tray status,
+      checks the SCSI interface MakeMKV actually rips through, and reads a sector off
+      the disc. Each step is reported on its own, because a drive that opens but
+      refuses SG_IO looks perfectly healthy right up until a rip fails.
+    </p>
+    <div id="rescanResult" class="small mb-3"></div>
+    <div id="driveList">
+      <span class="spinner-border spinner-border-sm me-2"></span>Looking for drives…
+    </div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------------------ -->
 <!-- Self-checks                                                         -->
 <!-- ------------------------------------------------------------------ -->
 <div class="card mb-4">
@@ -119,6 +144,143 @@ function loadChecks() {
   }).catch(err => {
     document.getElementById('checkList').innerHTML =
       `<li class="list-group-item text-danger small">Could not run checks: ${escapeHtml(err.message)}</li>`;
+  });
+}
+
+// ------------------------------------------------------------------ //
+// Drive test
+// ------------------------------------------------------------------ //
+const STEP_ICON = {
+  ok:   '<i class="bi bi-check-circle-fill text-success"></i>',
+  warn: '<i class="bi bi-exclamation-triangle-fill text-warning"></i>',
+  fail: '<i class="bi bi-x-circle-fill text-danger"></i>',
+  skip: '<i class="bi bi-dash-circle text-secondary"></i>',
+};
+
+function loadDrives() {
+  fetch('/api/drives/health').then(r => r.json()).then(d => {
+    const list = document.getElementById('driveList');
+    if (!d.drives.length) {
+      list.innerHTML = '<div class="text-secondary small">'
+        + 'No optical drive is visible, even on the Proxmox host.</div>';
+      return;
+    }
+    list.innerHTML = d.drives.map(drv => {
+      const id = drv.device.replace(/\W/g, '');
+      const state = drv.openable
+        ? '<span class="badge bg-success">reachable</span>'
+        : (drv.node_present
+            ? '<span class="badge bg-danger">access denied</span>'
+            : '<span class="badge bg-danger">not passed through</span>');
+      return `
+        <div class="border rounded p-3 mb-2">
+          <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+              <code>${escapeHtml(drv.device)}</code> ${state}
+              <div class="small text-secondary">${escapeHtml(drv.model)}${
+                drv.has_media ? ' · disc detected' : ' · tray empty'}</div>
+            </div>
+            <div class="btn-group btn-group-sm">
+              <button class="btn btn-outline-primary" onclick="testDrive('${drv.device}', false, this)">
+                <i class="bi bi-activity me-1"></i>Test
+              </button>
+              <button class="btn btn-outline-secondary" onclick="testDrive('${drv.device}', true, this)"
+                      title="Also asks MakeMKV to open the disc — takes up to 90 seconds">
+                <i class="bi bi-disc me-1"></i>Test with MakeMKV
+              </button>
+            </div>
+          </div>
+          <div id="probe${id}" class="mt-3"></div>
+        </div>`;
+    }).join('');
+  }).catch(err => {
+    document.getElementById('driveList').innerHTML =
+      `<div class="text-danger small">Could not list drives: ${escapeHtml(err.message)}</div>`;
+  });
+}
+
+function testDrive(device, deep, btn) {
+  const box = document.getElementById('probe' + device.replace(/\W/g, ''));
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testing…';
+  box.innerHTML = deep
+    ? '<div class="small text-secondary">Asking MakeMKV to open the disc — this can '
+      + 'take up to 90 seconds while the drive spins up and reads the title map.</div>'
+    : '';
+
+  fetch('/api/drives/test', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({device: device, deep: deep}),
+  }).then(r => r.json()).then(d => {
+    btn.disabled = false;
+    btn.innerHTML = original;
+    if (d.error) {
+      box.innerHTML = `<div class="alert alert-danger small mb-0">${escapeHtml(d.error)}</div>`;
+      return;
+    }
+    box.innerHTML = `
+      <div class="alert ${d.ok ? 'alert-success' : 'alert-danger'} small py-2">
+        ${d.ok ? '<i class="bi bi-check-circle me-1"></i>' : '<i class="bi bi-x-circle me-1"></i>'}
+        ${escapeHtml(d.summary)}
+      </div>
+      <ul class="list-unstyled mb-0 small">
+        ${d.steps.map(s => `
+          <li class="d-flex gap-2 mb-2">
+            <span>${STEP_ICON[s.status] || ''}</span>
+            <span><strong>${escapeHtml(s.name)}</strong><br>
+              <span class="text-secondary">${escapeHtml(s.detail)}</span></span>
+          </li>`).join('')}
+      </ul>`;
+    loadChecks();
+  }).catch(err => {
+    btn.disabled = false;
+    btn.innerHTML = original;
+    box.innerHTML = `<div class="alert alert-danger small mb-0">Test failed: ${escapeHtml(err.message)}</div>`;
+  });
+}
+
+function rescanDrives() {
+  const btn = document.getElementById('rescanBtn');
+  const out = document.getElementById('rescanResult');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Scanning…';
+
+  fetch('/api/drives/rescan', {method: 'POST'}).then(r => r.json()).then(d => {
+    btn.disabled = false;
+    btn.innerHTML = original;
+
+    let html;
+    if (d.added && d.added.length) {
+      html = `<div class="alert alert-success py-2 mb-0"><i class="bi bi-plus-circle me-1"></i>
+                New drive(s) found and now watched: <code>${d.added.map(escapeHtml).join('</code>, <code>')}</code></div>`;
+    } else if (d.count) {
+      html = `<div class="alert alert-secondary py-2 mb-0"><i class="bi bi-info-circle me-1"></i>
+                ${d.count} drive(s) found, nothing new.</div>`;
+    } else {
+      html = '<div class="alert alert-warning py-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>'
+           + 'No optical device is present in this container.</div>';
+    }
+    // A drive the host has but this container did not get is a different
+    // problem from having no drive, and the fix is on the host.
+    if (d.host_only && d.host_only.length) {
+      html += `<div class="alert alert-danger py-2 mb-0 mt-2">
+                 <i class="bi bi-exclamation-octagon me-1"></i>
+                 The host has <code>${d.host_only.map(escapeHtml).join('</code>, <code>')}</code>
+                 but this container did not get ${d.host_only.length > 1 ? 'them' : 'it'}.
+                 Scanning cannot fix that — a device node cannot be added to a running
+                 container. Run <code>adr-doctor --fix {{ ctid or '&lt;CTID&gt;' }}</code> on the host.
+               </div>`;
+    }
+    out.innerHTML = html;
+    loadDrives();
+    loadChecks();
+  }).catch(err => {
+    btn.disabled = false;
+    btn.innerHTML = original;
+    out.innerHTML = `<div class="alert alert-danger py-2 mb-0">Scan failed: ${escapeHtml(err.message)}</div>`;
   });
 }
 
@@ -224,6 +386,7 @@ function pollUpdate() {
 }
 
 document.addEventListener('DOMContentLoaded', () => {
+  loadDrives();
   loadChecks();
   checkUpdate();
 });

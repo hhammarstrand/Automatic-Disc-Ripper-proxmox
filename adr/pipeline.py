@@ -993,6 +993,25 @@ class PipelineManager:
         self.disc_watcher.on_disc_inserted(pipeline.handle_disc_inserted)
         logger.info("Pipeline registered for hot-added drive %s", drive_letter)
 
+    def rescan_drives(self) -> dict:
+        """Re-detect optical drives now, and hot-add any that are new.
+
+        The watcher would find them on its own within a poll cycle, but "press
+        the button and see the answer" is the whole point — a rescan that takes
+        effect in thirty seconds is indistinguishable from one that did nothing.
+        """
+        from adr.drivetest import rescan_drives as _scan
+
+        result = _scan()
+        found = self.disc_watcher.refresh_drives()
+        added = [d for d in found if d not in self.drive_pipelines]
+        for drive in added:
+            self._handle_new_drive(drive)
+
+        result["added"] = added
+        result["known"] = sorted(self.drive_pipelines.keys())
+        return result
+
     def stop(self) -> None:
         """Shut down all background threads gracefully."""
         self.disc_watcher.stop()

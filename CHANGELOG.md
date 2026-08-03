@@ -88,6 +88,29 @@ free space, writability and mount state on the path films actually land in —
 previously it could show a healthy `completed_path` while the library it never
 looked at was full.
 
+### Testing a drive, instead of inferring that it works
+
+Everything in this app observed the drive passively: sysfs says a disc is
+loaded, the node exists, `open()` succeeded. Enough to run on, not enough to
+answer "is my drive working?" — which is the question you have when nothing is
+happening and you cannot tell whose fault it is.
+
+**Doctor → Optical drives** now pokes it: device node → open → drive status
+(tray state and disc type, straight from the drive) → generic SCSI → read a
+sector. Each step is reported separately and the chain stops at the first
+failure, since everything after it is a consequence.
+
+The SG_IO probe is the one that earns its place. A drive can open cleanly,
+report a disc, and still refuse SG_IO — and because MakeMKV is the only thing
+that uses that interface, the dashboard looks healthy right up until every rip
+fails. **Test with MakeMKV** goes further and opens the disc for real, the only
+check that exercises the registration key end to end.
+
+**Scan for drives** re-reads sysfs and hot-adds anything new instead of waiting
+out the watcher's 30-second cache. A drive the host has but the container did
+not get is reported as its own thing, pointing at the host — scanning cannot
+fix it, because a device node cannot be added to a running container.
+
 ### Doctor page, and updating from the browser
 
 **Doctor** in the web UI runs everything the container can check about itself —
