@@ -3,6 +3,24 @@
 # Copy to config/adr.yaml and edit, or edit everything from the web UI under
 # Settings. Every key here is also a default, so anything you delete simply
 # falls back to the value shown.
+
+# --- Audio CDs -------------------------------------------------------------
+# An audio CD has no video titles, so it takes its own path: cdparanoia
+# extracts each track, ffmpeg encodes and tags it, and MusicBrainz supplies the
+# artist, album and track names. music_path empty means completed_path/Music.
+audio_cd_enabled: true
+audio_cd_format: flac          # flac | mp3
+audio_cd_mp3_bitrate: 320k
+cdparanoia_path: /usr/bin/cdparanoia
+ffmpeg_path: /usr/bin/ffmpeg
+music_path: ''
+
+# --- Data discs ------------------------------------------------------------
+# Nothing to transcode, so the disc is kept as a byte-for-byte ISO image.
+# data_disc_path empty means completed_path/ISO.
+data_disc_enabled: true
+data_disc_path: ''
+
 auto_move_to_plex: true
 completed_path: /opt/adr/completed
 disabled_drives: []

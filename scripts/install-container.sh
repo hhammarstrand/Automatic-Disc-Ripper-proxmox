@@ -58,6 +58,17 @@ if ! apt-get install -y -qq handbrake-cli >/dev/null 2>&1; then
 fi
 msg_ok "Base packages installed (HandBrakeCLI: $(HandBrakeCLI --version 2>&1 | head -1 || echo present))"
 
+# cdparanoia and ffmpeg handle audio CDs: cdparanoia re-reads until the samples
+# agree, ffmpeg encodes and tags. Not fatal if they are missing — video discs
+# do not need them, and the Doctor page says so rather than the install dying.
+msg_info "Installing audio CD tools…"
+if apt-get install -y -qq cdparanoia ffmpeg >/dev/null 2>&1; then
+    msg_ok "Audio CD tools installed (cdparanoia, ffmpeg)"
+else
+    msg_warn "Could not install cdparanoia/ffmpeg — audio CDs will not rip."
+    msg_warn "    apt-get install -y cdparanoia ffmpeg"
+fi
+
 # ----------------------------------------------------------------------------- #
 # MakeMKV from the heyarje PPA (no compilation)
 #

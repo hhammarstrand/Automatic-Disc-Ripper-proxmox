@@ -6,6 +6,7 @@ to a shared EncoderWorker pool so ripping can continue on other drives while
 encoding runs.
 """
 
+import contextlib
 import json
 import logging
 import queue
@@ -19,7 +20,8 @@ from typing import Any
 import requests
 from sqlalchemy.exc import OperationalError as SAOperationalError
 
-from adr import duplicates, joblog, seriesmode
+from adr import disctype, duplicates, isobackup, joblog, musicbrainz, seriesmode
+from adr.audiocd import AudioCDRipper
 from adr.config import Config
 from adr.disc import DiscWatcher, eject_drive
 from adr.encoder import HandBrakeEncoder
@@ -103,6 +105,37 @@ class ProcessRegistry:
 
 # Singleton instance shared by ripper, encoder, and cancel API
 process_registry = ProcessRegistry()
+
+
+def _progress_committer(job, session, phase: str, min_interval: float = 2.0):
+    """Return a progress callback that writes to the database, throttled.
+
+    Audio extraction and disc imaging both report progress far more often than
+    a dashboard can use it, and every report is a database write competing with
+    the encoder workers for the same SQLite file. Once every two seconds is
+    smooth to watch and cheap; the final report is always let through so a
+    finished job never sits at 98%.
+    """
+    state = {"fraction": 0.0, "at": 0.0}
+
+    def report(info: dict) -> None:
+        fraction = min(float(info.get("overall", 0.0) or 0.0), 1.0)
+        now = time.time()
+        if fraction < state["fraction"]:
+            return                                   # ignore backwards jumps
+        if fraction < 1.0 and now - state["at"] < min_interval:
+            return
+        state["fraction"], state["at"] = fraction, now
+        detail = {k: v for k, v in info.items() if k != "overall"}
+        try:
+            job.progress_rip = fraction
+            job.progress_info = json.dumps({"phase": phase, **detail})
+            session.commit()
+        except SAOperationalError:
+            with contextlib.suppress(Exception):
+                session.rollback()
+
+    return report
 
 
 class _SeriesDisc(Exception):
@@ -725,6 +758,26 @@ class DrivePipeline:
             session.commit()
             logger.info("Job %s created for drive %s: label=%s", job.id, self.drive, volume_name)
 
+            # 1a. What is actually in the drive?
+            #
+            # Everything below this point assumes a disc with video titles on
+            # it. An audio CD or a data disc has none, and handing one to
+            # MakeMKV produces a failure indistinguishable from a drive that
+            # cannot be reached — which is the worst kind, because it sends
+            # someone off debugging hardware that is fine.
+            disc = disctype.classify(self.drive)
+            if disc.kind != disctype.KIND_VIDEO:
+                job.content_type = disc.kind
+                session.commit()
+                JobLog(self._config, job.id).append("detect", disc.detail)
+                logger.info("Job %s: %s", job.id, disc.detail)
+            if disc.kind == disctype.KIND_AUDIO:
+                self._run_audio_cd(job, session, disc)
+                return
+            if disc.kind == disctype.KIND_DATA:
+                self._run_data_disc(job, session, disc)
+                return
+
             # Series mode overrides everything about what this disc is: the
             # user has said so explicitly, which beats a guess from durations.
             if seriesmode.apply_to(job, self._config):
@@ -1119,6 +1172,185 @@ class DrivePipeline:
         finally:
             self._lock.release()
             session.close()
+
+    # -------------------------------------------------------------- #
+    # Discs that are not video
+    # -------------------------------------------------------------- #
+
+    def _refuse(self, job, session, message: str) -> None:
+        """Close a job we have deliberately decided not to process.
+
+        Cancelled rather than errored: nothing went wrong, the disc simply is
+        not something this installation was asked to handle, and an error would
+        put a red job in the history and fire a failure notification for a
+        setting the user chose on purpose.
+        """
+        job.status = JobStatus.CANCELLED
+        job.error_message = message
+        job.completed_at = utcnow()
+        session.commit()
+        logger.info("Job %s: %s", job.id, message)
+        JobLog(self._config, job.id).append("detect", message)
+        if self._config.should_eject(self.drive):
+            eject_drive(self.drive)
+
+    def _run_audio_cd(self, job, session, disc) -> None:
+        """Rip an audio CD: identify at MusicBrainz, extract, encode, tag."""
+        if not self._config.audio_cd_enabled:
+            self._refuse(job, session, (
+                "This is an audio CD, and audio CD ripping is turned off under "
+                "Settings. The disc was left alone."
+            ))
+            return
+
+        toc = disc.toc
+        if toc is None or not toc.audio_tracks:
+            self._refuse(job, session, (
+                "The disc looked like an audio CD but its table of contents "
+                "could not be read a second time. Try it again."
+            ))
+            return
+
+        log = JobLog(self._config, job.id)
+        album = musicbrainz.lookup(toc)
+        log.append("detect", f"MusicBrainz: {album.display}")
+        if album.identified:
+            job.title = f"{album.artist} — {album.album}" if album.artist else album.album
+            job.year = album.year
+        if not job.disc_label:
+            job.disc_label = album.display
+        job.status = JobStatus.RIPPING
+        session.commit()
+
+        ripper = AudioCDRipper(self._config, process_registry=process_registry)
+        ripper.log_sink = log.sink("rip")
+        try:
+            result = ripper.rip(
+                device=self.drive,
+                job_id=job.id,
+                toc=toc,
+                album=album,
+                output_root=self._config.music_path,
+                progress_callback=_progress_committer(job, session, "ripping"),
+            )
+        finally:
+            ripper.log_sink = None
+
+        if not result.success:
+            job.status = JobStatus.ERROR
+            job.error_message = result.error
+            job.completed_at = utcnow()
+            session.commit()
+            log.append("rip", f"Audio CD failed: {result.error}")
+            logger.error("Audio CD rip failed for job %s: %s", job.id, result.error)
+            Notifier(self._config).job_failed(job)
+            return
+
+        for index, path in enumerate(result.files, start=1):
+            try:
+                size_mb = path.stat().st_size / BYTES_PER_MB
+            except OSError:
+                size_mb = 0.0
+            session.add(Track(
+                job_id=job.id,
+                track_number=index,
+                filename=path.name,
+                size_mb=size_mb,
+                status=TrackStatus.DONE,
+            ))
+        session.commit()
+
+        job.progress_rip = 1.0
+        # There is no encode phase, and a progress bar frozen at 40% for the
+        # rest of time reads as a hung job.
+        job.progress_encode = 1.0
+        job.output_path = str(result.output_dir) if result.output_dir else None
+        job.status = JobStatus.DONE
+        job.rip_completed_at = utcnow()
+        job.completed_at = utcnow()
+        # A CD with one unreadable track still counts as done; the caveat is
+        # recorded so the history says which tracks are missing.
+        job.error_message = result.error
+        session.commit()
+        log.append("done", f"{len(result.files)} track(s) written to {result.output_dir}")
+        logger.info("Job %s: audio CD finished — %d track(s)", job.id, len(result.files))
+
+        if self._config.should_eject(self.drive):
+            eject_drive(self.drive)
+        Notifier(self._config).job_done(job, str(result.output_dir or ""))
+
+    def _run_data_disc(self, job, session, disc) -> None:
+        """Back a data disc up as an ISO image."""
+        if not self._config.data_disc_enabled:
+            self._refuse(job, session, (
+                "This is a data disc, and disc imaging is turned off under "
+                "Settings. The disc was left alone."
+            ))
+            return
+
+        log = JobLog(self._config, job.id)
+        if not job.title:
+            job.title = job.disc_label or "Data disc"
+        job.status = JobStatus.RIPPING
+        session.commit()
+
+        # is_cancelled opens a database session, and the image loop runs sixteen
+        # times a megabyte. Asking every two seconds is responsive enough for a
+        # cancel button and cheap enough to be free.
+        cancel_check = {"at": 0.0, "value": False}
+
+        def cancelled() -> bool:
+            now = time.time()
+            if now - cancel_check["at"] >= 2.0:
+                cancel_check["at"] = now
+                cancel_check["value"] = process_registry.is_cancelled(job.id)
+            return cancel_check["value"]
+
+        result = isobackup.create_image(
+            device=self.drive,
+            destination_dir=self._config.data_disc_path,
+            label=job.disc_label,
+            progress_callback=_progress_committer(job, session, "imaging"),
+            should_cancel=cancelled,
+        )
+
+        session.refresh(job)
+        if job.status == JobStatus.CANCELLED:
+            job.completed_at = utcnow()
+            session.commit()
+            log.append("rip", "Cancelled; the partial image was deleted.")
+            return
+
+        if not result.success:
+            job.status = JobStatus.ERROR
+            job.error_message = result.error
+            job.completed_at = utcnow()
+            session.commit()
+            log.append("rip", f"Imaging failed: {result.error}")
+            logger.error("ISO backup failed for job %s: %s", job.id, result.error)
+            Notifier(self._config).job_failed(job)
+            return
+
+        session.add(Track(
+            job_id=job.id,
+            track_number=1,
+            filename=result.path.name if result.path else "disc.iso",
+            size_mb=result.size_bytes / BYTES_PER_MB,
+            status=TrackStatus.DONE,
+        ))
+        job.progress_rip = 1.0
+        job.progress_encode = 1.0
+        job.output_path = str(result.path) if result.path else None
+        job.status = JobStatus.DONE
+        job.rip_completed_at = utcnow()
+        job.completed_at = utcnow()
+        session.commit()
+        log.append("done", f"Image written to {result.path} ({result.size_bytes / BYTES_PER_MB:.0f} MB)")
+        logger.info("Job %s: disc image finished — %s", job.id, result.path)
+
+        if self._config.should_eject(self.drive):
+            eject_drive(self.drive)
+        Notifier(self._config).job_done(job, str(result.path or ""))
 
 
 # ------------------------------------------------------------------ #

@@ -97,7 +97,8 @@ def plan(job, config) -> dict:
         "resume": RESUME_IMPOSSIBLE,
         "reason": (
             "Neither the encoded files nor the raw MKVs are still on disk, so "
-            "there is nothing to resume from. Put the disc back in to rip it again."
+            "there is nothing to resume from. If the disc is still in the "
+            "drive, press Rip on the dashboard; otherwise put it back in."
         ),
         "files": [],
         "can_retry": False,

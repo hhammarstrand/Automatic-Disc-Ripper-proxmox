@@ -19,6 +19,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 ## Features
 
 - **Zero-touch pipeline:** detect → identify (TMDb) → rip (MakeMKV) → eject → transcode (HandBrake) → Plex-ready output.
+- **Every kind of disc**, not just films: DVDs and Blu-rays transcode, **audio CDs** become tagged FLAC or MP3, **data discs** become ISO images.
 - **One-command install** on the Proxmox host: creates the container, passes the optical drive through, installs everything, starts the service.
 - **No compilation:** MakeMKV from the `heyarje/makemkv-beta` PPA, HandBrakeCLI from Ubuntu universe.
 - **Automatic MakeMKV key:** fetches the current free beta key, or accepts your own.
@@ -204,6 +205,8 @@ UI under **Settings**. Key options:
   ├─ raw/            raw MKVs straight off the disc   (local, deleted after encoding)
   ├─ staging/        HandBrake writes here            (local, always)
   └─ completed/      finished films, when you have no NAS
+       ├─ Music/     albums from audio CDs            (music_path)
+       └─ ISO/       images of data discs             (data_disc_path)
 /mnt/media/          finished films, when you do      (your NAS or host storage)
 ```
 
@@ -221,6 +224,48 @@ directory". Installs made before 1.0 used that layout; `adr-doctor --fix
 Ripping and encoding always happen on the container's own disk. Only the
 finished MP4 crosses the network, as a single sequential transfer — see
 [Local staging](#local-staging) below.
+
+### Discs that are not films
+
+Not everything in an optical drive is a film, and until 1.3 everything was
+handed to MakeMKV anyway. An audio CD came back as "no titles found" — which is
+exactly what an unreachable drive looks like, so the failure sent you off
+debugging hardware that was fine.
+
+Every disc is now classified first, from its table of contents and its ISO 9660
+root directory. Nothing is mounted and no extra privileges are needed.
+
+| What is in the drive | What happens | Where it lands |
+|---|---|---|
+| DVD / Blu-ray | MakeMKV → HandBrake, as before | `completed_path`, `plex_path` or `tv_path` |
+| Audio CD | cdparanoia → ffmpeg, tagged from MusicBrainz | `music_path` (default `completed_path/Music`) |
+| Mixed-mode CD | the audio tracks are ripped, the data track ignored | `music_path` |
+| Data disc | byte-for-byte ISO image | `data_disc_path` (default `completed_path/ISO`) |
+
+A disc that cannot be read at all is still treated as video — that is what the
+application did before any of this existed, so a pure-UDF Blu-ray with no
+ISO 9660 descriptor keeps working exactly as it used to.
+
+**Audio CDs.** cdparanoia does the extraction because CD audio has no error
+correction worth the name: a scratch does not produce a read error, it produces
+a click, and cdparanoia re-reads and overlaps until the samples agree.
+MusicBrainz supplies artist, album, year and track names, looked up by a disc
+ID computed from the track layout. Output is `Artist/Album (Year)/01 - Title.flac`,
+which is what every music server expects. A CD nobody has ever submitted still
+rips — it is filed under its disc ID, which is stable, so the same disc always
+lands in the same folder. One unreadable track costs you that track, not the
+album.
+
+Set the format (FLAC or MP3), the bitrate and the folder under **Settings →
+Audio CDs**, or turn the whole thing off there if you would rather an audio CD
+were left alone.
+
+**Data discs.** Only the recorded part of the disc is read: a drive routinely
+reports more capacity than the disc holds, and reading past the end produces
+I/O errors that look like a failure and are not. The size comes from the ISO
+9660 volume descriptor when there is one. A read error is retried before it is
+believed, and a copy that fails is deleted rather than left behind — a
+half-written ISO that looks complete is worse than no ISO at all.
 
 ### Television discs
 
@@ -784,8 +829,10 @@ ruff check .       # lint
 ### Project structure
 
 ```
-adr/        Core package (config, disc, ripper, encoder, identify, pipeline, watcher,
-            makemkv_key, storage, diagnostics, drivetest, updater)
+adr/        Core package (config, disc, disctype, ripper, encoder, identify, pipeline,
+            watcher, audiocd, musicbrainz, isobackup, series, seriesmode, naming,
+            duplicates, retry, joblog, notify, plex, makemkv_key, storage,
+            diagnostics, drivetest, updater)
 web/        Flask app (dashboard, history, storage, doctor, settings), templates, static assets
 scripts/    install.sh (host), install-container.sh, setup-nas.sh, adr-doctor.sh, update.sh, uninstall.sh
 systemd/    adr.service, adr-update.service, adr-update.path
@@ -796,7 +843,8 @@ tests/      pytest suite
 
 ### Tech stack
 
-Python 3.11+ · Flask · SQLAlchemy + SQLite (WAL) · MakeMKV · HandBrakeCLI · TMDb.
+Python 3.11+ · Flask · SQLAlchemy + SQLite (WAL) · MakeMKV · HandBrakeCLI ·
+cdparanoia · ffmpeg · TMDb · MusicBrainz.
 
 ---
 

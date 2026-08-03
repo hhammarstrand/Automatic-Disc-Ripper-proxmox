@@ -153,6 +153,24 @@ if ! pip_log="$(sudo -u "$RUN_USER" "$INSTALL_DIR/.venv/bin/pip" \
 fi
 msg_ok "Dependencies updated"
 
+# System tools a newer version needs that an older install never had. Audio CD
+# ripping arrived after the first release, so an existing container has neither
+# tool. Missing them is not fatal — video discs are unaffected and the Doctor
+# page names the command — so this never aborts the update.
+missing_tools=()
+for tool in cdparanoia ffmpeg; do
+    command -v "$tool" >/dev/null 2>&1 || missing_tools+=("$tool")
+done
+if [[ ${#missing_tools[@]} -gt 0 ]]; then
+    msg_info "Installing new system tools: ${missing_tools[*]}…"
+    if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "${missing_tools[@]}" >/dev/null 2>&1; then
+        msg_ok "Installed: ${missing_tools[*]}"
+    else
+        msg_warn "Could not install ${missing_tools[*]} — audio CDs will not rip."
+        msg_warn "    apt-get install -y ${missing_tools[*]}"
+    fi
+fi
+
 # Unit files may have changed between versions — and adr-update.* may not exist
 # at all on an install made before in-app updates.
 units_changed=0

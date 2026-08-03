@@ -51,6 +51,19 @@
                     <img src="{{ job.poster_url }}" alt="" style="height:30px;" class="me-2 rounded">
                     {% endif %}
                     {{ job.display_title }}
+                    {% if job.content_type == 'audio_cd' %}
+                    <span class="badge bg-info text-dark ms-1" title="Ripped as an audio CD">
+                        <i class="bi bi-music-note-beamed me-1"></i>Audio CD
+                    </span>
+                    {% elif job.content_type == 'data' %}
+                    <span class="badge bg-secondary ms-1" title="Backed up as an ISO image">
+                        <i class="bi bi-device-hdd me-1"></i>Disc image
+                    </span>
+                    {% elif job.content_type == 'series' %}
+                    <span class="badge bg-primary ms-1" title="Ripped as a TV disc">
+                        <i class="bi bi-collection-play me-1"></i>TV
+                    </span>
+                    {% endif %}
                     {% if job.duplicate_of %}
                     <span class="badge bg-warning text-dark ms-1"
                           title="Already ripped as job #{{ job.duplicate_of }} — see the tool output for which check matched">

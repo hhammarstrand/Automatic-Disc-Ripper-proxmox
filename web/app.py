@@ -194,7 +194,15 @@ def _register_ui_routes(app: Flask) -> None:
                     "model": _drive_models.get(dl, ""),
                     "label": _config.drive_label(dl),
                 })
-        return render_template("settings.html", config=cfg, hidden_drives=hidden_drives, all_drives=all_drives)
+        # music_path and data_disc_path are stored empty and computed from
+        # completed_path. The form needs both: the stored value to edit, and
+        # the computed one as the placeholder saying where things go today.
+        defaults = {
+            "music_path": str(_config.music_path),
+            "data_disc_path": str(_config.data_disc_path),
+        }
+        return render_template("settings.html", config=cfg, hidden_drives=hidden_drives,
+                               all_drives=all_drives, defaults=defaults)
 
     @app.route("/storage")
     def storage_page():
@@ -1298,6 +1306,9 @@ def _register_api_routes(app: Flask) -> None:
         "notify_events",
         "plex_refresh_enabled", "plex_url", "plex_token", "plex_section",
         "require_completed_mount", "stage_locally", "staging_path",
+        "audio_cd_enabled", "audio_cd_format", "audio_cd_mp3_bitrate",
+        "music_path", "cdparanoia_path", "ffmpeg_path",
+        "data_disc_enabled", "data_disc_path",
     })
 
     @app.route("/api/settings", methods=["POST"])
@@ -1338,6 +1349,8 @@ def _register_api_routes(app: Flask) -> None:
                 errors.append("watch_interval must be a number")
         if "log_level" in data and data["log_level"] not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
             errors.append("Invalid log_level")
+        if "audio_cd_format" in data and data["audio_cd_format"] not in ("flac", "mp3"):
+            errors.append("audio_cd_format must be 'flac' or 'mp3'")
         if errors:
             return jsonify({"error": "; ".join(errors)}), 400
 

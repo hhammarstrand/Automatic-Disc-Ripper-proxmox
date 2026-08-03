@@ -458,7 +458,15 @@ function formatProgressDetail(job) {
         return parts.join(' \u00b7 ');
     }
 
-    return '';
+    // Imaging a data disc: the copy has no titles or tracks, only bytes, so
+    // the module writes the whole line and there is nothing to assemble here.
+    if (pi.phase === 'imaging') {
+        return pi.description || '';
+    }
+
+    // An unknown phase still has something to say for itself. A blank line
+    // where progress should be reads as a stalled job.
+    return pi.description || '';
 }
 
 function formatEta(seconds) {

@@ -121,12 +121,36 @@ class TestScratch:
         assert "staging" in check["detail"]
 
 
+class TestAudioTools:
+    def test_a_machine_that_never_sees_a_cd_is_not_broken(self, tmp_path):
+        config = _config(tmp_path, audio_cd_enabled=False)
+        check = diagnostics.check_audio_tools(config)
+        assert check["status"] == "ok"
+        assert "turned off" in check["detail"]
+
+    def test_installed_tools_pass(self, tmp_path):
+        config = _config(tmp_path, audio_cd_enabled=True,
+                         cdparanoia_path="/bin/true", ffmpeg_path="/bin/true")
+        assert diagnostics.check_audio_tools(config)["status"] == "ok"
+
+    def test_missing_tools_warn_rather_than_fail(self, tmp_path):
+        """Video discs still work without them, so this must not read as a
+        broken installation."""
+        config = _config(tmp_path, audio_cd_enabled=True,
+                         cdparanoia_path="/nowhere/cdparanoia", ffmpeg_path="/nowhere/ffmpeg")
+        check = diagnostics.check_audio_tools(config)
+        assert check["status"] == "warn"
+        assert "cdparanoia" in check["detail"]
+        assert "video discs are unaffected" in check["detail"].lower()
+        assert "apt-get install" in check["fix"]
+
+
 class TestRunChecks:
     def test_every_check_is_present(self, tmp_path):
         result = diagnostics.run_checks(_config(tmp_path))
         ids = {c["id"] for c in result["checks"]}
         assert ids == {
-            "drives", "tools", "preset", "makemkv_key",
+            "drives", "tools", "preset", "makemkv_key", "audio_tools",
             "destination", "scratch", "database",
         }
 
@@ -136,7 +160,7 @@ class TestRunChecks:
         monkeypatch.setattr(diagnostics, "check_drives", _boom)
 
         result = diagnostics.run_checks(_config(tmp_path))
-        assert len(result["checks"]) == 7, "a broken drive must not hide a full disk"
+        assert len(result["checks"]) == 8, "a broken drive must not hide a full disk"
         drives = next(c for c in result["checks"] if c["id"] == "drives")
         assert drives["status"] == "warn"
         assert "sysfs went away" in drives["detail"]

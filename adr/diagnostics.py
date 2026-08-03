@@ -62,6 +62,32 @@ def check_tools() -> dict:
     )
 
 
+def check_audio_tools(config) -> dict:
+    """cdparanoia and ffmpeg — needed only for audio CDs.
+
+    A warning rather than a failure, and only when audio CD ripping is switched
+    on: a machine that never sees a CD is not broken for lacking the tools to
+    read one.
+    """
+    from adr.audiocd import missing_tools
+
+    if not getattr(config, "audio_cd_enabled", False):
+        return _check(
+            "audio_tools", "Audio CD tools", "ok",
+            "Audio CD ripping is turned off, so these are not needed.",
+        )
+    missing = missing_tools(config)
+    if not missing:
+        return _check("audio_tools", "Audio CD tools", "ok",
+                      "cdparanoia and ffmpeg are installed.")
+    return _check(
+        "audio_tools", "Audio CD tools", "warn",
+        f"Not found: {', '.join(missing)}. Audio CDs cannot be ripped until "
+        "they are installed; video discs are unaffected.",
+        "pct exec {ctid} -- apt-get install -y cdparanoia ffmpeg",
+    )
+
+
 def check_makemkv_key() -> dict:
     """MakeMKV refuses to read a disc without a registration key."""
     from adr.makemkv_key import read_existing_key
@@ -258,6 +284,7 @@ def run_checks(config) -> dict:
         ("tools", lambda: check_tools()),
         ("preset", lambda: check_preset(config)),
         ("makemkv_key", lambda: check_makemkv_key()),
+        ("audio_tools", lambda: check_audio_tools(config)),
         ("destination", lambda: check_destination_path(config)),
         ("scratch", lambda: check_scratch(config)),
         ("database", lambda: check_database(config)),

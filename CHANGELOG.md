@@ -1,5 +1,51 @@
 # Changelog
 
+## 1.3.0
+
+**Every disc went to MakeMKV, including the ones with no video on them.** An
+audio CD came back as "no titles found". So did a data disc. So does a drive
+the container cannot open — and that is the problem: three unrelated causes
+produced one indistinguishable failure, and the one people acted on was the
+hardware one, which was fine.
+
+A disc is now classified before anything touches it, from its table of contents
+and its ISO 9660 root directory. Nothing is mounted; no extra privileges are
+needed. A disc that cannot be read at all is still treated as video, because
+that is exactly what the application did before this existed — a pure-UDF
+Blu-ray with no ISO 9660 descriptor takes that path and keeps working.
+
+**Audio CDs** are extracted with cdparanoia and encoded to FLAC or MP3 with
+ffmpeg, tagged from MusicBrainz. cdparanoia rather than a plain read because CD
+audio has no error correction worth the name: a scratch does not produce a read
+error, it produces a click, and cdparanoia re-reads until the samples agree.
+The MusicBrainz disc ID is computed here from the track layout rather than
+pulled in as a C dependency — it is a published, fixed algorithm, and it is
+checked against MusicBrainz's own worked example in the tests.
+
+Output is `Artist/Album (Year)/01 - Title.flac`. A CD nobody has submitted
+still rips, filed under its disc ID, which is stable — so the same disc always
+lands in the same folder instead of accumulating "Unknown Album (2), (3), (4)".
+One unreadable track costs that track, not the album.
+
+**Data discs** are kept as byte-for-byte ISO images. Only the recorded area is
+read: a drive routinely claims more capacity than the disc holds, and reading
+past the end produces I/O errors that look like failure and are not. Read
+errors are retried before being believed, and a copy that fails is deleted —
+a half-written ISO that looks complete is worse than none.
+
+Both can be turned off under Settings, in which case the disc is left alone and
+the job is closed as cancelled rather than failed. Nothing went wrong; a red
+job and a failure notification would be lying about a setting you chose.
+
+Also fixed, found while testing the above: killing a timed-out tool killed only
+the process we started. Anything *it* had started kept the output pipe open, so
+the reader thread blocked on a read that would never return and closing the
+pipe waited on that read — which turned the timeout, the mechanism that exists
+to stop us hanging, into a hang. Tools now run in their own process group and
+the whole group is signalled.
+
+---
+
 ## 1.2.6
 
 **A disc that failed had no way to be tried again without ejecting it.**

@@ -114,7 +114,8 @@ class TestPlan:
         result = retry.plan(job, config)
         assert result["can_retry"] is False
         assert result["resume"] == retry.RESUME_IMPOSSIBLE
-        assert "disc back in" in result["reason"]
+        assert "nothing to resume from" in result["reason"]
+        assert "press Rip" in result["reason"]
 
     def test_a_stale_output_path_is_not_believed(self, failed_job, config):
         """The status says one thing; only the filesystem is authoritative."""

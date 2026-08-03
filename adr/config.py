@@ -104,6 +104,21 @@ _DEFAULTS: dict[str, Any] = {
     "plex_url": "",
     "plex_token": "",
     "plex_section": "",
+    # Audio CDs and data discs. Both were previously handed to MakeMKV, which
+    # fails on them in a way indistinguishable from a broken drive. See
+    # adr/disctype.py for how a disc is told apart.
+    "audio_cd_enabled": True,
+    "audio_cd_format": "flac",          # flac | mp3
+    "audio_cd_mp3_bitrate": "320k",
+    # Where albums land. Empty means completed_path/Music — music does not
+    # belong in a film library, so it never defaults to plex_path.
+    "music_path": "",
+    "cdparanoia_path": "/usr/bin/cdparanoia",
+    "ffmpeg_path": "/usr/bin/ffmpeg",
+    # A data disc has nothing to transcode, so the useful thing to do with it
+    # is keep a byte-for-byte image. Empty path means completed_path/ISO.
+    "data_disc_enabled": True,
+    "data_disc_path": "",
 }
 
 
@@ -229,6 +244,48 @@ class Config:
         if env_key:
             return env_key
         return self._data["tmdb_api_key"]
+
+    # -------------------------------------------------------------- #
+    # Audio CDs and data discs
+    # -------------------------------------------------------------- #
+
+    @property
+    def audio_cd_enabled(self) -> bool:
+        return bool(self._data.get("audio_cd_enabled", True))
+
+    @property
+    def audio_cd_format(self) -> str:
+        """Output format for audio CDs: 'flac' or 'mp3'."""
+        value = str(self._data.get("audio_cd_format", "flac")).strip().lower()
+        return value or "flac"
+
+    @property
+    def audio_cd_mp3_bitrate(self) -> str:
+        return str(self._data.get("audio_cd_mp3_bitrate", "320k")).strip() or "320k"
+
+    @property
+    def music_path(self) -> Path:
+        """Where albums land. Defaults to a Music folder beside the films."""
+        value = str(self._data.get("music_path", "") or "").strip()
+        return Path(value) if value else self.completed_path / "Music"
+
+    @property
+    def cdparanoia_path(self) -> str:
+        return self._data.get("cdparanoia_path", "/usr/bin/cdparanoia")
+
+    @property
+    def ffmpeg_path(self) -> str:
+        return self._data.get("ffmpeg_path", "/usr/bin/ffmpeg")
+
+    @property
+    def data_disc_enabled(self) -> bool:
+        return bool(self._data.get("data_disc_enabled", True))
+
+    @property
+    def data_disc_path(self) -> Path:
+        """Where disc images land. Defaults to an ISO folder beside the films."""
+        value = str(self._data.get("data_disc_path", "") or "").strip()
+        return Path(value) if value else self.completed_path / "ISO"
 
     @property
     def watch_path(self) -> str:

@@ -131,6 +131,88 @@
         </div>
     </div>
 
+    <!-- Audio CDs -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-music-note-beamed me-1"></i>Audio CDs</div>
+        <div class="card-body">
+            <p class="small text-secondary">
+                An audio CD has no video titles, so it takes its own path: cdparanoia
+                reads each track, ffmpeg encodes and tags it, and MusicBrainz supplies
+                the artist, album and track names. A CD nobody has submitted still
+                rips — it is filed under its disc ID instead.
+            </p>
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="audioCdEnabled"
+                           name="audio_cd_enabled" {% if config.audio_cd_enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="audioCdEnabled">Rip audio CDs</label>
+                </div>
+                <div class="form-text">Off means an audio CD is left alone rather than ripped.</div>
+            </div>
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Format</label>
+                    <select class="form-select" name="audio_cd_format">
+                        <option value="flac" {% if config.audio_cd_format == 'flac' %}selected{% endif %}>FLAC (lossless)</option>
+                        <option value="mp3" {% if config.audio_cd_format == 'mp3' %}selected{% endif %}>MP3</option>
+                    </select>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">MP3 bitrate</label>
+                    <input type="text" class="form-control" name="audio_cd_mp3_bitrate"
+                           value="{{ config.audio_cd_mp3_bitrate }}">
+                    <div class="form-text">Ignored when the format is FLAC.</div>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Music folder</label>
+                    <input type="text" class="form-control" name="music_path"
+                           value="{{ config.music_path }}"
+                           placeholder="{{ defaults.music_path }}">
+                    <div class="form-text">Empty uses the folder shown.</div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">cdparanoia</label>
+                    <input type="text" class="form-control" name="cdparanoia_path"
+                           value="{{ config.cdparanoia_path }}">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">ffmpeg</label>
+                    <input type="text" class="form-control" name="ffmpeg_path"
+                           value="{{ config.ffmpeg_path }}">
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Data discs -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-device-hdd me-1"></i>Data discs</div>
+        <div class="card-body">
+            <p class="small text-secondary">
+                There is nothing to transcode on a data disc, so the useful thing to
+                do with one is keep it: a byte-for-byte ISO image that outlives the
+                plastic. Only the recorded part of the disc is read, so the image is
+                the size of the data rather than the size the drive claims.
+            </p>
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="dataDiscEnabled"
+                           name="data_disc_enabled" {% if config.data_disc_enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="dataDiscEnabled">Back data discs up as ISO images</label>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Image folder</label>
+                <input type="text" class="form-control" name="data_disc_path"
+                       value="{{ config.data_disc_path }}"
+                       placeholder="{{ defaults.data_disc_path }}">
+                <div class="form-text">Empty uses the folder shown.</div>
+            </div>
+        </div>
+    </div>
+
     <!-- Encoding settings -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-camera-reels me-1"></i>Encoding</div>
@@ -569,6 +651,8 @@ function saveSettings(e) {
     data.series_detection = !!form.querySelector('[name="series_detection"]').checked;
     data.skip_duplicates = !!form.querySelector('[name="skip_duplicates"]').checked;
     data.plex_refresh_enabled = !!form.querySelector('[name="plex_refresh_enabled"]').checked;
+    data.audio_cd_enabled = !!form.querySelector('[name="audio_cd_enabled"]').checked;
+    data.data_disc_enabled = !!form.querySelector('[name="data_disc_enabled"]').checked;
 
     // Event checkboxes are not form fields — they collapse into one list, so
     // that an unchecked box means "do not send" rather than "key missing".
