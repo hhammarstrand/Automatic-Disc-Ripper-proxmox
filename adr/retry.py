@@ -111,9 +111,10 @@ def requeue_encode(job, session, config, encode_queue) -> int:
     attempt's rows carry its error state and output paths, and a retry that
     silently inherits them is hard to reason about afterwards.
     """
+    from adr.naming import plan_output
     from adr.pipeline import EncodeTask, final_destination
     from adr.storage import should_stage
-    from adr.utils import BYTES_PER_MB, make_plex_folder_name, sanitize_filename, unique_output_dir
+    from adr.utils import BYTES_PER_MB, unique_output_dir
 
     raw = _raw_files(job, config)
     if not raw:
@@ -123,17 +124,19 @@ def requeue_encode(job, session, config, encode_queue) -> int:
         session.delete(track)
     session.commit()
 
-    plex_folder_name = make_plex_folder_name(
-        sanitize_filename(job.title or job.disc_label or f"Job {job.id}"), job.year,
-    )
+    # Ask adr.naming rather than building names here. This module predates
+    # television, and rolling its own meant a retried season came back as
+    # 'Show (2002)/Show (2002) - pt1' — wrong folder, wrong names, wrong
+    # library. There is one place that knows what a job's files are called.
+    plan = plan_output(job, len(raw), fallback_title=job.disc_label or f"Job {job.id}")
     dest_parent, _ = final_destination(job, config)
     staging = should_stage(dest_parent, config.stage_locally)
     if staging:
         final_dir = dest_parent
-        output_dir = unique_output_dir(Path(config.staging_path) / plex_folder_name)
+        output_dir = unique_output_dir(Path(config.staging_path) / plan.folder)
     else:
         final_dir = None
-        output_dir = unique_output_dir(dest_parent / plex_folder_name)
+        output_dir = unique_output_dir(dest_parent / plan.folder)
 
     job.output_path = str(output_dir)
     job.status = JobStatus.ENCODING
@@ -153,7 +156,14 @@ def requeue_encode(job, session, config, encode_queue) -> int:
         session.add(track)
         session.commit()
 
-        out_name = plex_folder_name if len(raw) == 1 else f"{plex_folder_name} - pt{index + 1}"
+        if plan.episodes and index < len(plan.episodes):
+            track.episode_number = plan.episodes[index]
+            session.commit()
+
+        out_name = (
+            plan.filenames[index] if index < len(plan.filenames)
+            else f"{plan.folder} - pt{index + 1}"
+        )
         encode_queue.put(EncodeTask(
             job_id=job.id,
             track_id=track.id,

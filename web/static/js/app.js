@@ -589,31 +589,129 @@ function showError(jobId, title, errorText) {
 // is still cheap to change, and refused once it is not.
 // ------------------------------------------------------------------ //
 
-function editSeries(jobId, season, firstEpisode) {
-    const seasonInput = prompt(
-        'Season number (0 for specials):', season);
-    if (seasonInput === null) return;
-    const episodeInput = prompt(
-        'Episode number of the FIRST title on this disc:', firstEpisode);
-    if (episodeInput === null) return;
+function editSeries(jobId, season, firstEpisode, suggestedShow, suggestedYear) {
+    document.getElementById('seriesJobId').value = jobId;
+    document.getElementById('seriesSeason').value = season;
+    document.getElementById('seriesFirstEpisode').value = firstEpisode;
+    document.getElementById('seriesShowResults').innerHTML = '';
+    document.getElementById('seriesShowResults').className = '';
+    document.getElementById('seriesTmdbId').value = '';
+    // Whatever the disc label parsed to, as a starting point. It is a guess
+    // from a film search, which is exactly why the TMDb lookup is offered.
+    document.getElementById('seriesShowName').value = suggestedShow || '';
+    document.getElementById('seriesShowYear').value = suggestedYear || '';
+    previewSeries();
+    new bootstrap.Modal(document.getElementById('seriesModal')).show();
+}
 
+// The show has to be looked up against TMDb's *TV* namespace. Identification
+// runs the movie search, which for a box set returns a confident-looking film
+// — so without this step a season is named after whatever film the disc label
+// happened to resemble.
+function searchSeriesShow() {
+    const query = document.getElementById('seriesShowName').value.trim();
+    const box = document.getElementById('seriesShowResults');
+    if (!query) { box.innerHTML = '<span class="text-warning small">Enter a show name first.</span>'; return; }
+    box.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Searching TMDb…';
+
+    fetch('/api/tmdb/search-tv?query=' + encodeURIComponent(query))
+        .then(r => r.json())
+        .then(d => {
+            if (d.error) { box.innerHTML = `<span class="text-danger small">${escapeHtml(d.error)}</span>`; return; }
+            if (!d.results.length) { box.innerHTML = '<span class="text-secondary small">No shows found.</span>'; return; }
+            box.innerHTML = d.results.map(s => `
+                <button type="button" class="list-group-item list-group-item-action bg-transparent text-start"
+                        onclick="pickSeriesShow(${s.tmdb_id}, ${JSON.stringify(s.name)}, ${s.year || 'null'})">
+                    <strong>${escapeHtml(s.name)}</strong>
+                    <span class="text-secondary">${s.year ? '(' + s.year + ')' : ''}</span>
+                    <div class="small text-secondary">${escapeHtml((s.overview || '').slice(0, 140))}</div>
+                </button>`).join('');
+            box.className = 'list-group';
+        })
+        .catch(err => { box.innerHTML = `<span class="text-danger small">${escapeHtml(err.message)}</span>`; });
+}
+
+function pickSeriesShow(tmdbId, name, year) {
+    document.getElementById('seriesTmdbId').value = tmdbId;
+    document.getElementById('seriesShowName').value = name;
+    document.getElementById('seriesShowYear').value = year || '';
+    document.getElementById('seriesShowResults').innerHTML =
+        `<div class="small text-success"><i class="bi bi-check-circle me-1"></i>Using
+         <strong>${escapeHtml(name)}</strong>${year ? ' (' + year + ')' : ''}</div>`;
+    document.getElementById('seriesShowResults').className = '';
+    previewSeries();
+}
+
+function previewSeries() {
+    const box = document.getElementById('seriesPreview');
+    const show = document.getElementById('seriesShowName').value.trim();
+    const yearRaw = document.getElementById('seriesShowYear').value.trim();
+    const season = parseInt(document.getElementById('seriesSeason').value, 10);
+    const first = parseInt(document.getElementById('seriesFirstEpisode').value, 10);
+    if (!show || isNaN(season) || isNaN(first)) { box.innerHTML = ''; return; }
+
+    const pad = n => String(n).padStart(2, '0');
+    const folder = show + (yearRaw ? ` (${yearRaw})` : '');
+    const render = titles => {
+        const lines = [0, 1, 2].map(i => {
+            const ep = first + i;
+            const name = titles[ep] ? `   ← ${titles[ep]}` : '';
+            return `${folder}/Season ${pad(season)}/${folder} - S${pad(season)}E${pad(ep)}.mp4${name}`;
+        });
+        box.innerHTML = '<div class="small text-secondary">Files will be named:</div>'
+            + '<pre class="small mb-0">' + escapeHtml(lines.join('\n')) + '\n…</pre>';
+    };
+    render({});
+
+    // Real episode titles turn "is E05 the right starting point?" from a guess
+    // into something checkable by eye. Best-effort — plain numbers are all Plex
+    // needs, so a lookup failure changes nothing.
+    const tmdbId = document.getElementById('seriesTmdbId').value;
+    if (!tmdbId) return;
+    fetch(`/api/tmdb/season?tmdb_id=${tmdbId}&season=${season}`)
+        .then(r => r.json())
+        .then(d => {
+            if (!d.episodes || !d.episodes.length) return;
+            const titles = {};
+            d.episodes.forEach(e => { titles[e.episode_number] = e.name; });
+            render(titles);
+        })
+        .catch(() => {});
+}
+
+function saveSeries() {
+    const jobId = document.getElementById('seriesJobId').value;
+    const payload = {
+        content_type: 'series',
+        season: parseInt(document.getElementById('seriesSeason').value, 10),
+        first_episode: parseInt(document.getElementById('seriesFirstEpisode').value, 10),
+        show: document.getElementById('seriesShowName').value.trim(),
+        year: parseInt(document.getElementById('seriesShowYear').value, 10) || null,
+        tmdb_id: parseInt(document.getElementById('seriesTmdbId').value, 10) || null,
+    };
     fetch('/api/jobs/' + jobId + '/content-type', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({
-            content_type: 'series',
-            season: parseInt(seasonInput, 10),
-            first_episode: parseInt(episodeInput, 10),
-        }),
+        body: JSON.stringify(payload),
     })
     .then(r => r.json().then(d => ({ok: r.ok, d})))
     .then(({ok, d}) => {
         if (!ok) { alert(d.error || 'Could not change this job.'); return; }
-        if (d.preview && d.preview.length) {
-            const shown = d.preview.slice(0, 6).join('\n');
-            const more = d.preview.length > 6 ? `\n… and ${d.preview.length - 6} more` : '';
-            alert('Files will be named:\n\n' + shown + more);
-        }
+        location.reload();
+    })
+    .catch(err => alert('Error: ' + err.message));
+}
+
+function markAsMovie(jobId) {
+    if (!confirm('Treat this disc as a film again? Files will be named "Title (Year)".')) return;
+    fetch('/api/jobs/' + jobId + '/content-type', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({content_type: 'movie'}),
+    })
+    .then(r => r.json().then(d => ({ok: r.ok, d})))
+    .then(({ok, d}) => {
+        if (!ok) { alert(d.error || 'Could not change this job.'); return; }
         location.reload();
     })
     .catch(err => alert('Error: ' + err.message));

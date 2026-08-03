@@ -142,7 +142,7 @@ def probe_drive(device: str, deep: bool = False) -> dict:
 
         # 4. The interface MakeMKV actually uses.
         if fd is not None:
-            steps.append(_check_sg(fd))
+            steps.append(_check_sg(fd, device))
         else:
             steps.append(_step(
                 "Generic SCSI (SG_IO)", "skip",
@@ -168,18 +168,23 @@ def probe_drive(device: str, deep: bool = False) -> dict:
                 os.close(fd)
 
 
-def _check_sg(fd: int) -> dict:
+def _check_sg(fd: int, device: str = "") -> dict:
     """Ask for the SG interface version — cheap, and MakeMKV depends on it."""
     buf = array.array("i", [0])
     try:
         fcntl.ioctl(fd, SG_GET_VERSION_NUM, buf, True)
     except OSError as exc:
+        # Name the actual node rather than "the drive's /dev/sg node": it is
+        # resolved from sysfs, and it is what has to appear in the container
+        # config.
+        node = sg_node_for(device) if device else None
+        which = f"'{node}'" if node else "the drive's /dev/sg node"
         return _step(
             "Generic SCSI (SG_IO)", "fail",
             f"The SCSI generic interface is not available ({_errno_name(exc)}). "
             "MakeMKV drives the disc through it, so ripping will fail even though "
-            "the drive otherwise looks fine. Check that the container passes "
-            "through the drive's /dev/sg node and allows 'c 21:* rwm'.",
+            f"the drive otherwise looks fine. The container must pass through "
+            f"{which} and allow 'c 21:* rwm'. On the Proxmox host: adr-doctor --fix <CTID>",
         )
     version = buf[0]
     return _step(

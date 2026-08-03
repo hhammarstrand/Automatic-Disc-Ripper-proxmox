@@ -26,6 +26,7 @@ def config(tmp_path):
         completed_path=tmp_path / "completed",
         staging_path=tmp_path / "staging",
         plex_path="",
+        tv_path="",
         auto_move_to_plex=False,
         stage_locally=True,
         require_completed_mount=False,
@@ -229,3 +230,48 @@ class TestRequeueEncode:
         q = queue.Queue()
         assert retry.requeue_encode(job, session, config, q) == 0
         assert q.empty()
+
+
+class TestRetryingASeries:
+    """A series job must not come back as a film.
+
+    retry.py was written before television existed. Re-queuing an encode built
+    its own filenames instead of asking adr.naming, so retrying a failed season
+    would rename 'Show/Season 02/Show - S02E05' into 'Show/Show - pt1' — the
+    files land in the wrong folder, with the wrong names, in the wrong library.
+    """
+
+    def test_the_season_layout_survives_a_retry(self, failed_job, config):
+        session, job = failed_job
+        job.content_type = "series"
+        job.title = "The Wire"
+        job.year = 2002
+        job.series_season = 2
+        job.series_first_episode = 5
+        session.commit()
+        _make_raw(config, job, count=3)
+
+        q = queue.Queue()
+        assert retry.requeue_encode(job, session, config, q) == 3
+
+        tasks = [q.get(), q.get(), q.get()]
+        assert [t.output_filename for t in tasks] == [
+            "The Wire (2002) - S02E05",
+            "The Wire (2002) - S02E06",
+            "The Wire (2002) - S02E07",
+        ]
+        assert str(tasks[0].output_dir).endswith("The Wire (2002)/Season 02")
+
+    def test_episode_numbers_are_recorded_on_the_tracks(self, failed_job, config):
+        session, job = failed_job
+        job.content_type = "series"
+        job.title = "The Wire"
+        job.year = 2002
+        job.series_season = 2
+        job.series_first_episode = 5
+        session.commit()
+        _make_raw(config, job, count=2)
+
+        retry.requeue_encode(job, session, config, queue.Queue())
+        session.refresh(job)
+        assert sorted(t.episode_number for t in job.tracks) == [5, 6]

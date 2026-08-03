@@ -149,3 +149,110 @@ class TestDriveHealth:
         data = _client(_make_config(tmp_path)).get("/api/drives/health").get_json()
         assert data["ok"] is True
         assert data["problems"] == []
+
+
+class TestSeriesIdentification:
+    """Correcting a TV disc that the movie search mis-identified.
+
+    Identification runs TMDb's *movie* endpoint, which for a box set returns a
+    confident-looking film. Naming a whole season after it is silently wrong,
+    so the show is corrected against the TV namespace before encoding.
+    """
+
+    def _job(self, status=None):
+        from adr.models import Job, JobStatus, Track, TrackStatus, get_session, init_db
+        from adr.utils import utcnow
+
+        init_db()
+        session = get_session()
+        job = Job(
+            disc_label="THE_WIRE_S02_D3", title="The Wire (2008 film)", year=2008,
+            drive="/dev/sr0", status=status or JobStatus.RIPPED,
+            started_at=utcnow(), tmdb_id=999, poster_url="http://x/film.jpg",
+        )
+        session.add(job)
+        session.commit()
+        for i in range(3):
+            session.add(Track(job_id=job.id, track_number=i + 1,
+                              filename=f"t{i}.mkv", status=TrackStatus.PENDING))
+        session.commit()
+        job_id = job.id
+        session.close()
+        return job_id
+
+    def test_the_show_replaces_the_film_it_was_mistaken_for(self, tmp_path):
+        from adr.models import Job, get_session
+
+        job_id = self._job()
+        client = _client(_make_config(tmp_path))
+        response = client.post(f"/api/jobs/{job_id}/content-type", json={
+            "content_type": "series", "season": 2, "first_episode": 5,
+            "show": "The Wire", "year": 2002, "tmdb_id": 1438,
+        })
+        assert response.status_code == 200
+
+        session = get_session()
+        job = session.get(Job, job_id)
+        assert job.title == "The Wire"
+        assert job.year == 2002
+        assert job.tmdb_id == 1438
+        assert job.poster_url is None, "the poster was the film's; it no longer applies"
+        session.close()
+
+    def test_the_preview_shows_what_the_files_will_be_called(self, tmp_path):
+        job_id = self._job()
+        data = _client(_make_config(tmp_path)).post(
+            f"/api/jobs/{job_id}/content-type",
+            json={"content_type": "series", "season": 2, "first_episode": 5,
+                  "show": "The Wire", "year": 2002},
+        ).get_json()
+        assert data["preview"] == [
+            "The Wire (2002) - S02E05",
+            "The Wire (2002) - S02E06",
+            "The Wire (2002) - S02E07",
+        ]
+
+    def test_omitting_the_show_leaves_the_existing_title_alone(self, tmp_path):
+        from adr.models import Job, get_session
+
+        job_id = self._job()
+        _client(_make_config(tmp_path)).post(
+            f"/api/jobs/{job_id}/content-type",
+            json={"content_type": "series", "season": 1, "first_episode": 1},
+        )
+        session = get_session()
+        assert session.get(Job, job_id).title == "The Wire (2008 film)"
+        session.close()
+
+    def test_it_is_refused_once_encoding_has_started(self, tmp_path):
+        from adr.models import JobStatus
+
+        job_id = self._job(status=JobStatus.ENCODING)
+        response = _client(_make_config(tmp_path)).post(
+            f"/api/jobs/{job_id}/content-type",
+            json={"content_type": "series", "season": 1, "first_episode": 1},
+        )
+        assert response.status_code == 409
+        assert "already started" in response.get_json()["error"]
+
+    def test_marking_it_back_as_a_film_clears_the_season(self, tmp_path):
+        from adr.models import Job, get_session
+
+        job_id = self._job()
+        client = _client(_make_config(tmp_path))
+        client.post(f"/api/jobs/{job_id}/content-type",
+                    json={"content_type": "series", "season": 2, "first_episode": 5})
+        client.post(f"/api/jobs/{job_id}/content-type", json={"content_type": "movie"})
+
+        session = get_session()
+        job = session.get(Job, job_id)
+        assert job.content_type == "movie"
+        assert job.series_season is None
+        assert job.series_first_episode is None
+        session.close()
+
+    def test_a_nonsense_content_type_is_refused(self, tmp_path):
+        job_id = self._job()
+        response = _client(_make_config(tmp_path)).post(
+            f"/api/jobs/{job_id}/content-type", json={"content_type": "documentary"})
+        assert response.status_code == 400

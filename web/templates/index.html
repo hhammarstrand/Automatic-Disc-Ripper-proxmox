@@ -115,16 +115,23 @@
                                             season {{ job.series_season or 1 }},
                                             from episode {{ job.series_first_episode or 1 }}.
                                         </span>
-                                        <button class="btn btn-sm btn-outline-light"
-                                                onclick="editSeries({{ job.id }}, {{ job.series_season or 1 }}, {{ job.series_first_episode or 1 }})">
-                                            <i class="bi bi-pencil me-1"></i>Change
-                                        </button>
+                                        <span class="d-flex gap-2">
+                                            <button class="btn btn-sm btn-outline-light"
+                                                    onclick="editSeries({{ job.id }}, {{ job.series_season or 1 }}, {{ job.series_first_episode or 1 }}, {{ (job.title or '') | tojson }}, {{ job.year or 'null' }})">
+                                                <i class="bi bi-pencil me-1"></i>Change
+                                            </button>
+                                            <button class="btn btn-sm btn-outline-light"
+                                                    onclick="markAsMovie({{ job.id }})"
+                                                    title="It is actually a film">
+                                                <i class="bi bi-film me-1"></i>Not a series
+                                            </button>
+                                        </span>
                                     </div>
                                 </div>
                                 {% elif job.status and job.status.value in ('identifying', 'ripping', 'ripped') %}
                                 <div class="mt-2">
                                     <button class="btn btn-sm btn-outline-secondary py-0 px-2"
-                                            onclick="editSeries({{ job.id }}, 1, 1)"
+                                            onclick="editSeries({{ job.id }}, 1, 1, {{ (job.title or job.disc_label or '') | tojson }}, {{ job.year or 'null' }})"
                                             title="Name the output as episodes instead of a film">
                                         <i class="bi bi-collection-play me-1"></i>This is a TV disc
                                     </button>

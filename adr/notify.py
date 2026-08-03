@@ -16,9 +16,7 @@ must never hold up a rip or fail a job — the film is on disk either way, and a
 exception here would be a worse outcome than a missed message.
 """
 
-import json
 import logging
-from typing import Any
 from urllib.parse import urlparse
 
 import requests
@@ -204,18 +202,3 @@ class Notifier:
             "Disc inserted",
             f"{label or 'Unlabelled disc'} in {drive}.",
         )
-
-
-def describe_payload(provider: str) -> dict[str, Any]:
-    """An example of what a receiver will get. Shown next to the webhook field.
-
-    Only meaningful for the raw webhook — the others have their own documented
-    shapes and the user is not writing the receiver.
-    """
-    if provider == "webhook":
-        return json.loads(json.dumps({
-            "event": EVENT_JOB_DONE,
-            "title": "Disc ripped",
-            "message": "The Matrix (1999) is ready. Saved to /mnt/media.",
-        }))
-    return {}

@@ -466,6 +466,21 @@ def _register_api_routes(app: Flask) -> None:
                     job.series_first_episode = max(1, int(data.get("first_episode", 1)))
                 except (TypeError, ValueError):
                     return jsonify({"error": "season and first_episode must be numbers"}), 400
+
+                # The show, when the user picked one from the TV search. The
+                # title on the job came from TMDb's *movie* search, which for a
+                # box set returns a confident-looking film — so without this the
+                # season is named after whatever the disc label resembled.
+                show = str(data.get("show", "")).strip()
+                if show:
+                    job.title = show
+                    year = data.get("year")
+                    job.year = int(year) if str(year or "").isdigit() else None
+                    tmdb_id = data.get("tmdb_id")
+                    if str(tmdb_id or "").isdigit():
+                        job.tmdb_id = int(tmdb_id)
+                        # The poster is a film's; it no longer describes this job.
+                        job.poster_url = None
             else:
                 job.series_season = None
                 job.series_first_episode = None
@@ -506,6 +521,25 @@ def _register_api_routes(app: Flask) -> None:
         if not _config.tmdb_api_key:
             return jsonify({"error": "No TMDb API key configured."}), 400
         return jsonify({"results": search_series(query, _config.tmdb_api_key)})
+
+    @app.route("/api/tmdb/season")
+    def api_tmdb_season():
+        """Episode titles for one season of a show.
+
+        Correct numbering is all Plex needs, but real titles are how an
+        off-by-one gets caught by eye — before forty minutes of encoding, not
+        after. Best-effort: a failure here degrades to plain numbers.
+        """
+        from adr.identify import get_season_episodes
+
+        try:
+            tmdb_id = int(request.args.get("tmdb_id", ""))
+            season = int(request.args.get("season", ""))
+        except ValueError:
+            return jsonify({"error": "tmdb_id and season must be numbers"}), 400
+        if not _config.tmdb_api_key:
+            return jsonify({"episodes": []})
+        return jsonify({"episodes": get_season_episodes(tmdb_id, season, _config.tmdb_api_key)})
 
     @app.route("/api/jobs/<int:job_id>/retry", methods=["GET", "POST"])
     def api_job_retry(job_id: int):
