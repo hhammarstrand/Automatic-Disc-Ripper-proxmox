@@ -1,9 +1,8 @@
-# Automatic Disc Ripper — Linux / Proxmox configuration
-# Copy this file to adr.yaml and edit to match your setup.
+# Automatic Disc Ripper — example configuration.
 #
-# TMDb API key: get a free key at https://www.themoviedb.org/settings/api
-# You can also set the ADR_TMDB_API_KEY environment variable instead.
-
+# Copy to config/adr.yaml and edit, or edit everything from the web UI under
+# Settings. Every key here is also a default, so anything you delete simply
+# falls back to the value shown.
 auto_move_to_plex: true
 completed_path: /opt/adr/completed
 disabled_drives: []
@@ -20,8 +19,22 @@ makemkv_path: /usr/bin/makemkvcon
 max_encode_jobs: 1
 min_title_length: 120
 no_eject_drives: []
+notify_enabled: false
+notify_events:
+- job_done
+- job_failed
+notify_provider: ntfy
+notify_token: ''
+notify_url: ''
 plex_path: ''
+plex_refresh_enabled: false
+plex_section: ''
+plex_token: ''
+plex_url: ''
 raw_path: /opt/adr/raw
+require_completed_mount: false
+stage_locally: true
+staging_path: /opt/adr/staging
 tmdb_api_key: ''
 watch_interval: 5
 watch_output_path: ''

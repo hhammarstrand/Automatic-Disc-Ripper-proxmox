@@ -24,6 +24,8 @@ from adr.disc import DiscWatcher, eject_drive
 from adr.encoder import HandBrakeEncoder
 from adr.identify import identify_disc
 from adr.models import Job, JobStatus, Track, TrackStatus, get_session, init_db
+from adr.notify import Notifier
+from adr.plex import PlexNotifier
 from adr.ripper import MakeMKVRipper
 from adr.storage import check_destination, should_stage
 from adr.utils import (
@@ -515,6 +517,7 @@ class EncoderWorker(threading.Thread):
                         job.status = JobStatus.ERROR
                         job.completed_at = utcnow()
                         session.commit()
+                        Notifier(self._config).job_failed(job)
                         return
 
                 # Usually a no-op by now: the transfer above already put the
@@ -525,10 +528,19 @@ class EncoderWorker(threading.Thread):
                 # Clean up raw MKV files / watch folder source
                 self._cleanup_raw(job.id)
                 self._cleanup_watch_source(job, task)
+
+                # The disc is done. Tell whoever walked away, and tell Plex so
+                # the film is visible now rather than after the next scheduled
+                # scan. Both are best-effort: the film is on disk either way.
+                session.commit()
+                Notifier(self._config).job_done(job, job.output_path or "")
+                PlexNotifier(self._config).refresh_for(job.output_path or "")
             elif any_error and all(t.status in (TrackStatus.DONE, TrackStatus.ERROR) for t in job.tracks):
                 job.status = JobStatus.ERROR
                 job.error_message = "One or more tracks failed to encode"
                 job.completed_at = utcnow()
+                session.commit()
+                Notifier(self._config).job_failed(job)
 
             session.commit()
         except Exception:
@@ -595,6 +607,7 @@ class DrivePipeline:
         if normalize_drive(drive) in self._config.disabled_drives:
             logger.info("Drive %s is disabled — ignoring disc event", drive)
             return
+        Notifier(self._config).disc_inserted(drive, volume_name)
         thread = threading.Thread(
             target=self._run_pipeline,
             args=(volume_name,),
@@ -655,6 +668,7 @@ class DrivePipeline:
                 job.completed_at = utcnow()
                 session.commit()
                 logger.error("Job %s aborted before ripping: %s", job.id, dest_err)
+                Notifier(self._config).job_failed(job)
                 return
 
             # 2. Identify disc via TMDb
@@ -798,6 +812,7 @@ class DrivePipeline:
                 job.completed_at = utcnow()
                 session.commit()
                 logger.error("Rip failed for job %s: %s", job.id, rip_result.error)
+                Notifier(self._config).job_failed(job)
                 return
 
             job.progress_rip = 1.0
@@ -898,6 +913,7 @@ class DrivePipeline:
                     job.error_message = f"{exc}\n\n{tb}"
                     job.completed_at = utcnow()
                     session.commit()
+                    Notifier(self._config).job_failed(job)
                 except Exception:
                     session.rollback()
         finally:

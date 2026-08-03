@@ -258,6 +258,121 @@
                 </div>
                 <div class="form-text">Matched movies are automatically moved to the Plex folder when encoding is complete.</div>
             </div>
+
+            <hr>
+
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="plexRefreshEnabled"
+                           name="plex_refresh_enabled" {% if config.plex_refresh_enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="plexRefreshEnabled">Tell Plex to scan when a film lands</label>
+                </div>
+                <div class="form-text">
+                    Without this the film is on disk but invisible in Plex until the next
+                    scheduled scan — which usually reads as the ripper having failed.
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Plex server URL</label>
+                    <input type="text" class="form-control" id="plexUrl"
+                           name="plex_url" value="{{ config.plex_url }}"
+                           placeholder="http://192.168.1.10:32400">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">Plex token</label>
+                    <input type="password" class="form-control" id="plexToken"
+                           name="plex_token" value="{{ config.plex_token }}">
+                    <div class="form-text">
+                        In Plex: open any item → <em>Get Info</em> → <em>View XML</em>, and copy
+                        <code>X-Plex-Token</code> out of the URL.
+                    </div>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Library</label>
+                <div class="input-group">
+                    <select class="form-select" id="plexSection" name="plex_section">
+                        <option value="{{ config.plex_section }}" selected>
+                            {% if config.plex_section %}Section {{ config.plex_section }}{% else %}— not selected —{% endif %}
+                        </option>
+                    </select>
+                    <button class="btn btn-outline-secondary" type="button" onclick="loadPlexSections()">
+                        <i class="bi bi-arrow-repeat me-1"></i>Fetch libraries
+                    </button>
+                    <button class="btn btn-outline-secondary" type="button" onclick="testPlexRefresh()">
+                        <i class="bi bi-play me-1"></i>Scan now
+                    </button>
+                </div>
+                <div class="form-text" id="plexStatus"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notifications -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-bell me-1"></i>Notifications</div>
+        <div class="card-body">
+            <p class="small text-secondary">
+                The pipeline is meant to be unattended. Without this, the only way to find
+                out a rip failed forty minutes ago is to open this page and look.
+            </p>
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="notifyEnabled"
+                           name="notify_enabled" {% if config.notify_enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="notifyEnabled">Send notifications</label>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Service</label>
+                    <select class="form-select" id="notifyProvider" name="notify_provider"
+                            onchange="onNotifyProviderChange()">
+                        {% for p, desc in [
+                            ('ntfy', 'ntfy — push to a phone'),
+                            ('gotify', 'Gotify'),
+                            ('discord', 'Discord webhook'),
+                            ('webhook', 'Generic JSON webhook')] %}
+                        <option value="{{ p }}" {% if config.notify_provider == p %}selected{% endif %}>{{ desc }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="col-md-8 mb-3">
+                    <label class="form-label">URL</label>
+                    <input type="text" class="form-control" id="notifyUrl"
+                           name="notify_url" value="{{ config.notify_url }}">
+                    <div class="form-text" id="notifyUrlHelp"></div>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Token <span class="text-secondary">(optional)</span></label>
+                <input type="password" class="form-control" id="notifyToken"
+                       name="notify_token" value="{{ config.notify_token }}">
+                <div class="form-text">
+                    Gotify calls this the application token; ntfy uses it for protected
+                    topics; the generic webhook sends it as <code>Authorization: Bearer</code>.
+                    Discord needs none — the secret is in the URL.
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Notify me about</label>
+                {% for value, label in [
+                    ('job_done', 'A disc finished'),
+                    ('job_failed', 'A rip failed'),
+                    ('disc_inserted', 'A disc was inserted')] %}
+                <div class="form-check">
+                    <input class="form-check-input notify-event" type="checkbox"
+                           id="ev_{{ value }}" value="{{ value }}"
+                           {% if value in config.notify_events %}checked{% endif %}>
+                    <label class="form-check-label" for="ev_{{ value }}">{{ label }}</label>
+                </div>
+                {% endfor %}
+            </div>
+            <button class="btn btn-outline-secondary btn-sm" type="button" onclick="testNotification()">
+                <i class="bi bi-send me-1"></i>Send a test notification
+            </button>
+            <div class="form-text mt-2" id="notifyStatus"></div>
         </div>
     </div>
 
@@ -369,6 +484,13 @@ function saveSettings(e) {
     // Checkboxes: not in FormData when unchecked, so set explicitly
     data.main_feature_only = !!form.querySelector('[name="main_feature_only"]').checked;
     data.auto_move_to_plex = !!form.querySelector('[name="auto_move_to_plex"]').checked;
+    data.notify_enabled = !!form.querySelector('[name="notify_enabled"]').checked;
+    data.plex_refresh_enabled = !!form.querySelector('[name="plex_refresh_enabled"]').checked;
+
+    // Event checkboxes are not form fields — they collapse into one list, so
+    // that an unchecked box means "do not send" rather than "key missing".
+    data.notify_events = Array.from(document.querySelectorAll('.notify-event:checked'))
+                              .map(el => el.value);
 
     fetch('/api/settings', {
         method: 'POST',
@@ -476,5 +598,96 @@ function unhideDrive(driveLetter) {
     })
     .catch(err => alert('Error: ' + err.message));
 }
+
+// ---- Notifications ----
+const NOTIFY_HELP = {
+  ntfy:    'e.g. <code>https://ntfy.sh/my-secret-topic</code> — pick a topic name nobody else would guess; anyone who knows it can read your notifications.',
+  gotify:  'The Gotify server root, e.g. <code>http://192.168.1.10:8080</code>. The application token goes in the field below.',
+  discord: 'A channel webhook URL from Discord: <em>Channel settings → Integrations → Webhooks</em>. Treat it as a secret.',
+  webhook: 'Any URL that accepts a JSON POST of <code>{event, title, message}</code> — Home Assistant, n8n, a script of your own.',
+};
+
+function onNotifyProviderChange() {
+  const provider = document.getElementById('notifyProvider').value;
+  document.getElementById('notifyUrlHelp').innerHTML = NOTIFY_HELP[provider] || '';
+}
+
+function testNotification() {
+  const status = document.getElementById('notifyStatus');
+  status.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Sending…';
+  // The values on the form, not the saved ones — testing before saving is the
+  // only moment a test is actually useful.
+  fetch('/api/notify/test', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      provider: document.getElementById('notifyProvider').value,
+      url: document.getElementById('notifyUrl').value,
+      token: document.getElementById('notifyToken').value,
+    }),
+  }).then(r => r.json()).then(d => {
+    status.innerHTML = d.ok
+      ? '<span class="text-success"><i class="bi bi-check-circle me-1"></i>' + d.detail
+        + ' Check your device.</span>'
+      : '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>' + d.detail + '</span>';
+  }).catch(err => {
+    status.innerHTML = '<span class="text-danger">Request failed: ' + err.message + '</span>';
+  });
+}
+
+// ---- Plex ----
+function loadPlexSections() {
+  const status = document.getElementById('plexStatus');
+  status.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Asking Plex…';
+  fetch('/api/plex/sections', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      url: document.getElementById('plexUrl').value,
+      token: document.getElementById('plexToken').value,
+    }),
+  }).then(r => r.json()).then(d => {
+    if (!d.ok) {
+      status.innerHTML = '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>' + d.error + '</span>';
+      return;
+    }
+    const select = document.getElementById('plexSection');
+    const current = select.value;
+    select.innerHTML = '';
+    d.sections.forEach(s => {
+      const opt = document.createElement('option');
+      opt.value = s.key;
+      opt.textContent = s.title + ' (' + s.type + ')';
+      if (s.key === current) opt.selected = true;
+      select.appendChild(opt);
+    });
+    status.innerHTML = '<span class="text-success"><i class="bi bi-check-circle me-1"></i>'
+      + d.sections.length + ' librar' + (d.sections.length === 1 ? 'y' : 'ies') + ' found.</span>';
+  }).catch(err => {
+    status.innerHTML = '<span class="text-danger">Request failed: ' + err.message + '</span>';
+  });
+}
+
+function testPlexRefresh() {
+  const status = document.getElementById('plexStatus');
+  status.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Asking Plex to scan…';
+  fetch('/api/plex/refresh', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({
+      url: document.getElementById('plexUrl').value,
+      token: document.getElementById('plexToken').value,
+      section: document.getElementById('plexSection').value,
+    }),
+  }).then(r => r.json()).then(d => {
+    status.innerHTML = d.ok
+      ? '<span class="text-success"><i class="bi bi-check-circle me-1"></i>' + d.detail + '</span>'
+      : '<span class="text-danger"><i class="bi bi-x-circle me-1"></i>' + d.detail + '</span>';
+  }).catch(err => {
+    status.innerHTML = '<span class="text-danger">Request failed: ' + err.message + '</span>';
+  });
+}
+
+onNotifyProviderChange();
 </script>
 {% endblock %}

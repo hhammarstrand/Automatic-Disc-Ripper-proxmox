@@ -61,6 +61,20 @@ _DEFAULTS: dict[str, Any] = {
     "plex_path": "",
     "auto_move_to_plex": True,
     "drive_labels": {},
+    # Notifications. The pipeline is meant to be unattended, so "it failed
+    # forty minutes ago" has to reach the user rather than wait on the
+    # dashboard for them to look.
+    "notify_enabled": False,
+    "notify_provider": "ntfy",      # ntfy | gotify | discord | webhook
+    "notify_url": "",
+    "notify_token": "",
+    "notify_events": ["job_done", "job_failed"],
+    # Ask Plex to scan after a film lands, instead of it staying invisible
+    # until the next scheduled scan.
+    "plex_refresh_enabled": False,
+    "plex_url": "",
+    "plex_token": "",
+    "plex_section": "",
 }
 
 
@@ -271,6 +285,54 @@ class Config:
     def drive_label(self, drive_letter: str) -> str:
         """Return the user-set label for a drive, or empty string."""
         return self.drive_labels.get(normalize_drive(drive_letter), "")
+
+    # ------------------------------------------------------------------ #
+    # Notifications
+    # ------------------------------------------------------------------ #
+
+    @property
+    def notify_enabled(self) -> bool:
+        return bool(self._data.get("notify_enabled", False))
+
+    @property
+    def notify_provider(self) -> str:
+        return str(self._data.get("notify_provider", "ntfy") or "").strip().lower()
+
+    @property
+    def notify_url(self) -> str:
+        return str(self._data.get("notify_url", "") or "").strip()
+
+    @property
+    def notify_token(self) -> str:
+        return str(self._data.get("notify_token", "") or "").strip()
+
+    @property
+    def notify_events(self) -> list[str]:
+        """Which events to send. A malformed value means 'none', not 'all'."""
+        val = self._data.get("notify_events", [])
+        if isinstance(val, str):
+            return [e.strip() for e in val.split(",") if e.strip()]
+        return [str(e) for e in val] if isinstance(val, list) else []
+
+    # ------------------------------------------------------------------ #
+    # Plex library refresh
+    # ------------------------------------------------------------------ #
+
+    @property
+    def plex_refresh_enabled(self) -> bool:
+        return bool(self._data.get("plex_refresh_enabled", False))
+
+    @property
+    def plex_url(self) -> str:
+        return str(self._data.get("plex_url", "") or "").strip()
+
+    @property
+    def plex_token(self) -> str:
+        return str(self._data.get("plex_token", "") or "").strip()
+
+    @property
+    def plex_section(self) -> str:
+        return str(self._data.get("plex_section", "") or "").strip()
 
     def should_eject(self, drive_letter: str) -> bool:
         """Check if a specific drive should auto-eject after ripping."""

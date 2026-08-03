@@ -812,6 +812,57 @@ def _register_api_routes(app: Flask) -> None:
     # ------------------------------------------------------------------ #
 
     # ------------------------------------------------------------------ #
+    # Notifications and Plex
+    # ------------------------------------------------------------------ #
+
+    @app.route("/api/notify/test", methods=["POST"])
+    def api_notify_test():
+        """Send a test notification using the values on the settings form.
+
+        Deliberately uses the posted values rather than the saved config: the
+        point is to find out whether they work *before* saving them, which is
+        the only moment testing is actually useful.
+        """
+        from adr import notify
+
+        data = request.get_json() or {}
+        ok, detail = notify.send(
+            str(data.get("provider", "")),
+            str(data.get("url", "")),
+            "Automatic Disc Ripper",
+            "Test notification — if you can read this, notifications work.",
+            notify.EVENT_TEST,
+            str(data.get("token", "")),
+        )
+        return jsonify({"ok": ok, "detail": detail}), (200 if ok else 400)
+
+    @app.route("/api/plex/sections", methods=["POST"])
+    def api_plex_sections():
+        """List the Plex libraries, so the user picks one instead of guessing a key."""
+        from adr import plex
+
+        data = request.get_json() or {}
+        sections, error = plex.list_sections(
+            str(data.get("url", "")), str(data.get("token", "")),
+        )
+        if error:
+            return jsonify({"ok": False, "error": error}), 400
+        return jsonify({"ok": True, "sections": sections})
+
+    @app.route("/api/plex/refresh", methods=["POST"])
+    def api_plex_refresh():
+        """Trigger a library scan now — also the 'does this work' test button."""
+        from adr import plex
+
+        data = request.get_json() or {}
+        ok, detail = plex.refresh_section(
+            str(data.get("url", "") or _config.plex_url),
+            str(data.get("token", "") or _config.plex_token),
+            str(data.get("section", "") or _config.plex_section),
+        )
+        return jsonify({"ok": ok, "detail": detail}), (200 if ok else 400)
+
+    # ------------------------------------------------------------------ #
     # Doctor / updates
     # ------------------------------------------------------------------ #
 
@@ -1031,6 +1082,10 @@ def _register_api_routes(app: Flask) -> None:
         "web_port", "log_level", "disabled_drives", "eject_after_rip",
         "no_eject_drives", "main_feature_only", "plex_path",
         "auto_move_to_plex", "drive_labels",
+        "notify_enabled", "notify_provider", "notify_url", "notify_token",
+        "notify_events",
+        "plex_refresh_enabled", "plex_url", "plex_token", "plex_section",
+        "require_completed_mount", "stage_locally", "staging_path",
     })
 
     @app.route("/api/settings", methods=["POST"])
