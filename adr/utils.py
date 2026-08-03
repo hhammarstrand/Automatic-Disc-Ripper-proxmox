@@ -149,19 +149,39 @@ def parse_duration(text: str) -> int:
     return 0
 
 
-def unique_output_dir(base_dir: Path | str) -> Path:
-    """Create base_dir; if it already contains .mp4 files, append (2), (3) etc.
+#: Containers a finished job can be in — MP4 from HandBrake, MKV when
+#: transcoding is turned off. Kept here rather than imported from adr.naming
+#: because adr.naming imports this module.
+_FINISHED_SUFFIXES = (".mp4", ".mkv")
 
-    Prevents output collision when two jobs produce the same Plex title.
+
+def _holds_finished_video(directory: Path) -> bool:
+    """True if *directory* already contains a finished file."""
+    try:
+        return any(
+            p.is_file() and p.suffix.lower() in _FINISHED_SUFFIXES
+            for p in directory.iterdir()
+        )
+    except OSError:
+        return False
+
+
+def unique_output_dir(base_dir: Path | str) -> Path:
+    """Create base_dir; if it already holds finished video, append (2), (3) etc.
+
+    Prevents output collision when two jobs produce the same Plex title. Both
+    containers count: with transcoding off the earlier job left MKVs, and
+    looking only for MP4s would write the second film into the first one's
+    folder.
     """
     base_dir = Path(base_dir)
     base_dir.mkdir(parents=True, exist_ok=True)
-    if not list(base_dir.glob("*.mp4")):
+    if not _holds_finished_video(base_dir):
         return base_dir
     for i in range(2, 100):
         candidate = base_dir.parent / f"{base_dir.name} ({i})"
         candidate.mkdir(parents=True, exist_ok=True)
-        if not list(candidate.glob("*.mp4")):
+        if not _holds_finished_video(candidate):
             return candidate
     return base_dir
 

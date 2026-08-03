@@ -21,6 +21,7 @@ import logging
 from pathlib import Path
 
 from adr.models import JobStatus, Track, TrackStatus
+from adr.naming import finished_files
 
 logger = logging.getLogger(__name__)
 
@@ -31,16 +32,15 @@ RESUME_IMPOSSIBLE = "impossible"
 
 
 def _encoded_files(job) -> list[Path]:
-    """Finished MP4s still sitting where the encoder left them."""
+    """Finished videos still sitting where the encoder left them.
+
+    Both containers: with transcoding turned off a finished job holds MKVs,
+    and a retry that only looked for MP4s would call an intact job unsalvageable
+    and send the user to find the disc again.
+    """
     if not job.output_path:
         return []
-    directory = Path(job.output_path)
-    if not directory.is_dir():
-        return []
-    try:
-        return sorted(p for p in directory.glob("*.mp4") if p.is_file())
-    except OSError:
-        return []
+    return finished_files(job.output_path)
 
 
 def _raw_files(job, config) -> list[Path]:
@@ -172,6 +172,7 @@ def requeue_encode(job, session, config, encode_queue) -> int:
             output_dir=output_dir,
             output_filename=out_name,
             final_dir=final_dir,
+            passthrough=not config.transcode_enabled,
         ))
 
     logger.info("Job %s re-queued for encoding (%d file(s))", job.id, len(raw))

@@ -127,6 +127,9 @@ class HandBrakeEncoder:
             out_name = input_path.stem + ".mp4"
 
         output_path = dest_dir / out_name
+        # An output filename can name a subfolder — extras go in "Other/", which
+        # is one of the names Plex recognises. HandBrake will not create it.
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         result.output_path = output_path
 
         # Build command

@@ -1295,7 +1295,8 @@ def _register_api_routes(app: Flask) -> None:
     _ALLOWED_SETTINGS_KEYS = frozenset({
         "makemkv_path", "handbrake_path", "raw_path", "completed_path",
         "min_title_length", "handbrake_preset", "handbrake_preset_file",
-        "handbrake_extra_args", "max_encode_jobs", "drives", "tmdb_api_key",
+        "handbrake_extra_args", "max_encode_jobs", "transcode_enabled",
+        "drives", "tmdb_api_key",
         "watch_path", "watch_output_path", "watch_interval", "web_host",
         "web_port", "log_level", "disabled_drives", "eject_after_rip",
         "no_eject_drives", "main_feature_only", "plex_path", "tv_path",

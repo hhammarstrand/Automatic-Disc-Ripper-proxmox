@@ -37,6 +37,23 @@ Both can be turned off under Settings, in which case the disc is left alone and
 the job is closed as cancelled rather than failed. Nothing went wrong; a red
 job and a failure notification would be lying about a setting you chose.
 
+**Transcoding can be turned off**, under Settings → Encoding. The MKV is kept
+exactly as MakeMKV produced it: lossless, and minutes rather than hours, at
+several times the size. Everything after the encode is unchanged, because the
+task still goes through the same worker — the same folder, the same rename, the
+same transfer, the same notification. Three places assumed the finished file
+was an MP4 and would have reported a folder full of films as empty: renaming,
+retrying, and the collision check that stops two films sharing a folder.
+
+**Extras no longer land on the end of the film.** With main-feature selection
+off, a disc's trailers were named `Film (1999) - pt2` — and Plex *stacks*
+numbered parts, so a two-minute trailer became the back half of the movie. When
+one title is at least 1.5× longer than the next it is the feature, and the rest
+go to `Other/`, one of the eight folder names Plex recognises and the only one
+that does not claim to know what the extra is. Titles of similar length are
+still numbered parts: that is what a two-part film looks like, and calling half
+a film an extra is the worse mistake.
+
 Also fixed, found while testing the above: killing a timed-out tool killed only
 the process we started. Anything *it* had started kept the output pipe open, so
 the reader thread blocked on a read that would never return and closing the

@@ -30,6 +30,7 @@ def config(tmp_path):
         auto_move_to_plex=False,
         stage_locally=True,
         require_completed_mount=False,
+        transcode_enabled=True,
     )
 
 

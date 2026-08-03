@@ -34,6 +34,11 @@ _DEFAULTS: dict[str, Any] = {
     "handbrake_preset_file": "",
     "handbrake_extra_args": "",
     "max_encode_jobs": 1,
+    # Transcoding can be turned off entirely: the MKV MakeMKV produced is kept
+    # as it is. Lossless and minutes instead of hours, at several times the
+    # size. The watch folder is unaffected — transcoding is the whole reason
+    # it exists.
+    "transcode_enabled": True,
     "drives": "auto",
     "tmdb_api_key": "",
     "watch_path": "",
@@ -232,6 +237,11 @@ class Config:
     @property
     def max_encode_jobs(self) -> int:
         return int(self._data["max_encode_jobs"])
+
+    @property
+    def transcode_enabled(self) -> bool:
+        """Whether ripped titles are transcoded, or kept as MKV."""
+        return bool(self._data.get("transcode_enabled", True))
 
     @property
     def drives(self) -> list[str] | str:

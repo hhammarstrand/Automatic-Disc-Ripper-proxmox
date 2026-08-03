@@ -33,6 +33,8 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Duplicate detection** against the library itself, the TMDb id and the disc label — optionally skipping the rip entirely.
 - **Retry** a failed job from whatever is still on disk — a broken NAS should not cost you a 40-minute rip.
 - **Multi-drive** support and a **watch folder** for batch encoding of existing video files.
+- **Transcoding is optional** — keep the lossless MKV straight off the disc instead, if size is cheaper than time.
+- **Extras kept apart** from the film, in a folder Plex actually recognises, so a trailer never becomes the second half of the movie.
 - **Install via Claude for Chrome** — paste one prompt and it does the whole thing for you.
 
 ---
@@ -224,6 +226,30 @@ directory". Installs made before 1.0 used that layout; `adr-doctor --fix
 Ripping and encoding always happen on the container's own disk. Only the
 finished MP4 crosses the network, as a single sequential transfer — see
 [Local staging](#local-staging) below.
+
+### Keeping the MKV instead of transcoding
+
+**Settings → Encoding → Transcode with HandBrake.** Off keeps the file exactly
+as MakeMKV produced it: lossless, and minutes rather than hours, at several
+times the size. Nothing else changes — same folder, same name, same move into
+the library, same notifications. The watch folder still transcodes, since
+transcoding is the only reason it exists.
+
+### Extras
+
+With main-feature selection off, a disc's trailers and featurettes are ripped
+too. They used to be named `Film (1999) - pt2`, `pt3` and so on, and Plex
+*stacks* numbered parts — it treats them as one film split across files, so a
+two-minute trailer became the back half of the movie.
+
+When one title is at least 1.5× longer than the next, it is the feature and the
+rest go to `Film (1999)/Other/Extra 1.mp4`. `Other` is one of the eight folder
+names Plex recognises for local extras, and the only one that does not claim to
+know what the extra *is* — MakeMKV reports a duration and nothing else.
+
+Titles of similar length are left as numbered parts, because that is what a
+genuinely two-part film looks like, and calling half a film an extra is the
+worse of the two mistakes.
 
 ### Discs that are not films
 

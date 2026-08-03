@@ -218,6 +218,20 @@
         <div class="card-header"><i class="bi bi-camera-reels me-1"></i>Encoding</div>
         <div class="card-body">
             <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="transcodeEnabled"
+                           name="transcode_enabled" {% if config.transcode_enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="transcodeEnabled">Transcode with HandBrake</label>
+                </div>
+                <div class="form-text">
+                    Off keeps the MKV exactly as MakeMKV produced it: lossless, and
+                    minutes rather than hours, at several times the size. Everything
+                    else is unchanged — the same folder, the same name, the same move
+                    into the library. The watch folder still transcodes; that is the
+                    only reason it exists.
+                </div>
+            </div>
+            <div class="mb-3">
                 <label class="form-label">HandBrake preset</label>
                 <div class="input-group">
                     <select class="form-select" id="presetSelect" name="handbrake_preset">
@@ -651,6 +665,7 @@ function saveSettings(e) {
     data.series_detection = !!form.querySelector('[name="series_detection"]').checked;
     data.skip_duplicates = !!form.querySelector('[name="skip_duplicates"]').checked;
     data.plex_refresh_enabled = !!form.querySelector('[name="plex_refresh_enabled"]').checked;
+    data.transcode_enabled = !!form.querySelector('[name="transcode_enabled"]').checked;
     data.audio_cd_enabled = !!form.querySelector('[name="audio_cd_enabled"]').checked;
     data.data_disc_enabled = !!form.querySelector('[name="data_disc_enabled"]').checked;
 

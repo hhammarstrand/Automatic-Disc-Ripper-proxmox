@@ -66,6 +66,8 @@ skip_duplicates: false
 stage_locally: true
 staging_path: /opt/adr/staging
 tmdb_api_key: ''
+# Off keeps the MKV as MakeMKV produced it: lossless, fast, several times larger.
+transcode_enabled: true
 tv_path: ''
 watch_interval: 5
 watch_output_path: ''

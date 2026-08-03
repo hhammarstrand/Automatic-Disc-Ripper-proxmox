@@ -28,7 +28,13 @@ from adr.encoder import HandBrakeEncoder
 from adr.identify import identify_disc
 from adr.joblog import JobLog
 from adr.models import Job, JobStatus, Track, TrackStatus, get_session, init_db
-from adr.naming import plan_output, relative_folder
+from adr.naming import (
+    EXTRAS_FOLDER,
+    finished_files,
+    pick_main_feature,
+    plan_output,
+    relative_folder,
+)
 from adr.notify import Notifier
 from adr.plex import PlexNotifier
 from adr.ripper import MakeMKVRipper
@@ -148,7 +154,7 @@ class _SeriesDisc(Exception):
 
 
 def rename_job_output(job, session) -> None:
-    """Rename output folder and MP4 files to Plex-style name.
+    """Rename output folder and finished files to Plex-style name.
 
     Called after encoding finishes (deferred rename) and when re-matching
     an already-completed job from the web UI.
@@ -176,9 +182,12 @@ def rename_job_output(job, session) -> None:
         old_output.rename(new_output)
         job.output_path = str(new_output)
 
-        mp4_files = sorted(new_output.glob("*.mp4"))
-        multi = len(mp4_files) > 1
-        for idx, f in enumerate(mp4_files, start=1):
+        # Both containers: a job with transcoding turned off keeps its MKVs,
+        # and skipping them here would leave the old name inside a folder that
+        # had just been renamed.
+        video_files = finished_files(new_output)
+        multi = len(video_files) > 1
+        for idx, f in enumerate(video_files, start=1):
             if multi:
                 part = f.stem.rsplit(" - pt", 1)[-1] if " - pt" in f.stem else str(idx)
                 new_fname = f"{new_plex_name} - pt{part}{f.suffix}"
@@ -392,6 +401,7 @@ class EncodeTask:
         output_dir: Path,
         output_filename: str,
         final_dir: Path | None = None,
+        passthrough: bool = False,
     ):
         self.job_id = job_id
         self.track_id = track_id
@@ -399,6 +409,11 @@ class EncodeTask:
         self.output_dir = output_dir
         self.output_filename = output_filename
         self.final_dir = final_dir
+        #: Keep the MKV as it came off the disc instead of transcoding it.
+        #: The task still goes through the worker pool, so everything after
+        #: the encode — renaming, the transfer, the Plex move, cleanup and
+        #: notifications — happens exactly as it does for an encoded job.
+        self.passthrough = passthrough
 
 
 # ------------------------------------------------------------------ #
@@ -559,24 +574,39 @@ class EncoderWorker(threading.Thread):
             # Capture HandBrake's own output against this job, so a preset or
             # codec failure is readable from the UI rather than journalctl.
             job_log = JobLog(self._config, task.job_id)
-            job_log.append("encode", f"Encoding {task.input_path.name} -> {task.output_filename}")
-            self._encoder.log_sink = job_log.sink("encode")
-            try:
-                result = self._encoder.encode(
-                    input_path=task.input_path,
-                    output_dir=task.output_dir,
-                    output_filename=task.output_filename,
-                    progress_callback=on_progress,
-                    job_id=task.job_id,
+            if task.passthrough:
+                job_log.append(
+                    "encode",
+                    f"Transcoding is off — keeping {task.input_path.name} as "
+                    f"{task.output_filename}.mkv",
                 )
-            finally:
-                # Workers are shared between jobs; a stale sink would write one
-                # job's output into another job's log.
-                self._encoder.log_sink = None
-            job_log.append(
-                "encode",
-                "Encode finished." if result.success else f"Encode failed: {result.error}",
-            )
+                result = self._passthrough(task)
+                job_log.append(
+                    "encode",
+                    "File kept without transcoding."
+                    if result.success else f"Could not keep the file: {result.error}",
+                )
+            else:
+                job_log.append(
+                    "encode", f"Encoding {task.input_path.name} -> {task.output_filename}",
+                )
+                self._encoder.log_sink = job_log.sink("encode")
+                try:
+                    result = self._encoder.encode(
+                        input_path=task.input_path,
+                        output_dir=task.output_dir,
+                        output_filename=task.output_filename,
+                        progress_callback=on_progress,
+                        job_id=task.job_id,
+                    )
+                finally:
+                    # Workers are shared between jobs; a stale sink would write
+                    # one job's output into another job's log.
+                    self._encoder.log_sink = None
+                job_log.append(
+                    "encode",
+                    "Encode finished." if result.success else f"Encode failed: {result.error}",
+                )
 
             # Check if cancelled during encode
             session.refresh(job)
@@ -659,6 +689,35 @@ class EncoderWorker(threading.Thread):
             logger.exception("Error processing encode task for job %s", task.job_id)
         finally:
             session.close()
+
+    @staticmethod
+    def _passthrough(task: "EncodeTask"):
+        """Move the ripped MKV into place instead of transcoding it.
+
+        A move rather than a copy: the raw file and the finished file are the
+        same bytes, and copying would need twice the disk for no benefit. The
+        cleanup that follows removes an empty raw directory either way.
+
+        Falls back to a copy when the two are on different filesystems, which
+        is what os.rename refuses to do — raw_path and staging_path are both
+        local by design, but nothing stops someone pointing one elsewhere.
+        """
+        from adr.encoder import EncodeResult
+
+        result = EncodeResult()
+        result.input_path = task.input_path
+        destination = task.output_dir / f"{task.output_filename}.mkv"
+        try:
+            task.output_dir.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(task.input_path), str(destination))
+        except (OSError, shutil.Error) as exc:
+            result.error = f"Could not move {task.input_path.name} into place: {exc}"
+            logger.error("Passthrough failed for job %s: %s", task.job_id, exc)
+            return result
+        result.success = True
+        result.output_path = destination
+        logger.info("Job %s: kept %s without transcoding", task.job_id, destination.name)
+        return result
 
     def _cleanup_raw(self, job_id: int) -> None:
         """Remove temporary raw MKV directory for a completed job."""
@@ -1076,8 +1135,32 @@ class DrivePipeline:
                 fallback_title, fallback_year = parse_disc_label(volume_name or "")
                 logger.info("Using disc label for output name: %s (%s)", fallback_title, fallback_year)
 
-            plan = plan_output(job, len(rip_result.mkv_files), fallback_title, fallback_year)
+            # Durations first: they decide whether one of these titles is the
+            # feature and the rest are extras, or whether the disc is a
+            # genuinely multi-part film. Getting that wrong in the extras
+            # direction hides half a film; getting it wrong the other way makes
+            # Plex stack a two-minute trailer onto the end of the movie.
+            durations = []
+            for mkv_file in rip_result.mkv_files:
+                seconds = None
+                for ti_info in rip_result.title_info.values():
+                    if ti_info.get("filename") == mkv_file.name:
+                        seconds = parse_duration(ti_info.get("duration", "0:00:00")) or None
+                        break
+                durations.append(seconds)
+
+            main_index = pick_main_feature(durations)
+            plan = plan_output(
+                job, len(rip_result.mkv_files), fallback_title, fallback_year,
+                main_index=main_index,
+            )
             plex_folder_name = plan.folder
+            if main_index is not None:
+                job_log.append(
+                    "encode",
+                    f"Title {main_index + 1} is the main feature; the other "
+                    f"{len(durations) - 1} go to {EXTRAS_FOLDER}/ as extras.",
+                )
             job_log.append(
                 "encode",
                 f"Output: {plan.folder} ({'series' if plan.is_series else 'film'}, "
@@ -1107,12 +1190,7 @@ class DrivePipeline:
             job.output_path = str(output_dir)
 
             for idx, mkv_file in enumerate(rip_result.mkv_files):
-                # Try to find duration from title_info by matching filename
-                duration_sec = None
-                for ti_info in rip_result.title_info.values():
-                    if ti_info.get("filename") == mkv_file.name:
-                        duration_sec = parse_duration(ti_info.get("duration", "0:00:00")) or None
-                        break
+                duration_sec = durations[idx]
 
                 track = Track(
                     job_id=job.id,
@@ -1137,6 +1215,7 @@ class DrivePipeline:
                     output_dir=output_dir,
                     output_filename=out_name,
                     final_dir=final_dir,
+                    passthrough=not self._config.transcode_enabled,
                 ))
 
             job.status = JobStatus.ENCODING
