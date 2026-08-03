@@ -72,6 +72,16 @@ _DEFAULTS: dict[str, Any] = {
     "series_min_episodes": 3,
     # Turn detection off entirely and treat every disc as a film.
     "series_detection": True,
+    # Series mode: a sticky "every disc is this show" plus an episode counter
+    # that advances between discs, so a box set can be fed in without touching
+    # the UI. See adr/seriesmode.py.
+    "series_mode": False,
+    "series_mode_show": "",
+    "series_mode_year": None,
+    "series_mode_tmdb_id": None,
+    "series_mode_season": 1,
+    "series_mode_next_episode": 1,
+    "series_mode_discs": 0,
     "auto_move_to_plex": True,
     "drive_labels": {},
     # Notifications. The pipeline is meant to be unattended, so "it failed
@@ -288,6 +298,37 @@ class Config:
     def tv_path(self) -> str:
         """Plex TV library folder (empty = series go to completed_path)."""
         return self._data.get("tv_path", "")
+
+    @property
+    def series_mode(self) -> bool:
+        """Whether every inserted disc is this show's episodes."""
+        return bool(self._data.get("series_mode", False))
+
+    @property
+    def series_mode_show(self) -> str:
+        return str(self._data.get("series_mode_show", "") or "").strip()
+
+    @property
+    def series_mode_year(self) -> int | None:
+        val = self._data.get("series_mode_year")
+        return int(val) if val else None
+
+    @property
+    def series_mode_tmdb_id(self) -> int | None:
+        val = self._data.get("series_mode_tmdb_id")
+        return int(val) if val else None
+
+    @property
+    def series_mode_season(self) -> int:
+        return int(self._data.get("series_mode_season", 1) or 1)
+
+    @property
+    def series_mode_next_episode(self) -> int:
+        return int(self._data.get("series_mode_next_episode", 1) or 1)
+
+    @property
+    def series_mode_discs(self) -> int:
+        return int(self._data.get("series_mode_discs", 0) or 0)
 
     @property
     def series_detection(self) -> bool:

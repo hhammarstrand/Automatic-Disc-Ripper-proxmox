@@ -81,6 +81,37 @@
         </div>
     </nav>
 
+    <!-- Series mode banner.
+         A mode that renames every disc it sees has to be visible from wherever
+         the user is looking, not only from the page it was switched on. It
+         stays until switched off — expiring on a timer would be surprising in
+         the worst way: discs 4-6 of a season silently numbered from 1 again. -->
+    {% if series_mode and series_mode.active %}
+    <div class="alert alert-warning rounded-0 mb-0 py-2">
+        <div class="container-fluid d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span>
+                <i class="bi bi-collection-play-fill me-2"></i>
+                <strong>TV series mode</strong> — every disc is named as
+                <strong>{{ series_mode.show }}{% if series_mode.year %} ({{ series_mode.year }}){% endif %}</strong>,
+                season {{ '%02d' | format(series_mode.season) }}.
+                Next disc starts at <strong>episode {{ series_mode.next_episode }}</strong>.
+                {% if series_mode.discs_done %}
+                <span class="text-secondary">({{ series_mode.discs_done }} disc(s) done)</span>
+                {% endif %}
+            </span>
+            <span class="d-flex gap-2">
+                <button class="btn btn-sm btn-outline-dark" onclick="fixNextEpisode({{ series_mode.next_episode }})"
+                        title="A disc with a feature-length extra can push the count too far">
+                    <i class="bi bi-pencil me-1"></i>Fix episode number
+                </button>
+                <button class="btn btn-sm btn-dark" onclick="stopSeriesMode()">
+                    <i class="bi bi-stop-circle me-1"></i>Turn off
+                </button>
+            </span>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Main content -->
     <main class="container-fluid py-4">
         {% block content %}{% endblock %}
@@ -138,6 +169,14 @@
                 <div class="modal-body">
                     <input type="hidden" id="seriesJobId">
                     <input type="hidden" id="seriesTmdbId">
+
+                    <div class="alert alert-warning small d-none" id="seriesModeHint">
+                        <i class="bi bi-collection-play me-1"></i>
+                        Starting <strong>series mode</strong>: every disc inserted from now
+                        on is named as this show, and the episode number carries across
+                        discs — disc 2 continues where disc 1 stopped. It stays on until
+                        you turn it off.
+                    </div>
 
                     <div class="mb-3">
                         <label class="form-label">Show</label>

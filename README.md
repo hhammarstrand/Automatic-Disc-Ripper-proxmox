@@ -25,6 +25,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Web dashboard** (port 8080) with live progress, job history, a Storage page for NAS setup, settings, and in-browser playback.
 - **Doctor page** that self-diagnoses drives, tools, keys and storage — and updates the app from GitHub with one button.
 - **Television discs**: box sets are recognised from title durations and named `Show (Year)/Season 02/Show (Year) - S02E05.mp4`.
+- **Series mode**: set the show once, then feed a whole box set — the episode number carries across discs on its own.
 - **Notifications** to ntfy, Gotify, Discord or a webhook when a disc finishes or fails — the pipeline is unattended, so it tells you.
 - **Plex library refresh** the moment a film lands, instead of waiting for the next scheduled scan.
 - **Per-job logs** in the UI: what MakeMKV and HandBrake actually said, without SSH.
@@ -246,6 +247,40 @@ box set that returns a confident-looking film. Picking the show corrects the
 title, year and poster, and the file names are previewed against the season's
 real episode titles — which is how an off-by-one is caught before forty minutes
 of encoding rather than after.
+
+#### Series mode — working through a box set
+
+Marking one disc as television is a small thing. Doing it for six discs of a
+season — re-entering the show, the season, and the episode each disc starts at —
+is not, and that last number is both easy to get wrong and expensive to get
+wrong: a third of the season silently misnumbered, which Plex will happily
+display as the wrong episodes.
+
+**Rip a TV series** on the dashboard is a sticky answer to those questions plus
+a counter. Set the show and season once, then feed discs:
+
+```
+disc 1 → The Wire (2002)/Season 02/The Wire (2002) - S02E01 … E04
+disc 2 → …                                                   S02E05 … E08
+disc 3 → …                                                   S02E09 … E12
+```
+
+The counter advances by however many titles each disc actually produced, so
+disc 2 starts at 5 because disc 1 yielded four episodes — not because anyone
+said so. If a disc holds a feature-length extra that looked like an episode,
+**Fix episode number** in the banner winds it back without re-ripping anything.
+
+While the mode is on it takes over completely: the film identification is
+skipped (it is a *film* search, and for a box set it returns a confident-looking
+film that would overwrite the show you just named), and main-feature selection
+is skipped so every episode is ripped rather than just the longest.
+
+It does not expire. A mode that switched itself off after some interval would
+be surprising in the worst way — discs 4–6 of a season quietly numbered from 1
+again. It stays until you turn it off, and every page carries a banner saying
+so.
+
+#### Thresholds
 
 The thresholds are settings, not constants: anime runs to 24 minutes, a
 documentary series to 55, and some box set will sit outside any default.

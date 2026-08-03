@@ -600,6 +600,7 @@ function editSeries(jobId, season, firstEpisode, suggestedShow, suggestedYear) {
     // from a film search, which is exactly why the TMDb lookup is offered.
     document.getElementById('seriesShowName').value = suggestedShow || '';
     document.getElementById('seriesShowYear').value = suggestedYear || '';
+    document.getElementById('seriesModeHint').classList.add('d-none');
     previewSeries();
     new bootstrap.Modal(document.getElementById('seriesModal')).show();
 }
@@ -689,6 +690,24 @@ function saveSeries() {
         year: parseInt(document.getElementById('seriesShowYear').value, 10) || null,
         tmdb_id: parseInt(document.getElementById('seriesTmdbId').value, 10) || null,
     };
+
+    // No job id: the modal was opened to start the mode rather than to fix a
+    // single disc.
+    if (!jobId) {
+        if (!payload.show) { alert('Enter the show name first.'); return; }
+        fetch('/api/series-mode', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({active: true, ...payload}),
+        }).then(r => r.json().then(d => ({ok: r.ok, d})))
+          .then(({ok, d}) => {
+              if (!ok) { alert(d.error || 'Could not start series mode.'); return; }
+              location.reload();
+          })
+          .catch(err => alert('Error: ' + err.message));
+        return;
+    }
+
     fetch('/api/jobs/' + jobId + '/content-type', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
@@ -700,6 +719,59 @@ function saveSeries() {
         location.reload();
     })
     .catch(err => alert('Error: ' + err.message));
+}
+
+// ------------------------------------------------------------------ //
+// Series mode
+//
+// The value is not "mark this disc as a series" — it is that the episode
+// counter carries across discs. Otherwise disc 2 of a season means typing the
+// starting episode again, which is the number that is easy to get wrong and
+// expensive to get wrong.
+// ------------------------------------------------------------------ //
+
+function startSeriesMode() {
+    // Reuses the per-job series modal: same three questions, different verb.
+    document.getElementById('seriesJobId').value = '';   // '' means "the mode"
+    document.getElementById('seriesTmdbId').value = '';
+    document.getElementById('seriesShowName').value = '';
+    document.getElementById('seriesShowYear').value = '';
+    document.getElementById('seriesSeason').value = 1;
+    document.getElementById('seriesFirstEpisode').value = 1;
+    document.getElementById('seriesShowResults').innerHTML = '';
+    document.getElementById('seriesShowResults').className = '';
+    document.getElementById('seriesModeHint').classList.remove('d-none');
+    previewSeries();
+    new bootstrap.Modal(document.getElementById('seriesModal')).show();
+}
+
+function stopSeriesMode() {
+    if (!confirm('Turn off TV series mode? Discs will be identified as films again.')) return;
+    fetch('/api/series-mode', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({active: false}),
+    }).then(() => location.reload())
+      .catch(err => alert('Error: ' + err.message));
+}
+
+function fixNextEpisode(current) {
+    const value = prompt(
+        'Episode number the NEXT disc should start at:\n\n'
+        + 'The counter advances by however many titles each disc produced, which '
+        + 'is right until a disc holds a feature-length extra that looked like an '
+        + 'episode.', current);
+    if (value === null) return;
+    fetch('/api/series-mode/next-episode', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({episode: parseInt(value, 10)}),
+    }).then(r => r.json().then(d => ({ok: r.ok, d})))
+      .then(({ok, d}) => {
+          if (!ok) { alert(d.error || 'Could not change the counter.'); return; }
+          location.reload();
+      })
+      .catch(err => alert('Error: ' + err.message));
 }
 
 function markAsMovie(jobId) {

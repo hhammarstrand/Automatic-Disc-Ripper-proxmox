@@ -37,6 +37,13 @@ series_detection: true
 series_max_minutes: 75
 series_min_episodes: 3
 series_min_minutes: 15
+series_mode: false
+series_mode_discs: 0
+series_mode_next_episode: 1
+series_mode_season: 1
+series_mode_show: ''
+series_mode_tmdb_id: null
+series_mode_year: null
 stage_locally: true
 staging_path: /opt/adr/staging
 tmdb_api_key: ''

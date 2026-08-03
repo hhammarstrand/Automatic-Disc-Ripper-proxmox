@@ -79,12 +79,16 @@ def create_app(config: Config, pipeline_manager=None) -> Flask:
     # Make LAN IP available in all templates
     @app.context_processor
     def inject_globals():
-        from adr import __version__
+        from adr import __version__, seriesmode
 
         return {
             "lan_ip": get_lan_ip(),
             "lan_port": _config.web_port if _config else 8080,
             "adr_version": __version__,
+            # A mode that silently renames every disc must be visible from
+            # wherever the user happens to be looking, not only where it was
+            # turned on.
+            "series_mode": seriesmode.state(_config) if _config else {"active": False},
         }
 
     return app
@@ -505,6 +509,56 @@ def _register_api_routes(app: Flask) -> None:
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()
+
+    # ------------------------------------------------------------------ #
+    # Series mode
+    # ------------------------------------------------------------------ #
+
+    @app.route("/api/series-mode", methods=["GET", "POST"])
+    def api_series_mode():
+        """Read or change the sticky "every disc is this show" mode.
+
+        POST with ``active: false`` turns it off; with ``active: true`` it
+        needs a show name, and takes the season and the episode the *next*
+        disc starts at.
+        """
+        from adr import seriesmode
+
+        if request.method == "GET":
+            return jsonify(seriesmode.state(_config))
+
+        data = request.get_json() or {}
+        if not data.get("active"):
+            return jsonify(seriesmode.stop(_config))
+
+        try:
+            result = seriesmode.start(
+                _config,
+                show=str(data.get("show", "")),
+                season=int(data.get("season", 1)),
+                first_episode=int(data.get("first_episode", 1)),
+                year=int(data["year"]) if str(data.get("year") or "").isdigit() else None,
+                tmdb_id=int(data["tmdb_id"]) if str(data.get("tmdb_id") or "").isdigit() else None,
+            )
+        except (TypeError, ValueError) as exc:
+            return jsonify({"error": str(exc)}), 400
+        return jsonify(result)
+
+    @app.route("/api/series-mode/next-episode", methods=["POST"])
+    def api_series_mode_next_episode():
+        """Correct the counter, for a disc that held bonus material.
+
+        The count comes from how many titles were ripped, which is right until
+        a disc includes a feature-length extra that looked like an episode.
+        """
+        from adr import seriesmode
+
+        data = request.get_json() or {}
+        try:
+            episode = int(data.get("episode"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "episode must be a number"}), 400
+        return jsonify(seriesmode.set_next_episode(_config, episode))
 
     @app.route("/api/tmdb/search-tv")
     def api_tmdb_search_tv():

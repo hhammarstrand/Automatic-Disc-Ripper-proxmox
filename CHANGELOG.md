@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.2.0
+
+### Series mode
+
+Marking one disc as television was already possible. Doing it for six discs of
+a season meant re-entering the show, the season and the starting episode each
+time — and that last number is both easy to get wrong and expensive to get
+wrong, since a third of the season then carries the wrong episode numbers.
+
+**Rip a TV series** makes those answers sticky and adds a counter. Set the show
+and season once, then feed discs: each takes the next block of episode numbers
+and the counter advances by however many titles that disc actually produced.
+Disc 2 starts at episode 5 because disc 1 yielded four, not because anyone said
+so.
+
+The counter advances when the tracks are queued, which is the moment the
+numbers are spent — advancing at insert time would mean guessing the count, and
+advancing at completion would let a second drive hand out the same numbers
+first. It is lock-guarded for exactly that reason, and lives in the config file
+so a restart mid-box-set resumes where it left off.
+
+While the mode is on it overrides both the duration heuristic (someone has said
+what these discs are) and the film identification. That last one was a bug
+found while wiring it up: TMDb identification runs *after* job creation and
+would have overwritten the show with whatever film the disc label resembled.
+
+It does not expire, and every page carries a banner saying it is on — a mode
+that renames every disc it sees has to be visible from wherever you are
+looking, and one that switched itself off on a timer would silently number
+discs 4-6 of a season from 1 again.
+
+---
+
 ## 1.1.2
 
 - **The HandBrake preset is now a Doctor check.** A preset name missing from

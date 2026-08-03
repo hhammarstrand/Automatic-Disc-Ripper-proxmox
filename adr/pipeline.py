@@ -19,7 +19,7 @@ from typing import Any
 import requests
 from sqlalchemy.exc import OperationalError as SAOperationalError
 
-from adr import joblog
+from adr import joblog, seriesmode
 from adr.config import Config
 from adr.disc import DiscWatcher, eject_drive
 from adr.encoder import HandBrakeEncoder
@@ -718,6 +718,15 @@ class DrivePipeline:
             # re-ripping is a legitimate thing to want, and a disc label is not
             # a unique identifier — but ripping the same film twice by accident
             # is forty wasted minutes and a duplicate in the library.
+            # Series mode overrides everything about what this disc is: the
+            # user has said so explicitly, which beats a guess from durations.
+            if seriesmode.apply_to(job, self._config):
+                session.commit()
+                logger.info("Job %s: %s", job.id, seriesmode.describe(self._config))
+                JobLog(self._config, job.id).append(
+                    "detect", seriesmode.describe(self._config),
+                )
+
             previous = find_previous_rip(job, session)
             if previous:
                 job.duplicate_of = previous.id
@@ -769,33 +778,44 @@ class DrivePipeline:
                 Notifier(self._config).job_failed(job)
                 return
 
-            # 2. Identify disc via TMDb
+            # 2. Identify disc via TMDb.
+            #
+            # Skipped entirely in series mode: it is a *film* search, and for a
+            # box-set disc it returns a confident-looking film that would
+            # overwrite the show the user just named. The whole point of the
+            # mode is that they have already answered this question.
             tmdb_confident = False
-            try:
-                info = identify_disc(volume_name or "", self._config.tmdb_api_key)
-                tmdb_confident = info.high_confidence
-                if tmdb_confident:
-                    job.title = info.title
-                    job.year = info.year
-                    logger.info("TMDb high-confidence match: %s (conf=%.2f)", job.display_title, info.confidence)
-                else:
-                    # Keep disc label as title, but still store metadata for UI display
-                    logger.info(
-                        "TMDb low confidence (%.2f < %.2f) — keeping disc label '%s' instead of '%s'",
-                        info.confidence, 0.85, volume_name, info.title
-                    )
-                # Always store TMDb metadata (poster etc.) for the web UI
-                job.tmdb_id = info.tmdb_id
-                job.poster_url = info.poster_url
+            if seriesmode.is_active(self._config):
+                logger.info(
+                    "Job %s: skipping film identification, series mode names this disc",
+                    job.id,
+                )
+            else:
+                try:
+                    info = identify_disc(volume_name or "", self._config.tmdb_api_key)
+                    tmdb_confident = info.high_confidence
+                    if tmdb_confident:
+                        job.title = info.title
+                        job.year = info.year
+                        logger.info("TMDb high-confidence match: %s (conf=%.2f)", job.display_title, info.confidence)
+                    else:
+                        # Keep disc label as title, but still store metadata for UI display
+                        logger.info(
+                            "TMDb low confidence (%.2f < %.2f) — keeping disc label '%s' instead of '%s'",
+                            info.confidence, 0.85, volume_name, info.title
+                        )
+                    # Always store TMDb metadata (poster etc.) for the web UI
+                    job.tmdb_id = info.tmdb_id
+                    job.poster_url = info.poster_url
 
-                # Auto-flag for Plex move if confident match and feature enabled
-                if tmdb_confident and self._config.plex_path and self._config.auto_move_to_plex:
-                    job.move_to_plex = True
-                    logger.info("Job %s flagged for Plex move", job.id)
+                    # Auto-flag for Plex move if confident match and feature enabled
+                    if tmdb_confident and self._config.plex_path and self._config.auto_move_to_plex:
+                        job.move_to_plex = True
+                        logger.info("Job %s flagged for Plex move", job.id)
 
-                session.commit()
-            except (requests.RequestException, ValueError, KeyError):
-                logger.warning("Identification failed for job %s, continuing with label", job.id, exc_info=True)
+                    session.commit()
+                except (requests.RequestException, ValueError, KeyError):
+                    logger.warning("Identification failed for job %s, continuing with label", job.id, exc_info=True)
 
             # 3. Prepare rip
             # Smart main-feature selection: scan disc first, pick longest title
@@ -814,6 +834,12 @@ class DrivePipeline:
                     # episodes. Detection only annotates — the user confirms,
                     # because calling a film a series renames it into a season
                     # folder and that is annoying to undo.
+                    # In series mode the answer is already given; the
+                    # heuristic only decides for discs nobody has spoken for.
+                    if (job.content_type or "movie") == "series":
+                        selected_title_index = None
+                        raise _SeriesDisc
+
                     verdict = looks_like_series(scan_titles, self._config)
                     if verdict["is_series"] and self._config.series_detection:
                         job.content_type = "series"
@@ -1042,6 +1068,19 @@ class DrivePipeline:
             job.status = JobStatus.ENCODING
             session.commit()
             logger.info("Job %s: %d tracks queued for encoding", job.id, len(rip_result.mkv_files))
+
+            # The episode numbers are spent now, so the next disc continues
+            # from where this one stopped. Doing this at insert time would mean
+            # guessing the count; doing it at completion would let a second
+            # drive hand out the same numbers in the meantime.
+            if plan.episodes:
+                after = seriesmode.advance(self._config, len(plan.episodes))
+                if after["active"]:
+                    job_log.append(
+                        "detect",
+                        f"Episodes {plan.episodes[0]}–{plan.episodes[-1]} used. "
+                        f"Next disc starts at episode {after['next_episode']}.",
+                    )
 
         except Exception as exc:
             import traceback
