@@ -432,6 +432,55 @@ def _register_api_routes(app: Flask) -> None:
         finally:
             session.close()
 
+    @app.route("/api/jobs/<int:job_id>/retry", methods=["GET", "POST"])
+    def api_job_retry(job_id: int):
+        """Resume a failed job from the furthest point that still has its files.
+
+        GET reports what a retry would do without doing it — the difference
+        between "moves the finished file" and "re-encodes for forty minutes" is
+        worth knowing before pressing the button.
+        """
+        from adr import retry as _retry
+
+        session = get_session()
+        try:
+            job = session.get(Job, job_id)
+            if not job:
+                return jsonify({"error": "Job not found"}), 404
+
+            decision = _retry.plan(job, _config)
+            if request.method == "GET":
+                return jsonify(decision)
+
+            if not decision["can_retry"]:
+                return jsonify({"ok": False, "message": decision["reason"]}), 409
+
+            if decision["resume"] == _retry.RESUME_TRANSFER:
+                ok, message = _retry.retry_transfer(job, session, _config)
+                return jsonify({"ok": ok, "message": message, "resume": "transfer"}), (
+                    200 if ok else 409
+                )
+
+            if not _pipeline_manager:
+                return jsonify({
+                    "ok": False,
+                    "message": "The encoder is not running, so nothing can be queued.",
+                }), 503
+            queued = _retry.requeue_encode(
+                job, session, _config, _pipeline_manager.encode_queue,
+            )
+            return jsonify({
+                "ok": bool(queued),
+                "resume": "encode",
+                "message": f"Re-queued {queued} file(s) for encoding.",
+            })
+        except SQLAlchemyError as exc:
+            session.rollback()
+            logger.error("Retry failed for job %s: %s", job_id, exc)
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
     @app.route("/api/jobs/<int:job_id>/log")
     def api_job_log(job_id: int):
         """MakeMKV's and HandBrake's own output for this job.

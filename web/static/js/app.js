@@ -580,6 +580,35 @@ function showError(jobId, title, errorText) {
     modal.show();
 }
 
+// ------------------------------------------------------------------ //
+// Retry
+//
+// A rip is forty minutes and several GB. Most failures happen after the
+// expensive part, so the first thing to establish is which part still exists
+// — "moves the finished file" and "re-encodes for forty minutes" deserve
+// different answers from the user.
+// ------------------------------------------------------------------ //
+
+function retryJob(jobId) {
+    fetch('/api/jobs/' + jobId + '/retry')
+        .then(r => r.json())
+        .then(plan => {
+            if (!plan.can_retry) {
+                alert(plan.reason);
+                return;
+            }
+            if (!confirm(plan.reason + '\n\nGo ahead?')) return;
+
+            return fetch('/api/jobs/' + jobId + '/retry', {method: 'POST'})
+                .then(r => r.json().then(d => ({ok: r.ok, d})))
+                .then(({ok, d}) => {
+                    if (ok && d.ok) location.reload();
+                    else alert(d.message || d.error || 'Retry failed.');
+                });
+        })
+        .catch(err => alert('Error: ' + err.message));
+}
+
 function copyErrorText() {
     // Both halves: the summary is what we concluded, the log is the evidence.
     const text = document.getElementById('errorModalText').textContent

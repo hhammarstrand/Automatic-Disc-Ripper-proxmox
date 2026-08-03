@@ -149,6 +149,39 @@ def rename_job_output(job, session) -> None:
         logger.warning("Rename failed for job %s: %s", job.id, exc)
 
 
+def find_previous_rip(job, session):
+    """An earlier successful rip of the same disc, or None.
+
+    Matched on the disc label, which is what is known before identification has
+    run. It is not a unique identifier — plenty of discs ship with labels like
+    ``DVD_VIDEO`` — so this only ever annotates a job, never blocks one. A
+    blank or generic label is treated as no match, since flagging every
+    unlabelled disc as a duplicate of the last unlabelled disc would be worse
+    than saying nothing.
+    """
+    label = (job.disc_label or "").strip()
+    if not label or label.upper() in _GENERIC_DISC_LABELS:
+        return None
+    return (
+        session.query(Job)
+        .filter(
+            Job.id != job.id,
+            Job.disc_label == job.disc_label,
+            Job.status == JobStatus.DONE,
+        )
+        .order_by(Job.completed_at.desc())
+        .first()
+    )
+
+
+# Labels that identify a disc format rather than a film. Matching on these
+# would make every unlabelled disc a duplicate of the previous one.
+_GENERIC_DISC_LABELS = frozenset({
+    "DVD_VIDEO", "DVDVIDEO", "DVD", "BLURAY", "BLU-RAY", "BD_ROM", "BDROM",
+    "UNTITLED", "UNKNOWN", "NO_LABEL", "LOGICAL_VOLUME_ID", "VIDEO_TS",
+})
+
+
 def final_destination(job, config) -> tuple[Path, bool]:
     """Where this job's finished folder actually belongs.
 
@@ -651,6 +684,26 @@ class DrivePipeline:
             session.add(job)
             session.commit()
             logger.info("Job %s created for drive %s: label=%s", job.id, self.drive, volume_name)
+
+            # 1a. Say so if this disc has been ripped before. Not a refusal —
+            # re-ripping is a legitimate thing to want, and a disc label is not
+            # a unique identifier — but ripping the same film twice by accident
+            # is forty wasted minutes and a duplicate in the library.
+            previous = find_previous_rip(job, session)
+            if previous:
+                job.duplicate_of = previous.id
+                session.commit()
+                logger.warning(
+                    "Disc '%s' was already ripped as job %s (%s) — ripping anyway",
+                    volume_name, previous.id, previous.display_title,
+                )
+                JobLog(self._config, job.id).append(
+                    "detect",
+                    f"This disc was already ripped as job {previous.id} "
+                    f"({previous.display_title}) on "
+                    f"{previous.completed_at:%Y-%m-%d}." if previous.completed_at else
+                    f"This disc was already ripped as job {previous.id}.",
+                )
 
             # 1b. Fail fast if the finished files have nowhere to go. A rip
             # takes tens of minutes and several GB; discovering at the end that

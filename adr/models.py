@@ -92,6 +92,10 @@ class Job(Base):
     avg_fps = Column(Float, nullable=True)
     move_to_plex = Column(Boolean, nullable=True, default=None)
     plex_path = Column(String(1024), nullable=True)
+    # The id of an earlier completed job for the same disc label, when one
+    # exists. Annotation only — a disc label is not a unique identifier, so
+    # this never blocks a rip.
+    duplicate_of = Column(Integer, nullable=True)
 
     tracks = relationship("Track", back_populates="job", cascade="all, delete-orphan")
 
@@ -270,6 +274,7 @@ def _migrate_db(engine) -> None:
                 ("avg_fps", "FLOAT"),
                 ("move_to_plex", "BOOLEAN"),
                 ("plex_path", "VARCHAR(1024)"),
+                ("duplicate_of", "INTEGER"),
             ]
             for col_name, col_type in _new_cols:
                 if col_name not in cols:

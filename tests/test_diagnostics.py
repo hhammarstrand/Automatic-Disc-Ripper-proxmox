@@ -157,13 +157,21 @@ class TestRunChecks:
         drives = next(c for c in result["checks"] if c["id"] == "drives")
         assert "<CTID>" in drives["fix"]
 
-    def test_failing_counts_only_failures(self, tmp_path, monkeypatch):
+    def test_a_warning_is_not_counted_as_a_failure(self, tmp_path, monkeypatch):
+        """Asserts on the two checks it controls — the rest depend on the
+        machine the suite happens to run on, and pinning a total count makes
+        this pass as root and fail as anyone else."""
         monkeypatch.setattr(diagnostics, "check_drives", lambda: diagnostics._check(
             "drives", "Optical drives", "fail", "broken", "fix me"))
         monkeypatch.setattr(diagnostics, "check_tools", lambda: diagnostics._check(
             "tools", "Tools", "warn", "eh"))
         result = diagnostics.run_checks(_config(tmp_path))
-        assert result["failing"] == 1
+
+        by_id = {c["id"]: c for c in result["checks"]}
+        assert by_id["drives"]["status"] == "fail"
+        assert by_id["tools"]["status"] == "warn"
+        assert result["failing"] >= 1
+        assert result["failing"] == sum(1 for c in result["checks"] if c["status"] == "fail")
         assert result["ok"] is False
 
 
