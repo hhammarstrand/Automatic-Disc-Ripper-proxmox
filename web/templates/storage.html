@@ -188,18 +188,25 @@ function card(title, icon, d) {
 function loadStorage() {
   fetch('/api/storage').then(r => r.json()).then(data => {
     const c = document.getElementById('storageCards');
+    // Name the card that films actually land in, so it is obvious which path
+    // the numbers below refer to.
+    const toPlex = data.destination_is_plex;
     c.innerHTML =
-        card('Finished files', 'collection-play', data.paths.completed)
+        (data.paths.plex
+          ? card(toPlex ? 'Finished films → Plex library' : 'Plex library', 'film', data.paths.plex)
+          : '')
+      + card(toPlex ? 'Completed folder (unused)' : 'Finished films', 'collection-play', data.paths.completed)
       + card('Rip scratch', 'hourglass-split', data.paths.raw)
-      + (data.paths.staging ? card('Encode staging', 'box-seam', data.paths.staging) : '')
-      + (data.paths.plex ? card('Plex library', 'film', data.paths.plex) : '');
+      + (data.paths.staging ? card('Encode staging', 'box-seam', data.paths.staging) : '');
 
     const flow = document.getElementById('flowNote');
     if (flow) {
+      const dest = toPlex ? 'straight into the Plex library' : 'to the completed folder';
       flow.innerHTML = data.staging
         ? '<i class="bi bi-info-circle me-1"></i>Discs are ripped and encoded on '
-          + 'local disk, then each finished film is transferred to the network '
-          + 'share in a single copy — the share is not written to during the encode.'
+          + 'local disk, then each finished film is transferred ' + dest
+          + ' in a single copy — the share is not written to during the encode, '
+          + 'and never before that.'
         : '<i class="bi bi-info-circle me-1"></i>Everything is written straight to '
           + 'local storage; no network transfer is involved.';
     }

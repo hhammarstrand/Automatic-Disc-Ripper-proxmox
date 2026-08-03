@@ -820,7 +820,15 @@ def _register_api_routes(app: Flask) -> None:
         """Report the real state of the configured storage paths."""
         from adr import storage as _storage
 
-        staging = _storage.should_stage(_config.completed_path, _config.stage_locally)
+        # With a Plex library configured and auto-move on, finished films go
+        # straight there and never touch completed_path — so that is the path
+        # whose free space, writability and mount state actually decide whether
+        # a rip can succeed. Judging the wrong one gives a green page and a
+        # failed job.
+        to_plex = bool(_config.plex_path and _config.auto_move_to_plex)
+        destination = _config.plex_path if to_plex else _config.completed_path
+
+        staging = _storage.should_stage(destination, _config.stage_locally)
         paths = {
             "raw": _storage.describe_path(_config.raw_path),
             "completed": _storage.describe_path(_config.completed_path),
@@ -830,7 +838,7 @@ def _register_api_routes(app: Flask) -> None:
         if _config.plex_path:
             paths["plex"] = _storage.describe_path(_config.plex_path)
 
-        completed = paths["completed"]
+        completed = paths["plex"] if to_plex else paths["completed"]
         warnings = []
 
         # Keeping films on the container's own disk is a perfectly good setup,
@@ -865,6 +873,8 @@ def _register_api_routes(app: Flask) -> None:
             "service_uid": _storage.SERVICE_UID,
             "ctid": os.environ.get("ADR_CTID", "").strip() or None,
             "require_mount": _config.require_completed_mount,
+            "destination": str(destination),
+            "destination_is_plex": to_plex,
         })
 
     @app.route("/api/storage/probe", methods=["POST"])

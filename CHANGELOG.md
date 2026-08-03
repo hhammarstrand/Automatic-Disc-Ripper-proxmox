@@ -70,6 +70,24 @@ adr-doctor --fix <CTID>
 It moves the mount to `/mnt/media`, updates `completed_path`, and restarts the
 container. Your files are not moved or touched — they are already on the NAS.
 
+### Films go straight to the Plex library
+
+A job bound for Plex was written to `completed_path` first and moved
+afterwards. With the library on a NAS that is a multi-GB network write into a
+folder nothing reads — and if the two paths are on different mounts, a second
+full copy on top. The finished folder now crosses the network **once**, into
+the folder it will live in:
+
+```
+/dev/sr0 → /opt/adr/raw → /opt/adr/staging → <plex_path>
+           (local)        (local)            (the only network write)
+```
+
+The pre-rip check now verifies `plex_path` too, and the Storage page judges
+free space, writability and mount state on the path films actually land in —
+previously it could show a healthy `completed_path` while the library it never
+looked at was full.
+
 ### Other
 
 - `update.sh` no longer recursively chowns `$INSTALL_DIR`, which on a pre-1.0

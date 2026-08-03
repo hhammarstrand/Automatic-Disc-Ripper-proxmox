@@ -180,7 +180,7 @@ UI under **Settings**. Key options:
 | `drives` | `auto` | Or a list like `["/dev/sr0", "/dev/sr1"]` |
 | `handbrake_preset` | `Fast 1080p30` | Any built-in or custom preset |
 | `tmdb_api_key` | — | Free key from [themoviedb.org](https://www.themoviedb.org/settings/api) |
-| `plex_path` | — | Move finished movies into a Plex library folder |
+| `plex_path` | — | Plex library folder. When set (with `auto_move_to_plex`) films are written **directly** here and never pass through `completed_path` |
 | `require_completed_mount` | `false` | Refuse to start a rip unless the destination is a real mount point — set automatically by `adr-setup-nas` |
 | `stage_locally` | `true` | Encode to local disk and transfer the finished film in one copy. Only applies when `completed_path` is network storage |
 | `staging_path` | `/opt/adr/staging` | Local scratch used while encoding to network storage |
@@ -349,20 +349,38 @@ the SMB user to have write access to the share.
 
 Every rip verifies its destination before MakeMKV is launched: the directory
 must exist, be writable by the service user, and have room. With
-`require_completed_mount: true` it must also be a genuine mount point. A failing
-check aborts the job immediately and the reason appears in the job's error in
-the web UI. Without a NAS the setting stays `false` and local storage works
-exactly as before.
+`require_completed_mount: true` it must also be a genuine mount point. A
+configured `plex_path` is checked the same way, since that is where the film is
+actually going. A failing check aborts the job immediately and the reason
+appears in the job's error in the web UI. Without a NAS the setting stays
+`false` and local storage works exactly as before.
 
 #### Local staging
 
 HandBrake writing an encode straight onto a network share means hours of small
 random writes over the LAN, and any hiccup lands in the middle of the file.
 So it doesn't: encoding always happens in `/opt/adr/staging` on the container's
-own disk, and the finished folder is moved to `completed_path` in one sequential
+own disk, and the finished folder is moved to its destination in one sequential
 transfer at the end. Raw MKVs never touch the network at all.
 
-This kicks in automatically when `completed_path` is a network filesystem —
+**That transfer goes straight to the folder the film will live in.** If the job
+is bound for the Plex library, the library *is* the destination —
+`completed_path` is not a waypoint on the way there. Writing several GB into a
+folder nothing reads, only to move them again, is exactly the network traffic
+staging exists to avoid; if the two paths happen to sit on different mounts it
+would be a second full copy on top.
+
+So, in order, for a film destined for Plex on a NAS:
+
+```
+/dev/sr0  →  /opt/adr/raw       MakeMKV, local
+          →  /opt/adr/staging   HandBrake, local
+          →  <plex_path>        one sequential transfer — the only network write
+```
+
+Nothing reaches the NAS before that last step.
+
+Staging kicks in automatically when the destination is a network filesystem —
 staging to and from the same local disk would be a pointless extra copy, so it
 is skipped there. Set `stage_locally: false` to turn it off.
 

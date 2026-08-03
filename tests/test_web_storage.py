@@ -86,6 +86,47 @@ class TestStorageWarnings:
         assert "staging" not in data["paths"]
 
 
+class TestEffectiveDestination:
+    """Which path the page judges — the one films actually land in."""
+
+    def test_plex_library_is_the_destination_when_auto_move_is_on(self, tmp_path):
+        plex = tmp_path / "plex"
+        config = _make_config(tmp_path, plex_path=str(plex), auto_move_to_plex=True)
+        data = _client(config).get("/api/storage").get_json()
+
+        assert data["destination_is_plex"] is True
+        assert data["destination"] == str(plex)
+
+    def test_completed_path_is_the_destination_without_a_library(self, tmp_path):
+        config = _make_config(tmp_path)
+        data = _client(config).get("/api/storage").get_json()
+
+        assert data["destination_is_plex"] is False
+        assert data["destination"] == str(tmp_path / "completed")
+
+    def test_auto_move_off_leaves_completed_in_charge(self, tmp_path):
+        config = _make_config(
+            tmp_path, plex_path=str(tmp_path / "plex"), auto_move_to_plex=False,
+        )
+        data = _client(config).get("/api/storage").get_json()
+        assert data["destination_is_plex"] is False
+
+    def test_a_broken_library_is_warned_about_not_a_healthy_completed_path(self, tmp_path):
+        """The trap: completed_path looks fine, but nothing is written there."""
+        plex = tmp_path / "plex"
+        plex.mkdir()
+        config = _make_config(
+            tmp_path, plex_path=str(plex), auto_move_to_plex=True,
+            require_completed_mount=True,
+        )
+        data = _client(config).get("/api/storage").get_json()
+
+        assert len(data["warnings"]) == 1
+        assert str(plex) in data["warnings"][0], (
+            "the warning must name the path that actually decides the outcome"
+        )
+
+
 class TestDriveHealth:
     def test_problems_are_surfaced(self, tmp_path, monkeypatch):
         import adr.disc as disc

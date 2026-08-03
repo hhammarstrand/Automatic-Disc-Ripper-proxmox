@@ -145,6 +145,22 @@ def rename_job_output(job, session) -> None:
         logger.warning("Rename failed for job %s: %s", job.id, exc)
 
 
+def final_destination(job, config) -> tuple[Path, bool]:
+    """Where this job's finished folder actually belongs.
+
+    Returns ``(parent_directory, is_plex_library)``.
+
+    A job destined for the Plex library has no business passing through
+    ``completed_path`` on the way. When the library is on a NAS that detour is
+    a multi-GB network write into a folder nothing reads, followed by a move —
+    and if the two paths are on different mounts, a second full copy. The
+    finished folder goes straight where it is going to live.
+    """
+    if config.plex_path and job.move_to_plex:
+        return Path(config.plex_path), True
+    return Path(config.completed_path), False
+
+
 def transfer_to_destination(job, session, final_parent: Path) -> bool:
     """Move a finished job's folder from local staging to its real destination.
 
@@ -216,6 +232,14 @@ def move_to_plex(job, session, config) -> bool:
     if not src.exists():
         logger.warning("Plex move: source does not exist for job %s: %s", job.id, src)
         return False
+
+    # Normally the transfer already delivered the folder here — see
+    # final_destination(). Nothing to move, just record where it is.
+    if src.parent == Path(config.plex_path):
+        if job.plex_path != str(src):
+            job.plex_path = str(src)
+            session.commit()
+        return True
 
     dest = Path(config.plex_path) / src.name
 
@@ -478,10 +502,14 @@ class EncoderWorker(threading.Thread):
                 rename_job_output(job, session)
 
                 # Encoded to local staging — now do the single transfer to the
-                # real destination (typically the NAS).
+                # real destination (typically the NAS). The destination is
+                # resolved again here rather than trusting task.final_dir,
+                # because the user can toggle the Plex flag while the encode
+                # runs and this is the last moment it can still be honoured for
+                # free.
                 if task.final_dir is not None:
-                    transferred = transfer_to_destination(job, session, task.final_dir)
-                    if not transferred:
+                    dest_parent, _ = final_destination(job, self._config)
+                    if not transfer_to_destination(job, session, dest_parent):
                         # The files are intact in staging; say so rather than
                         # reporting a success the user does not have.
                         job.status = JobStatus.ERROR
@@ -489,7 +517,9 @@ class EncoderWorker(threading.Thread):
                         session.commit()
                         return
 
-                # Move to Plex library if configured and flagged
+                # Usually a no-op by now: the transfer above already put the
+                # folder in the library. This still catches the un-staged case
+                # and a flag toggled after the transfer — both local moves.
                 move_to_plex(job, session, self._config)
 
                 # Clean up raw MKV files / watch folder source
@@ -600,9 +630,22 @@ class DrivePipeline:
                 self._config.completed_path,
                 require_mount=self._config.require_completed_mount,
             )
+            # The Plex library is a real destination too — with auto_move_to_plex
+            # it is the one this job will most likely use — so a broken library
+            # path must fail here, not after the encode.
+            if dest_ok and self._config.plex_path:
+                dest_ok, dest_err = check_destination(
+                    self._config.plex_path,
+                    require_mount=self._config.require_completed_mount,
+                )
+                if not dest_ok:
+                    dest_err = f"Plex library unusable: {dest_err}"
             # When encoding is staged locally, the scratch area needs room too —
             # otherwise the rip only fails later, at the staging step.
-            if dest_ok and should_stage(self._config.completed_path, self._config.stage_locally):
+            if dest_ok and should_stage(
+                self._config.plex_path or self._config.completed_path,
+                self._config.stage_locally,
+            ):
                 dest_ok, dest_err = check_destination(self._config.staging_path)
                 if not dest_ok:
                     dest_err = f"Local staging area unusable: {dest_err}"
@@ -788,17 +831,23 @@ class DrivePipeline:
             # Encode to local disk when the destination is network storage, so
             # HandBrake is not writing over the network for the whole encode —
             # the finished folder is transferred once at the end instead.
-            staging = should_stage(self._config.completed_path, self._config.stage_locally)
+            #
+            # 'The destination' means where the film will actually live, which
+            # for a job bound for Plex is the library itself. Staging to local
+            # disk and then crossing the network once, into the final folder, is
+            # the whole point; a stop-off in completed_path would undo it.
+            dest_parent, to_plex = final_destination(job, self._config)
+            staging = should_stage(dest_parent, self._config.stage_locally)
             if staging:
-                final_dir = self._config.completed_path
+                final_dir = dest_parent
                 output_dir = unique_output_dir(self._config.staging_path / plex_folder_name)
                 logger.info(
-                    "Encoding to local staging %s; will transfer to %s when finished",
-                    output_dir, final_dir,
+                    "Encoding to local staging %s; will transfer to %s%s when finished",
+                    output_dir, final_dir, " (Plex library)" if to_plex else "",
                 )
             else:
                 final_dir = None
-                output_dir = unique_output_dir(self._config.completed_path / plex_folder_name)
+                output_dir = unique_output_dir(dest_parent / plex_folder_name)
             job.output_path = str(output_dir)
 
             for idx, mkv_file in enumerate(rip_result.mkv_files):
