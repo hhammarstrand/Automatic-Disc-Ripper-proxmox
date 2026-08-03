@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.1.1
+
+Three things shipped in 1.1 that were built but not connected, found by
+sweeping every route and public function for callers rather than by assuming:
+
+- **Retrying a series brought it back as a film.** `adr.retry` predates
+  television and rolled its own filenames, so a retried season landed as
+  `Show (2002)/Show (2002) - pt1` — wrong folder, wrong names, wrong library.
+  It now asks `adr.naming` like everything else does.
+- **The TV show could not actually be corrected.** Identification runs TMDb's
+  *movie* search, which for a box set returns a confident-looking film; the TV
+  search endpoint existed but nothing called it, so a season would be named
+  after whatever film the disc label resembled. The dashboard now looks the
+  show up in the TV namespace, previews the numbering with real episode titles,
+  and clears the film's poster and TMDb id when the show is replaced.
+- **Two dead functions** written and never called: one removed as redundant,
+  one wired in so the SG_IO failure names the actual `/dev/sg` node instead of
+  saying "the drive's sg node".
+
+---
+
 ## 1.1.0
 
 Everything from the Windows version was already here — verified module by
@@ -36,25 +57,6 @@ of it to an unmounted NAS was the difference between an annoyance and finding
 the disc again.
 
 Discs that were ripped before are flagged in the history, without blocking.
-
-### 1.1.1 — the gaps 1.1 left
-
-Three things shipped in 1.1 that were built but not connected, found by
-sweeping every route and public function for callers rather than by assuming:
-
-- **Retrying a series brought it back as a film.** `adr.retry` predates
-  television and rolled its own filenames, so a retried season landed as
-  `Show (2002)/Show (2002) - pt1` — wrong folder, wrong names, wrong library.
-  It now asks `adr.naming` like everything else does.
-- **The TV show could not actually be corrected.** Identification runs TMDb's
-  *movie* search, which for a box set returns a confident-looking film; the TV
-  search endpoint existed but nothing called it, so a season would be named
-  after whatever film the disc label resembled. The dashboard now looks the
-  show up in the TV namespace, previews the numbering with real episode titles,
-  and clears the film's poster and TMDb id when the show is replaced.
-- **Two dead functions** written and never called: one removed as redundant,
-  one wired in so the SG_IO failure names the actual `/dev/sg` node instead of
-  saying "the drive's sg node".
 
 ### Also
 
