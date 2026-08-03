@@ -20,6 +20,8 @@ def _config(tmp_path, **overrides):
         "completed_path": tmp_path / "completed",
         "staging_path": tmp_path / "staging",
         "plex_path": "",
+        "handbrake_preset": "Fast 1080p30",
+        "handbrake_preset_file": "",
         "auto_move_to_plex": True,
         "require_completed_mount": False,
     }
@@ -123,7 +125,10 @@ class TestRunChecks:
     def test_every_check_is_present(self, tmp_path):
         result = diagnostics.run_checks(_config(tmp_path))
         ids = {c["id"] for c in result["checks"]}
-        assert ids == {"drives", "tools", "makemkv_key", "destination", "scratch", "database"}
+        assert ids == {
+            "drives", "tools", "preset", "makemkv_key",
+            "destination", "scratch", "database",
+        }
 
     def test_a_check_that_explodes_does_not_hide_the_others(self, tmp_path, monkeypatch):
         def _boom():
@@ -131,7 +136,7 @@ class TestRunChecks:
         monkeypatch.setattr(diagnostics, "check_drives", _boom)
 
         result = diagnostics.run_checks(_config(tmp_path))
-        assert len(result["checks"]) == 6, "a broken drive must not hide a full disk"
+        assert len(result["checks"]) == 7, "a broken drive must not hide a full disk"
         drives = next(c for c in result["checks"] if c["id"] == "drives")
         assert drives["status"] == "warn"
         assert "sysfs went away" in drives["detail"]
@@ -180,3 +185,48 @@ def test_check_shape_is_stable(status):
     """The UI indexes these keys directly."""
     check = diagnostics._check("x", "X", status, "detail")
     assert set(check) == {"id", "title", "status", "detail", "fix"}
+
+
+class TestPreset:
+    """A preset name missing from its file makes every encode fail identically,
+    with HandBrake's output as the only clue."""
+
+    def _config_with(self, tmp_path, name, file=""):
+        return _config(tmp_path, handbrake_preset=name, handbrake_preset_file=str(file))
+
+    def test_a_builtin_preset_needs_no_file(self, tmp_path):
+        check = diagnostics.check_preset(self._config_with(tmp_path, "Fast 1080p30"))
+        assert check["status"] == "ok"
+        assert "built-in" in check["detail"]
+
+    def test_a_missing_file_fails_with_the_path(self, tmp_path):
+        check = diagnostics.check_preset(
+            self._config_with(tmp_path, "Mine", tmp_path / "gone.json"))
+        assert check["status"] == "fail"
+        assert "gone.json" in check["detail"]
+
+    def test_invalid_json_says_so(self, tmp_path):
+        preset = tmp_path / "broken.json"
+        preset.write_text("{not json")
+        check = diagnostics.check_preset(self._config_with(tmp_path, "Mine", preset))
+        assert check["status"] == "fail"
+        assert "not valid JSON" in check["detail"]
+
+    def test_a_name_that_is_not_in_the_file_lists_what_is(self, tmp_path):
+        preset = tmp_path / "p.json"
+        preset.write_text('{"PresetList": [{"PresetName": "Actual"}]}')
+        check = diagnostics.check_preset(self._config_with(tmp_path, "Typo", preset))
+        assert check["status"] == "fail"
+        assert "Actual" in check["detail"], "say which names are available"
+
+    def test_a_matching_name_passes(self, tmp_path):
+        preset = tmp_path / "p.json"
+        preset.write_text('{"PresetList": [{"PresetName": "Mine"}]}')
+        check = diagnostics.check_preset(self._config_with(tmp_path, "Mine", preset))
+        assert check["status"] == "ok"
+
+    def test_the_flat_single_preset_format_is_understood(self, tmp_path):
+        preset = tmp_path / "p.json"
+        preset.write_text('{"PresetName": "Solo"}')
+        check = diagnostics.check_preset(self._config_with(tmp_path, "Solo", preset))
+        assert check["status"] == "ok"

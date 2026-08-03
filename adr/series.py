@@ -52,20 +52,42 @@ _SEASON_WORD_RE = re.compile(
 _DISC_RE = re.compile(r"(?:disc|disk|d)[\s._-]*(\d{1,2})", re.IGNORECASE)
 
 
-def episode_candidates(title_info: dict[int, dict]) -> list[int]:
-    """Title indices that plausibly hold an episode, longest run first.
+def _hms(seconds: int) -> str:
+    """Render a duration the way a person reads a disc title.
+
+    Minutes-and-seconds alone turns a 2:16:00 feature into '136:00', which is
+    exactly the number someone scanning the list to work out why detection went
+    wrong does not want to have to divide by sixty.
+    """
+    hours, rest = divmod(int(seconds), 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
+def episode_candidates(title_info: dict[int, dict], config=None) -> list[int]:
+    """Title indices that plausibly hold an episode, in disc order.
 
     ``title_info`` is what MakeMKV reports for the disc: index → {duration, …}.
+
+    The thresholds come from *config* when given. They are a judgement about
+    what television looks like, not a fact — anime runs to 24 minutes, a
+    documentary series to 55, and someone's box set will sit outside whatever
+    is chosen here. Making them settings means a wrong guess is a value to
+    change rather than a patch to wait for.
     """
     from adr.utils import parse_duration
+
+    low = int(getattr(config, "series_min_minutes", 0) or 0) * 60 or MIN_EPISODE_SECONDS
+    high = int(getattr(config, "series_max_minutes", 0) or 0) * 60 or MAX_EPISODE_SECONDS
+    min_count = int(getattr(config, "series_min_episodes", 0) or 0) or MIN_EPISODE_COUNT
 
     durations: dict[int, int] = {}
     for index, info in (title_info or {}).items():
         seconds = parse_duration(str(info.get("duration", "") or "")) or 0
-        if MIN_EPISODE_SECONDS <= seconds <= MAX_EPISODE_SECONDS:
+        if low <= seconds <= high:
             durations[index] = seconds
 
-    if len(durations) < MIN_EPISODE_COUNT:
+    if len(durations) < min_count:
         return []
 
     # Find the largest run of similar lengths, by scanning the durations in
@@ -87,13 +109,13 @@ def episode_candidates(title_info: dict[int, dict]) -> list[int]:
         if length > best_len or (length == best_len and ratio < best_ratio):
             best_start, best_len, best_ratio = start, length, ratio
 
-    if best_len < MIN_EPISODE_COUNT:
+    if best_len < min_count:
         return []
     # Back to disc order: that is the order episodes are numbered in.
     return sorted(index for index, _ in ordered[best_start:best_start + best_len])
 
 
-def looks_like_series(title_info: dict[int, dict]) -> dict[str, Any]:
+def looks_like_series(title_info: dict[int, dict], config=None) -> dict[str, Any]:
     """Is this a TV disc? Returns the guess and the reasoning behind it.
 
     ``{"is_series": bool, "episode_titles": [...], "confidence": float,
@@ -101,32 +123,46 @@ def looks_like_series(title_info: dict[int, dict]) -> dict[str, Any]:
     that explains itself is correctable and a wrong guess that does not is
     baffling.
     """
-    candidates = episode_candidates(title_info)
+    candidates = episode_candidates(title_info, config)
     total = len(title_info or {})
+    low = int(getattr(config, "series_min_minutes", 0) or 0) or MIN_EPISODE_SECONDS // 60
+    high = int(getattr(config, "series_max_minutes", 0) or 0) or MAX_EPISODE_SECONDS // 60
+    min_count = int(getattr(config, "series_min_episodes", 0) or 0) or MIN_EPISODE_COUNT
+
+    # The durations it actually saw. A wrong verdict is otherwise undiagnosable:
+    # "not enough similar titles" says nothing about which titles there were.
+    from adr.utils import parse_duration
+    seen = sorted(
+        (parse_duration(str(i.get("duration", "") or "")) or 0)
+        for i in (title_info or {}).values()
+    )
+    observed = ", ".join(_hms(s) for s in seen) or "none"
 
     if not candidates:
         return {
             "is_series": False,
             "episode_titles": [],
             "confidence": 0.0,
+            "observed": observed,
             "reason": (
-                f"{total} title(s) on the disc, but not {MIN_EPISODE_COUNT} or more of "
-                f"similar length between {MIN_EPISODE_SECONDS // 60} and "
-                f"{MAX_EPISODE_SECONDS // 60} minutes. Treating it as a film."
+                f"{total} title(s) on the disc, but not {min_count} or more of "
+                f"similar length between {low} and {high} minutes. Treating it as "
+                f"a film. Title lengths seen: {observed}."
             ),
         }
 
     # More matching titles is stronger evidence; six episodes of 42 minutes is
     # not something a film disc produces by accident.
-    confidence = min(0.95, 0.5 + 0.1 * (len(candidates) - MIN_EPISODE_COUNT))
+    confidence = min(0.95, 0.5 + 0.1 * (len(candidates) - min_count))
     return {
         "is_series": True,
         "episode_titles": candidates,
         "confidence": round(confidence, 2),
+        "observed": observed,
         "reason": (
-            f"{len(candidates)} titles of similar length "
-            f"({MIN_EPISODE_SECONDS // 60}–{MAX_EPISODE_SECONDS // 60} min) "
-            "look like episodes rather than one main feature."
+            f"{len(candidates)} titles of similar length ({low}–{high} min) look "
+            f"like episodes rather than one main feature. Title lengths seen: "
+            f"{observed}."
         ),
     }
 

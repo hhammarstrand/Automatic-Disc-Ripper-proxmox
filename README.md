@@ -234,10 +234,23 @@ the scan started from, or a 16-minute featurette bridges into four 22-minute
 episodes.
 
 Detection only ever **annotates**. The dashboard shows the guess with its
-reasoning and you confirm the season and starting episode before encoding
-begins, because calling a film a series renames it into a season folder, and
-that is much more annoying to undo than the reverse. Any job can also be marked
-as a TV disc by hand while it is still ripping.
+reasoning — including every title length it saw, so a wrong verdict is
+correctable rather than baffling — and you confirm the show, season and
+starting episode before encoding begins. Calling a film a series renames it
+into a season folder, which is much more annoying to undo than the reverse. Any
+job can also be marked as a TV disc by hand while it is still ripping.
+
+The show is looked up against TMDb's **TV** catalogue, which is a different
+namespace from films: identification has already run a *film* search, and for a
+box set that returns a confident-looking film. Picking the show corrects the
+title, year and poster, and the file names are previewed against the season's
+real episode titles — which is how an off-by-one is caught before forty minutes
+of encoding rather than after.
+
+The thresholds are settings, not constants: anime runs to 24 minutes, a
+documentary series to 55, and some box set will sit outside any default.
+**Settings → Television** has the shortest and longest episode length, how many
+similar titles count as a season, and a switch to turn detection off entirely.
 
 Output follows Plex's TV layout:
 
@@ -589,6 +602,7 @@ itself and says what to do about each failure:
 |---|---|
 | Optical drives | Passthrough that did not apply, or a cgroup denying the device |
 | MakeMKV and HandBrake | A half-finished install where ripping or encoding cannot work |
+| HandBrake preset | A preset name missing from the file it is supposed to come from — every encode then fails identically |
 | MakeMKV key | The registration key that MakeMKV refuses to open a disc without |
 | Destination | The path films actually land in — missing, read-only, unmounted, or full |
 | Local scratch space | A container disk too small for a dual-layer DVD plus its encode |

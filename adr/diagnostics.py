@@ -80,6 +80,100 @@ def check_makemkv_key() -> dict:
     )
 
 
+def describe_preset(config) -> dict:
+    """Inspect the configured HandBrake preset file.
+
+    A preset name that does not exist in the file it is supposed to come from
+    makes every encode fail identically, and the only clue is HandBrake's
+    output. Answering it here turns that into one line on the Doctor page.
+    """
+    import json
+
+    preset_file = getattr(config, "handbrake_preset_file", "") or ""
+    preset_name = getattr(config, "handbrake_preset", "") or ""
+    info = {
+        "preset_name": preset_name,
+        "preset_file": preset_file,
+        "file_exists": False,
+        "valid_json": False,
+        "preset_names_in_file": [],
+        "name_match": False,
+        "error": None,
+    }
+
+    if not preset_file:
+        # Not an error: HandBrake's built-in presets are the common case.
+        info["error"] = "No preset file configured (handbrake_preset_file is empty)"
+        return info
+
+    if not os.path.isfile(preset_file):
+        info["error"] = f"File not found: {preset_file}"
+        return info
+    info["file_exists"] = True
+
+    try:
+        with open(preset_file, encoding="utf-8") as fh:
+            data = json.load(fh)
+        info["valid_json"] = True
+
+        from adr.encoder import HandBrakeEncoder
+        names: list[str] = []
+        seen: set[str] = set()
+        preset_list = data.get("PresetList", [])
+        if isinstance(preset_list, list):
+            for entry in preset_list:
+                HandBrakeEncoder._extract_preset_names(entry, names, seen)
+        # Flat format: the preset is the top-level object.
+        if "PresetName" in data and data["PresetName"] not in seen:
+            names.append(data["PresetName"])
+
+        info["preset_names_in_file"] = names
+        info["name_match"] = preset_name in names
+        if not info["name_match"] and names:
+            info["error"] = (
+                f"Preset '{preset_name}' not found in file. "
+                f"Available presets: {', '.join(names)}"
+            )
+    except json.JSONDecodeError as exc:
+        info["error"] = f"Invalid JSON: {exc}"
+    except (OSError, KeyError, TypeError) as exc:
+        info["error"] = str(exc)
+
+    return info
+
+
+def check_preset(config) -> dict:
+    """The HandBrake preset, which decides whether any encode can run at all."""
+    info = describe_preset(config)
+
+    if not info["preset_file"]:
+        return _check(
+            "preset", "HandBrake preset", "ok",
+            f"Using HandBrake's built-in preset '{info['preset_name']}'.",
+        )
+    if not info["file_exists"]:
+        return _check(
+            "preset", "HandBrake preset", "fail", info["error"],
+            "Settings → HandBrake preset file",
+        )
+    if not info["valid_json"]:
+        return _check(
+            "preset", "HandBrake preset", "fail",
+            f"{info['preset_file']} is not valid JSON: {info['error']}",
+            "Re-export the preset from the HandBrake GUI.",
+        )
+    if not info["name_match"]:
+        return _check(
+            "preset", "HandBrake preset", "fail", info["error"] or
+            f"'{info['preset_name']}' is not in {info['preset_file']}.",
+            "Settings → HandBrake preset",
+        )
+    return _check(
+        "preset", "HandBrake preset", "ok",
+        f"'{info['preset_name']}' found in {info['preset_file']}.",
+    )
+
+
 def check_destination_path(config) -> dict:
     """The path finished films are actually written to.
 
@@ -162,6 +256,7 @@ def run_checks(config) -> dict:
     for name, fn in (
         ("drives", lambda: check_drives()),
         ("tools", lambda: check_tools()),
+        ("preset", lambda: check_preset(config)),
         ("makemkv_key", lambda: check_makemkv_key()),
         ("destination", lambda: check_destination_path(config)),
         ("scratch", lambda: check_scratch(config)),

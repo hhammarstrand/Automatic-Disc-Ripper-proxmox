@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.1.2
+
+- **The HandBrake preset is now a Doctor check.** A preset name missing from
+  the file it is supposed to come from makes every encode fail identically,
+  with HandBrake's output as the only clue. The logic already existed behind
+  `/api/preset-check`, which nothing called; the route and the check now share
+  one implementation rather than two that can disagree.
+- **The TV thresholds are settings.** What counts as an episode — shortest,
+  longest, how many — is a judgement, not a fact, and someone's box set will
+  always sit outside the default. **Settings → Television**, plus a switch to
+  turn detection off entirely.
+- **A verdict now says what it saw.** "Not enough similar titles" said nothing
+  about which titles there were. The reason lists every title length on the
+  disc, so a wrong guess is correctable. Writing that test found the formatter
+  rendering a 2:16:00 feature as `136:00`.
+
+---
+
 ## 1.1.1
 
 Three things shipped in 1.1 that were built but not connected, found by

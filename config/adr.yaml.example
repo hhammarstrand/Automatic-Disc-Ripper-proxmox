@@ -33,6 +33,10 @@ plex_token: ''
 plex_url: ''
 raw_path: /opt/adr/raw
 require_completed_mount: false
+series_detection: true
+series_max_minutes: 75
+series_min_episodes: 3
+series_min_minutes: 15
 stage_locally: true
 staging_path: /opt/adr/staging
 tmdb_api_key: ''

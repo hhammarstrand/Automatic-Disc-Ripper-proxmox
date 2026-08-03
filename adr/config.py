@@ -63,6 +63,15 @@ _DEFAULTS: dict[str, Any] = {
     # rules, so a series cannot land in the movie folder. Empty means series
     # go to completed_path like anything else.
     "tv_path": "",
+    # What "looks like television" means. A judgement, not a fact: anime runs to
+    # 24 minutes, a documentary series to 55, and someone's box set will sit
+    # outside any default. Settings rather than constants so a wrong guess is a
+    # value to change, not a patch to wait for.
+    "series_min_minutes": 15,
+    "series_max_minutes": 75,
+    "series_min_episodes": 3,
+    # Turn detection off entirely and treat every disc as a film.
+    "series_detection": True,
     "auto_move_to_plex": True,
     "drive_labels": {},
     # Notifications. The pipeline is meant to be unattended, so "it failed
@@ -279,6 +288,23 @@ class Config:
     def tv_path(self) -> str:
         """Plex TV library folder (empty = series go to completed_path)."""
         return self._data.get("tv_path", "")
+
+    @property
+    def series_detection(self) -> bool:
+        """Whether to guess that a disc holds episodes."""
+        return bool(self._data.get("series_detection", True))
+
+    @property
+    def series_min_minutes(self) -> int:
+        return int(self._data.get("series_min_minutes", 15))
+
+    @property
+    def series_max_minutes(self) -> int:
+        return int(self._data.get("series_max_minutes", 75))
+
+    @property
+    def series_min_episodes(self) -> int:
+        return int(self._data.get("series_min_episodes", 3))
 
     @property
     def auto_move_to_plex(self) -> bool:

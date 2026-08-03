@@ -232,3 +232,79 @@ class TestFolderDepth:
 
     def test_a_short_path_does_not_over_reach(self):
         assert relative_folder("Season 02", _job()) == "Season 02"
+
+
+class TestConfigurableThresholds:
+    """The thresholds are a judgement about what television looks like, not a
+    fact. Anime runs to 24 minutes, a documentary series to 55 — a wrong guess
+    has to be a value the user can change, not a patch they wait for."""
+
+    def _config(self, **overrides):
+        data = {"series_min_minutes": 15, "series_max_minutes": 75,
+                "series_min_episodes": 3}
+        data.update(overrides)
+        return types.SimpleNamespace(**data)
+
+    def test_shorter_episodes_can_be_admitted(self, ):
+        """Anime at 12 minutes: excluded by default, found once told."""
+        titles = _titles(*(["0:12:00"] * 4))
+        assert series.episode_candidates(titles) == []
+        assert series.episode_candidates(
+            titles, self._config(series_min_minutes=10)) == [0, 1, 2, 3]
+
+    def test_longer_episodes_can_be_admitted(self):
+        """A 90-minute drama slot is above the default ceiling."""
+        titles = _titles(*(["1:28:00"] * 3))
+        assert series.episode_candidates(titles) == []
+        assert series.episode_candidates(
+            titles, self._config(series_max_minutes=95)) == [0, 1, 2]
+
+    def test_the_required_count_can_be_raised(self):
+        """Someone with lots of two-part films wants a stricter rule."""
+        titles = _titles(*(["0:42:00"] * 3))
+        assert series.episode_candidates(titles) == [0, 1, 2]
+        assert series.episode_candidates(
+            titles, self._config(series_min_episodes=5)) == []
+
+    def test_a_config_missing_the_keys_falls_back_to_defaults(self):
+        """Any object may be passed; absent settings must not crash it."""
+        bare = types.SimpleNamespace()
+        assert series.episode_candidates(_titles(*(["0:42:00"] * 4)), bare) == [0, 1, 2, 3]
+
+    def test_no_config_at_all_still_works(self):
+        assert series.episode_candidates(_titles(*(["0:42:00"] * 4))) == [0, 1, 2, 3]
+
+
+class TestTheVerdictIsDiagnosable:
+    """A wrong verdict that does not say what it saw is not correctable."""
+
+    def test_a_rejection_lists_the_title_lengths(self):
+        result = series.looks_like_series(_titles("2:16:00", "0:04:30"))
+        assert result["is_series"] is False
+        assert "2:16" in result["observed"]
+        assert "4:30" in result["observed"]
+        assert result["observed"] in result["reason"]
+
+    def test_an_acceptance_lists_them_too(self):
+        result = series.looks_like_series(_titles(*(["0:42:00"] * 4)))
+        assert result["is_series"] is True
+        assert "42:00" in result["observed"]
+
+    def test_the_reason_quotes_the_thresholds_in_force(self):
+        """Reading '15 and 75' when the config says 10 and 90 is worse than
+        saying nothing."""
+        config = types.SimpleNamespace(
+            series_min_minutes=10, series_max_minutes=90, series_min_episodes=4)
+        result = series.looks_like_series(_titles("0:03:00"), config)
+        assert "10 and 90" in result["reason"]
+        assert "4 or more" in result["reason"]
+
+    def test_an_empty_disc_does_not_render_as_none(self):
+        assert series.looks_like_series({})["observed"] == "none"
+
+    def test_a_feature_length_title_is_readable(self):
+        """'136:00' for a 2:16:00 feature is the number nobody wants to have
+        to divide by sixty while working out why detection went wrong."""
+        result = series.looks_like_series(_titles("2:16:00", "0:04:30"))
+        assert "2:16:00" in result["observed"]
+        assert "136:00" not in result["observed"]

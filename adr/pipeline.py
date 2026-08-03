@@ -814,8 +814,8 @@ class DrivePipeline:
                     # episodes. Detection only annotates — the user confirms,
                     # because calling a film a series renames it into a season
                     # folder and that is annoying to undo.
-                    verdict = looks_like_series(scan_titles)
-                    if verdict["is_series"]:
+                    verdict = looks_like_series(scan_titles, self._config)
+                    if verdict["is_series"] and self._config.series_detection:
                         job.content_type = "series"
                         guess = parse_series_label(job.disc_label or "")
                         job.series_season = guess["season"] or 1

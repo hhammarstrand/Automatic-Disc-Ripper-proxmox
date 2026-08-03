@@ -903,59 +903,14 @@ def _register_api_routes(app: Flask) -> None:
 
     @app.route("/api/preset-check")
     def api_preset_check():
-        """Verify the configured HandBrake preset file and show its contents."""
-        import json as _json
-        preset_file = _config.handbrake_preset_file if _config else ""
-        preset_name = _config.handbrake_preset if _config else ""
-        info = {
-            "preset_name": preset_name,
-            "preset_file": preset_file,
-            "file_exists": False,
-            "valid_json": False,
-            "preset_names_in_file": [],
-            "name_match": False,
-            "error": None,
-        }
-        if not preset_file:
-            info["error"] = "No preset file configured (handbrake_preset_file is empty)"
-            return jsonify(info)
+        """Verify the configured HandBrake preset file and show its contents.
 
-        import os
-        if not os.path.isfile(preset_file):
-            info["error"] = f"File not found: {preset_file}"
-            return jsonify(info)
-        info["file_exists"] = True
+        Shares its implementation with the Doctor page's preset check — one
+        answer to "is this preset usable", not two that can disagree.
+        """
+        from adr import diagnostics
 
-        try:
-            with open(preset_file, encoding="utf-8") as fh:
-                data = _json.load(fh)
-            info["valid_json"] = True
-
-            # Extract preset names using the same logic as HandBrakeEncoder
-            from adr.encoder import HandBrakeEncoder
-            names: list[str] = []
-            seen: set[str] = set()
-            preset_list = data.get("PresetList", [])
-            if isinstance(preset_list, list):
-                for entry in preset_list:
-                    HandBrakeEncoder._extract_preset_names(entry, names, seen)
-            # Also support flat format where top-level has PresetName
-            if "PresetName" in data and data["PresetName"] not in seen:
-                names.append(data["PresetName"])
-
-            info["preset_names_in_file"] = names
-            info["name_match"] = preset_name in names
-            if not info["name_match"] and names:
-                info["error"] = (
-                    f"Preset '{preset_name}' not found in file. "
-                    f"Available presets: {', '.join(names)}"
-                )
-        except _json.JSONDecodeError as exc:
-            info["error"] = f"Invalid JSON: {exc}"
-        except (OSError, KeyError, TypeError) as exc:
-            info["error"] = str(exc)
-
-        return jsonify(info)
+        return jsonify(diagnostics.describe_preset(_config))
 
     @app.route("/api/settings", methods=["GET"])
     def api_get_settings():
@@ -1268,6 +1223,8 @@ def _register_api_routes(app: Flask) -> None:
         "watch_path", "watch_output_path", "watch_interval", "web_host",
         "web_port", "log_level", "disabled_drives", "eject_after_rip",
         "no_eject_drives", "main_feature_only", "plex_path", "tv_path",
+        "series_detection", "series_min_minutes", "series_max_minutes",
+        "series_min_episodes",
         "auto_move_to_plex", "drive_labels",
         "notify_enabled", "notify_provider", "notify_url", "notify_token",
         "notify_events",
