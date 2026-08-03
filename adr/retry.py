@@ -31,7 +31,7 @@ RESUME_ENCODE = "encode"
 RESUME_IMPOSSIBLE = "impossible"
 
 
-def _encoded_files(job) -> list[Path]:
+def encoded_files(job) -> list[Path]:
     """Finished videos still sitting where the encoder left them.
 
     Both containers: with transcoding turned off a finished job holds MKVs,
@@ -69,7 +69,7 @@ def plan(job, config) -> dict:
             "can_retry": False,
         }
 
-    encoded = _encoded_files(job)
+    encoded = encoded_files(job)
     if encoded:
         return {
             "resume": RESUME_TRANSFER,

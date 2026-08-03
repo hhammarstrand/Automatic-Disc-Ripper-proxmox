@@ -10,12 +10,29 @@ import re
 import subprocess
 import tempfile
 import threading
+import time
 from collections.abc import Callable
 from pathlib import Path
 
 from adr.config import Config
+from adr.utils import kill_process_tree
 
 logger = logging.getLogger(__name__)
+
+#: How long MakeMKV may produce no output at all before the rip is abandoned.
+#:
+#: There is no overall time limit on a rip, and there should not be: a Blu-ray
+#: with many playlists legitimately takes hours, and a disc that is merely slow
+#: must not be thrown away. But a MakeMKV that has stopped talking entirely is
+#: not slow, it is stuck — and without this the thread waits on a read that
+#: never returns, holding the drive and the job for as long as the service
+#: runs. Half an hour of complete silence is far beyond anything a working rip
+#: does; MakeMKV reports progress continuously while it copies.
+STALL_TIMEOUT = 1800
+
+#: How often the watchdog looks. Cheap, so it can be frequent enough that the
+#: reported idle time is roughly accurate.
+STALL_CHECK_INTERVAL = 30
 
 # Robot-mode line prefixes we care about
 # MSG:code,flags,count,"message",... → log messages
@@ -195,12 +212,40 @@ class MakeMKVRipper:
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                start_new_session=True,
             )
             self._active_proc = proc
 
             # Register with process registry for cancellation support
             if self._process_registry and job_id:
                 self._process_registry.register(job_id, proc)
+
+            # Anything MakeMKV says counts as being alive: a progress line, a
+            # message, a title record. The watchdog below only fires when all
+            # of it stops.
+            _last_activity = [time.monotonic()]
+            _stalled = [False]
+
+            def _watchdog():
+                while not _stop_progress.is_set():
+                    _stop_progress.wait(STALL_CHECK_INTERVAL)
+                    if _stop_progress.is_set():
+                        return
+                    idle = time.monotonic() - _last_activity[0]
+                    if idle < STALL_TIMEOUT:
+                        continue
+                    _stalled[0] = True
+                    logger.error(
+                        "MakeMKV has produced no output for %.0f minutes on %s "
+                        "— abandoning the rip", idle / 60, drive_letter,
+                    )
+                    kill_process_tree(proc)
+                    return
+
+            watchdog_thread = threading.Thread(
+                target=_watchdog, daemon=True, name="MKVStallWatchdog",
+            )
+            watchdog_thread.start()
 
             # Start a background thread that reads the progress file
             _prgv_count_box = [0]
@@ -219,6 +264,7 @@ class MakeMKVRipper:
                             if not new_data:
                                 continue
                             last_pos = f.tell()
+                        _last_activity[0] = time.monotonic()
                         for line in new_data.splitlines():
                             line = line.strip()
                             if not line:
@@ -257,6 +303,7 @@ class MakeMKVRipper:
                     break
                 if not chunk:
                     break
+                _last_activity[0] = time.monotonic()
                 remainder += chunk
                 parts = re.split(b"\\r\\n|\\n|\\r", remainder)
                 remainder = parts[-1]  # incomplete line
@@ -316,6 +363,15 @@ class MakeMKVRipper:
                 else:
                     result.error = "MakeMKV exited OK but produced no MKV files"
                     logger.warning(result.error)
+            elif _stalled[0]:
+                result.error = (
+                    f"MakeMKV stopped responding: no output at all for "
+                    f"{STALL_TIMEOUT // 60} minutes, so the rip was abandoned. "
+                    "A disc this drive cannot read past a certain point does "
+                    "this. Try cleaning the disc, or another disc in the same "
+                    "drive to tell the two apart."
+                )
+                logger.error(result.error)
             else:
                 result.error = f"MakeMKV exited with code {proc.returncode}"
                 logger.error(result.error)

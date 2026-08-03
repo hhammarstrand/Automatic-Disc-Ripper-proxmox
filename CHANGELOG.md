@@ -54,6 +54,29 @@ that does not claim to know what the extra is. Titles of similar length are
 still numbered parts: that is what a two-part film looks like, and calling half
 a film an extra is the worse mistake.
 
+**A restart mid-job left it stranded for ever.** A job's progress is in the
+database; the thread doing the work is not. Press Update with a disc in — a
+normal thing to do — and the job said RIPPING until someone noticed, with the
+drive it named permanently busy so the card offered no way to start again.
+
+Every job that was running is now dealt with at the next start, according to
+what is actually still on disk. Mid-rip is failed, because a killed rip leaves
+a truncated file and nothing else. Mid-encode is *resumed*: the raw MKVs are
+intact and the expensive part is done, so it simply goes back on the queue —
+asking someone to press Retry after every update, for work the machine can
+obviously pick up itself, is not a reasonable thing to ask. A job waiting to be
+moved is failed pointing at Retry, which re-checks the destination first, since
+the destination may well be why the service was restarted. No notifications for
+any of it: a burst of failures after every update trains you to ignore them.
+
+**A MakeMKV that stopped talking held the drive for ever.** The read loop waits
+on a pipe with no timeout, which is right — a Blu-ray with many playlists takes
+hours and a slow disc must not be thrown away. But nothing distinguished slow
+from stuck, and stuck meant the drive, the job and the thread were gone until
+the service was restarted. Thirty minutes of *complete* silence — no progress,
+no messages, nothing — now ends the rip, with an error that names the one test
+that separates a bad disc from a bad drive: another disc in the same drive.
+
 Also fixed, found while testing the above: killing a timed-out tool killed only
 the process we started. Anything *it* had started kept the output pipe open, so
 the reader thread blocked on a read that would never return and closing the

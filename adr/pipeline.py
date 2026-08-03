@@ -20,7 +20,7 @@ from typing import Any
 import requests
 from sqlalchemy.exc import OperationalError as SAOperationalError
 
-from adr import disctype, duplicates, isobackup, joblog, musicbrainz, seriesmode
+from adr import disctype, duplicates, isobackup, joblog, musicbrainz, recovery, seriesmode
 from adr.audiocd import AudioCDRipper
 from adr.config import Config
 from adr.disc import DiscWatcher, eject_drive
@@ -1490,6 +1490,17 @@ class PipelineManager:
             worker = EncoderWorker(self.config, self.encode_queue, name=f"EncoderWorker-{i}")
             worker.start()
             self.encoder_workers.append(worker)
+
+        # Close out anything the last shutdown interrupted. After the workers
+        # exist, because an encode this queues has to be picked up; before the
+        # disc watcher, so a job left mid-rip is already failed by the time a
+        # disc still sitting in that drive is noticed.
+        outcome = recovery.recover_interrupted_jobs(self.config, self.encode_queue)
+        if outcome["resumed"] or outcome["failed"]:
+            logger.info(
+                "Interrupted jobs: %d resumed, %d closed as failed",
+                len(outcome["resumed"]), len(outcome["failed"]),
+            )
 
         # Register callback for dynamically discovered drives
         self.disc_watcher.on_new_drive(self._handle_new_drive)

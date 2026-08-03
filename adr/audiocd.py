@@ -23,10 +23,8 @@ from __future__ import annotations
 
 import contextlib
 import logging
-import os
 import re
 import shutil
-import signal
 import subprocess
 import threading
 from collections.abc import Callable
@@ -36,7 +34,7 @@ from pathlib import Path
 from adr.config import Config
 from adr.disctype import Toc, TocTrack
 from adr.musicbrainz import AlbumInfo
-from adr.utils import sanitize_filename
+from adr.utils import kill_process_tree, sanitize_filename
 
 logger = logging.getLogger(__name__)
 
@@ -53,22 +51,6 @@ _PROGRESS_RE = re.compile(r"\|\s*(\d+)\s+\d+\s*\]")
 FRAMES_PER_SECOND = 75
 
 SUPPORTED_FORMATS = ("flac", "mp3")
-
-
-def _kill_group(proc: subprocess.Popen) -> None:
-    """Kill *proc* and everything it started.
-
-    The process was launched into its own session, so one signal to the group
-    reaches the whole tree. Falling back to killing just the leader covers the
-    race where it has already exited and the group no longer exists.
-    """
-    try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
-        return
-    except (OSError, ProcessLookupError):
-        logger.debug("Could not kill process group for pid %s", proc.pid, exc_info=True)
-    with contextlib.suppress(OSError):
-        proc.kill()
 
 
 @dataclass
@@ -392,7 +374,7 @@ class AudioCDRipper:
         try:
             code = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
-            _kill_group(proc)
+            kill_process_tree(proc)
             proc.wait()
             code = -1
             tail.append(f"Timed out after {timeout}s")

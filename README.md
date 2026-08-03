@@ -32,6 +32,8 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Per-job logs** in the UI: what MakeMKV and HandBrake actually said, without SSH.
 - **Duplicate detection** against the library itself, the TMDb id and the disc label — optionally skipping the rip entirely.
 - **Retry** a failed job from whatever is still on disk — a broken NAS should not cost you a 40-minute rip.
+- **Survives a restart mid-job**: an interrupted encode picks itself up on the next start, and nothing is left saying "ripping" for ever.
+- **Notices a drive that has stopped answering** instead of waiting on it for the rest of the service's life.
 - **Multi-drive** support and a **watch folder** for batch encoding of existing video files.
 - **Transcoding is optional** — keep the lossless MKV straight off the disc instead, if size is cheaper than time.
 - **Extras kept apart** from the film, in a folder Plex actually recognises, so a trailer never becomes the second half of the movie.
@@ -421,6 +423,27 @@ from the furthest point it can:
 It tells you which before you commit, and re-checks the destination first —
 retrying into the same unmounted share fails identically, and saying so up
 front beats a second identical error twenty seconds later.
+
+**A restart mid-job.** Pressing Update while a disc is in is a normal thing to
+do, and the job's progress lives in the database while the thread doing the
+work does not. Every job that was running is checked at the next start:
+
+| Where it had got to | What happens |
+|---|---|
+| Mid-rip | Failed, saying so. Nothing survives a killed rip — press Rip to start again. |
+| Mid-encode | The encode is queued again by itself. The raw files are intact and the expensive part is done. |
+| Waiting to be moved | Failed, pointing at Retry, which re-checks the destination first. |
+
+No notifications are sent for these: restarting is routine, and a burst of
+"job failed" messages after every update would train you to ignore them.
+
+**A drive that stops answering.** There is no overall time limit on a rip — a
+Blu-ray with many playlists legitimately takes hours, and a slow disc must not
+be thrown away. But MakeMKV producing *nothing at all* for thirty minutes is
+not slow, it is stuck, and the read would otherwise block for as long as the
+service runs, holding the drive with it. The rip is abandoned and the failure
+says what to try next: the same drive with a different disc tells a bad disc
+from a bad drive.
 
 ### Already ripped?
 

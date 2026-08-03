@@ -1,7 +1,9 @@
 """Utility helpers for Automatic Disc Ripper."""
 
 import logging
+import os
 import re
+import signal
 import socket
 import sys
 import unicodedata
@@ -163,6 +165,34 @@ def _holds_finished_video(directory: Path) -> bool:
             for p in directory.iterdir()
         )
     except OSError:
+        return False
+
+
+def kill_process_tree(proc) -> bool:
+    """Kill *proc* and everything it started. True if a signal was delivered.
+
+    Killing only the process we launched leaves any child *it* launched holding
+    the output pipe, and then a thread reading that pipe blocks on a read that
+    will never return — which turns the timeout meant to stop us hanging into a
+    hang. Signalling the process group avoids that, and works because these
+    processes are started with ``start_new_session=True``.
+
+    Falls back to killing the leader alone, which covers the race where it has
+    already exited and the group is gone.
+    """
+    if proc is None:
+        return False
+    try:
+        os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+        return True
+    except (OSError, ProcessLookupError):
+        logger.debug("Could not kill process group for pid %s", getattr(proc, "pid", "?"),
+                     exc_info=True)
+    try:
+        proc.kill()
+        return True
+    except (OSError, ProcessLookupError, ValueError):
+        logger.debug("Could not kill process", exc_info=True)
         return False
 
 
