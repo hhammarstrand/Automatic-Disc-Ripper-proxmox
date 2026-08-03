@@ -1278,7 +1278,7 @@ def _register_api_routes(app: Flask) -> None:
         "web_port", "log_level", "disabled_drives", "eject_after_rip",
         "no_eject_drives", "main_feature_only", "plex_path", "tv_path",
         "series_detection", "series_min_minutes", "series_max_minutes",
-        "series_min_episodes",
+        "series_min_episodes", "skip_duplicates",
         "auto_move_to_plex", "drive_labels",
         "notify_enabled", "notify_provider", "notify_url", "notify_token",
         "notify_events",

@@ -19,7 +19,7 @@ from typing import Any
 import requests
 from sqlalchemy.exc import OperationalError as SAOperationalError
 
-from adr import joblog, seriesmode
+from adr import duplicates, joblog, seriesmode
 from adr.config import Config
 from adr.disc import DiscWatcher, eject_drive
 from adr.encoder import HandBrakeEncoder
@@ -714,10 +714,6 @@ class DrivePipeline:
             session.commit()
             logger.info("Job %s created for drive %s: label=%s", job.id, self.drive, volume_name)
 
-            # 1a. Say so if this disc has been ripped before. Not a refusal —
-            # re-ripping is a legitimate thing to want, and a disc label is not
-            # a unique identifier — but ripping the same film twice by accident
-            # is forty wasted minutes and a duplicate in the library.
             # Series mode overrides everything about what this disc is: the
             # user has said so explicitly, which beats a guess from durations.
             if seriesmode.apply_to(job, self._config):
@@ -727,21 +723,6 @@ class DrivePipeline:
                     "detect", seriesmode.describe(self._config),
                 )
 
-            previous = find_previous_rip(job, session)
-            if previous:
-                job.duplicate_of = previous.id
-                session.commit()
-                logger.warning(
-                    "Disc '%s' was already ripped as job %s (%s) — ripping anyway",
-                    volume_name, previous.id, previous.display_title,
-                )
-                JobLog(self._config, job.id).append(
-                    "detect",
-                    f"This disc was already ripped as job {previous.id} "
-                    f"({previous.display_title}) on "
-                    f"{previous.completed_at:%Y-%m-%d}." if previous.completed_at else
-                    f"This disc was already ripped as job {previous.id}.",
-                )
 
             # 1b. Fail fast if the finished files have nowhere to go. A rip
             # takes tens of minutes and several GB; discovering at the end that
@@ -816,6 +797,35 @@ class DrivePipeline:
                     session.commit()
                 except (requests.RequestException, ValueError, KeyError):
                     logger.warning("Identification failed for job %s, continuing with label", job.id, exc_info=True)
+
+            # 2b. Has this film been ripped before?
+            #
+            # After identification, not before: until TMDb has run, the only
+            # thing known about the disc is its label, which is the weakest of
+            # the three signals duplicates.py can use. Before the rip, because
+            # the whole point is not to spend forty minutes on a file that is
+            # already in the library.
+            duplicate = duplicates.find_duplicate(job, session, self._config)
+            if duplicate:
+                job.duplicate_of = duplicate["job_id"]
+                session.commit()
+                logger.warning("Job %s: %s", job.id, duplicate["detail"])
+                JobLog(self._config, job.id).append("detect", duplicate["detail"])
+                Notifier(self._config).duplicate(job, duplicate["detail"])
+
+                if self._config.skip_duplicates:
+                    job.status = JobStatus.CANCELLED
+                    job.error_message = (
+                        f"Skipped as a duplicate. {duplicate['detail']} "
+                        "Turn off 'Skip discs already ripped' under Settings to "
+                        "rip it anyway."
+                    )
+                    job.completed_at = utcnow()
+                    session.commit()
+                    logger.info("Job %s skipped as a duplicate", job.id)
+                    if self._config.should_eject(self.drive):
+                        eject_drive(self.drive)
+                    return
 
             # 3. Prepare rip
             # Smart main-feature selection: scan disc first, pick longest title

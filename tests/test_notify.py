@@ -213,3 +213,26 @@ class TestNotifier:
     def test_an_unlabelled_disc_does_not_render_as_none(self, captured):
         notify.Notifier(_config(notify_events=["disc_inserted"])).disc_inserted("/dev/sr0", None)
         assert "None" not in captured[0]["data"].decode()
+
+
+class TestDuplicateEvent:
+    """Worth sending while the user is still standing at the drive."""
+
+    def test_it_is_sent_when_selected(self, captured):
+        notifier = notify.Notifier(_config(notify_events=["duplicate"]))
+        job = _job()
+        assert notifier.duplicate(job, "Already in /mnt/media/The Matrix (1999).") is True
+        body = captured[0]["data"].decode()
+        assert "/mnt/media/The Matrix (1999)" in body
+        assert "The Matrix (1999)" in captured[0]["headers"]["Title"]
+
+    def test_it_is_not_sent_unless_selected(self, captured):
+        """It is off by default: most people do not want a push per disc."""
+        notifier = notify.Notifier(_config())      # job_done + job_failed only
+        assert notifier.duplicate(_job(), "detail") is False
+        assert captured == []
+
+    def test_it_is_not_a_failure_priority(self, captured):
+        """A duplicate is information, not an alarm."""
+        notify.Notifier(_config(notify_events=["duplicate"])).duplicate(_job(), "x")
+        assert captured[0]["headers"]["Priority"] != "high"

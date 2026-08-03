@@ -53,8 +53,15 @@
                     {{ job.display_title }}
                     {% if job.duplicate_of %}
                     <span class="badge bg-warning text-dark ms-1"
-                          title="The same disc label was already ripped as job #{{ job.duplicate_of }}">
+                          title="Already ripped as job #{{ job.duplicate_of }} — see the tool output for which check matched">
                         <i class="bi bi-files me-1"></i>dup of #{{ job.duplicate_of }}
+                    </span>
+                    {% elif job.status and job.status.value == 'cancelled' and job.error_message and 'duplicate' in job.error_message %}
+                    <!-- Matched the library rather than an earlier job, so there is
+                         no job number to point at. -->
+                    <span class="badge bg-warning text-dark ms-1"
+                          title="{{ job.error_message[:160] }}">
+                        <i class="bi bi-files me-1"></i>already in library
                     </span>
                     {% endif %}
                 </td>

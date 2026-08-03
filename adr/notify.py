@@ -30,9 +30,10 @@ TIMEOUT = 10
 EVENT_JOB_DONE = "job_done"
 EVENT_JOB_FAILED = "job_failed"
 EVENT_DISC_INSERTED = "disc_inserted"
+EVENT_DUPLICATE = "duplicate"
 EVENT_TEST = "test"
 
-EVENTS = (EVENT_JOB_DONE, EVENT_JOB_FAILED, EVENT_DISC_INSERTED)
+EVENTS = (EVENT_JOB_DONE, EVENT_JOB_FAILED, EVENT_DISC_INSERTED, EVENT_DUPLICATE)
 
 PROVIDERS = ("ntfy", "gotify", "discord", "webhook")
 
@@ -41,12 +42,14 @@ _PRIORITY = {
     EVENT_JOB_FAILED: "high",
     EVENT_JOB_DONE: "default",
     EVENT_DISC_INSERTED: "low",
+    EVENT_DUPLICATE: "default",
     EVENT_TEST: "default",
 }
 _TAG = {
     EVENT_JOB_FAILED: "rotating_light",
     EVENT_JOB_DONE: "white_check_mark",
     EVENT_DISC_INSERTED: "cd",
+    EVENT_DUPLICATE: "recycle",
     EVENT_TEST: "bell",
 }
 
@@ -194,6 +197,19 @@ class Notifier:
             EVENT_JOB_FAILED,
             f"Rip failed: {job.display_title}",
             reason,
+        )
+
+    def duplicate(self, job, detail: str) -> bool:
+        """This disc has been ripped before.
+
+        Worth sending while the user is still standing at the drive with the
+        disc in their hand — that is the moment the information is cheap to act
+        on.
+        """
+        return self.notify(
+            EVENT_DUPLICATE,
+            f"Already ripped: {job.display_title}",
+            detail,
         )
 
     def disc_inserted(self, drive: str, label: str | None) -> bool:

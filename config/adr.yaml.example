@@ -44,6 +44,7 @@ series_mode_season: 1
 series_mode_show: ''
 series_mode_tmdb_id: null
 series_mode_year: null
+skip_duplicates: false
 stage_locally: true
 staging_path: /opt/adr/staging
 tmdb_api_key: ''

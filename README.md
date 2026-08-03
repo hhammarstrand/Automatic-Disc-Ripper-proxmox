@@ -29,6 +29,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Notifications** to ntfy, Gotify, Discord or a webhook when a disc finishes or fails — the pipeline is unattended, so it tells you.
 - **Plex library refresh** the moment a film lands, instead of waiting for the next scheduled scan.
 - **Per-job logs** in the UI: what MakeMKV and HandBrake actually said, without SSH.
+- **Duplicate detection** against the library itself, the TMDb id and the disc label — optionally skipping the rip entirely.
 - **Retry** a failed job from whatever is still on disk — a broken NAS should not cost you a 40-minute rip.
 - **Multi-drive** support and a **watch folder** for batch encoding of existing video files.
 - **Install via Claude for Chrome** — paste one prompt and it does the whole thing for you.
@@ -350,10 +351,35 @@ It tells you which before you commit, and re-checks the destination first —
 retrying into the same unmounted share fails identically, and saying so up
 front beats a second identical error twenty seconds later.
 
-**Duplicate discs.** A disc whose label matches an earlier completed rip is
-flagged in the history. It never blocks: a disc label is not a unique
-identifier, re-ripping is legitimate, and generic labels like `DVD_VIDEO` are
-excluded so every unlabelled disc does not become a duplicate of the last one.
+### Already ripped?
+
+Working through a shelf, the expensive mistake is ripping the same film twice.
+Before the rip starts — and *after* identification, when the title is known —
+the disc is checked three ways, in descending order of how much each can be
+trusted:
+
+| Check | Catches |
+|---|---|
+| **The library** | `Title (Year)/` already holds a video file at the destination. The only check that is true rather than remembered: it survives a cleared history, a reinstall, and finds films that were in the library before this app existed |
+| **TMDb id** | An earlier completed job for the same film — a different pressing, a re-release, a disc with a different label |
+| **Disc label** | The fallback for a disc TMDb could not identify |
+
+The label is the weakest signal, so better evidence overrules it: if TMDb
+identified both discs and called them different films, a shared label is a
+coincidence rather than a duplicate.
+
+A duplicate is always logged, shown in the job's tool output, badged in the
+history, and can be sent as a notification. Whether it *stops* the rip is
+**Settings → Duplicates → Skip discs already ripped**, off by default —
+re-ripping is legitimate when the first attempt came from a scratched disc or a
+worse preset, and a false positive that silently cancels a disc is harder to
+notice than one that only warns. Turn it on when working through a large shelf;
+the disc is then cancelled and ejected before MakeMKV starts, so nothing is
+wasted.
+
+Series discs are exempt. Every disc of a box set writes into the same show
+folder, which is the normal case rather than a warning; episodes are protected
+by their numbering instead.
 
 ### MakeMKV key
 

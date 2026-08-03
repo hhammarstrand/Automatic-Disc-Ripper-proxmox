@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.2.1
+
+### "Have I already ripped this?"
+
+There was a duplicate check, but a weak one: it matched only the disc label,
+ran *before* identification (when the label was all that was known), and did
+nothing but put a badge in the history afterwards. It missed a different
+pressing of the same film, a cleared history, and anything already in the
+library that this application had not put there.
+
+It now runs after identification and asks three questions in descending order
+of authority: does the film's folder already hold video at the destination
+(the only check that is true rather than remembered), is there a completed job
+with the same TMDb id, and finally the disc label. Better evidence overrules
+worse — a shared label between two discs TMDb has called different films is a
+coincidence, not a duplicate.
+
+**Settings → Duplicates → Skip discs already ripped** makes it actually stop
+the rip, before MakeMKV starts. Off by default: re-ripping is legitimate when
+the first attempt came from a scratched disc, and a false positive that
+silently cancels a disc is harder to notice than one that only warns.
+
+Series discs are exempt — every disc of a box set writes into the same show
+folder, which is the normal case rather than a warning.
+
+---
+
 ## 1.2.0
 
 ### Series mode

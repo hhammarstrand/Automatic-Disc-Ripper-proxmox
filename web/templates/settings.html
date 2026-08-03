@@ -62,6 +62,35 @@
         </div>
     </div>
 
+    <!-- Duplicates -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-files me-1"></i>Duplicates</div>
+        <div class="card-body">
+            <p class="small text-secondary">
+                Before ripping, the disc is checked against three things: whether the
+                film's folder already holds video at the destination (the only check
+                that survives a cleared history), whether an earlier completed job has
+                the same TMDb id (a different pressing of the same film), and finally
+                the disc label. A duplicate is always logged and can be notified about.
+            </p>
+            <div class="mb-0">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="skipDuplicates"
+                           name="skip_duplicates" {% if config.skip_duplicates %}checked{% endif %}>
+                    <label class="form-check-label" for="skipDuplicates">
+                        Skip discs already ripped
+                    </label>
+                </div>
+                <div class="form-text">
+                    Off by default. Re-ripping is legitimate when the first attempt came
+                    from a scratched disc or a worse preset, and a false positive that
+                    silently cancels a disc is harder to notice than one that only warns.
+                    Turn it on when working through a large shelf.
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Television -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-collection-play me-1"></i>Television</div>
@@ -410,7 +439,8 @@
                 {% for value, label in [
                     ('job_done', 'A disc finished'),
                     ('job_failed', 'A rip failed'),
-                    ('disc_inserted', 'A disc was inserted')] %}
+                    ('disc_inserted', 'A disc was inserted'),
+                    ('duplicate', 'A disc was already ripped before')] %}
                 <div class="form-check">
                     <input class="form-check-input notify-event" type="checkbox"
                            id="ev_{{ value }}" value="{{ value }}"
@@ -537,6 +567,7 @@ function saveSettings(e) {
     data.auto_move_to_plex = !!form.querySelector('[name="auto_move_to_plex"]').checked;
     data.notify_enabled = !!form.querySelector('[name="notify_enabled"]').checked;
     data.series_detection = !!form.querySelector('[name="series_detection"]').checked;
+    data.skip_duplicates = !!form.querySelector('[name="skip_duplicates"]').checked;
     data.plex_refresh_enabled = !!form.querySelector('[name="plex_refresh_enabled"]').checked;
 
     // Event checkboxes are not form fields — they collapse into one list, so

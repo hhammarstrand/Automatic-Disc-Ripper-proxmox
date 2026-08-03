@@ -92,6 +92,12 @@ _DEFAULTS: dict[str, Any] = {
     "notify_url": "",
     "notify_token": "",
     "notify_events": ["job_done", "job_failed"],
+    # Cancel a disc that has already been ripped, rather than spending forty
+    # minutes on a file that is already in the library. Off by default:
+    # re-ripping is legitimate when the first attempt came from a scratched
+    # disc or a worse preset, and a false positive that silently skips a disc
+    # is a worse outcome than one that warns.
+    "skip_duplicates": False,
     # Ask Plex to scan after a film lands, instead of it staying invisible
     # until the next scheduled scan.
     "plex_refresh_enabled": False,
@@ -298,6 +304,11 @@ class Config:
     def tv_path(self) -> str:
         """Plex TV library folder (empty = series go to completed_path)."""
         return self._data.get("tv_path", "")
+
+    @property
+    def skip_duplicates(self) -> bool:
+        """Whether a disc already in the library is cancelled instead of ripped."""
+        return bool(self._data.get("skip_duplicates", False))
 
     @property
     def series_mode(self) -> bool:
