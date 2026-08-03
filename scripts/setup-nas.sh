@@ -21,7 +21,7 @@
 # Env vars:
 #   NAS_URL          nfs://host/export/path  or  smb://host/share[/subdir]   (required)
 #   NAS_USERNAME     SMB user     (SMB only)
-#   NAS_PASSWORD     SMB password (SMB only)
+#   NAS_PASSWORD     SMB password (SMB only; prompted for if a terminal is present)
 #   NAS_DOMAIN       SMB domain/workgroup (SMB only, optional)
 #   NAS_MOUNTPOINT   host mountpoint          (default /mnt/adr-media)
 #   CT_MEDIA_PATH    path inside the container (default /mnt/media)
@@ -152,6 +152,38 @@ else
         apt-get update -qq && apt-get install -y -qq cifs-utils >/dev/null
     }
     [[ -n "$NAS_USERNAME" ]] || die "NAS_USERNAME is required for smb://"
+
+    # An empty password is not a valid SMB credential — it produces
+    # "mount error(13): Permission denied", which reads as a wrong password
+    # rather than a missing one. Ask for it, or refuse; never write a blank.
+    if [[ -z "$NAS_PASSWORD" ]]; then
+        # Proxmox already stores the password for a CIFS storage. Offer it
+        # rather than making the user find and retype something the machine
+        # already knows.
+        for _pw in /etc/pve/priv/storage/*.pw; do
+            [[ -r "$_pw" ]] || continue
+            _id="$(basename "$_pw" .pw)"
+            if grep -qs "^\s*server ${host}\s*$" /etc/pve/storage.cfg; then
+                msg_info "Proxmox has a stored password for storage '${_id}' on ${host}."
+                msg_info "To reuse it:  NAS_PASSWORD=\"\$(cat ${_pw})\" $0 $CTID"
+                break
+            fi
+        done
+
+        if [[ -t 0 ]]; then
+            read -rsp " Password for SMB user '${NAS_USERNAME}' on ${host}: " NAS_PASSWORD
+            echo
+        fi
+    fi
+    [[ -n "$NAS_PASSWORD" ]] || die \
+"No SMB password given, and there is no terminal to ask on.
+
+  Re-run with it set:
+      NAS_URL=${NAS_URL} NAS_USERNAME=${NAS_USERNAME} NAS_PASSWORD=… $0 $CTID
+
+  Writing an empty password would only produce 'mount error(13): Permission
+  denied', which looks like a wrong password rather than a missing one."
+
     umask 077
     { echo "username=${NAS_USERNAME}"
       echo "password=${NAS_PASSWORD}"
@@ -215,10 +247,16 @@ if mountpoint -q "$NAS_MOUNTPOINT"; then
 fi
 
 msg_info "Mounting ${SRC} → ${NAS_MOUNTPOINT}…"
-if ! mount "$NAS_MOUNTPOINT"; then
-    msg_error "Mount failed. The fstab entry was kept so you can retry with: mount ${NAS_MOUNTPOINT}"
+if ! mount_output="$(mount "$NAS_MOUNTPOINT" 2>&1)"; then
+    msg_error "Mount failed: ${mount_output:-no output}"
+    msg_error "The fstab entry was kept so you can retry with: mount ${NAS_MOUNTPOINT}"
     if [[ "$FSTYPE" == nfs ]]; then
         msg_error "Check the export is visible:  showmount -e ${host}"
+    elif [[ "$mount_output" == *"error(13)"* ]]; then
+        # The single most common cause, and the message does not say it.
+        msg_error "Error 13 is the server rejecting the credentials — usually a wrong"
+        msg_error "or empty password, or a user without access to the share."
+        msg_error "Check with:  smbclient -L //${host} -U ${NAS_USERNAME}"
     else
         msg_error "Check credentials and share name:  smbclient -L //${host} -U ${NAS_USERNAME}"
     fi

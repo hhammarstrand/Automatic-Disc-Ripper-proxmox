@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.2.5
+
+**`adr-setup-nas` wrote an empty SMB password and let the mount fail.**
+`NAS_USERNAME` was required for `smb://`, `NAS_PASSWORD` was not — so omitting
+it produced `mount error(13): Permission denied` and the advice "check
+credentials and share name", which reads as a *wrong* password rather than a
+missing one.
+
+It now prompts when there is a terminal, refuses with the exact re-run command
+when there is not, and never writes a blank credential. If Proxmox already
+stores a password for a CIFS storage on the same server it says so, with the
+command to reuse it — the machine already knows the secret; there is no reason
+to make someone find and retype it.
+
+Mount failures also print what `mount` actually said, and error 13 in
+particular is named for what it is: the server rejecting the credentials.
+
+---
+
 ## 1.2.4
 
 **The MakeMKV scan gave up sooner than a real rip does.** The diagnostic used a
