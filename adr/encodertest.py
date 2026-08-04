@@ -91,12 +91,25 @@ def _hardware_advice() -> str:
     from adr import gpu
 
     state = gpu.describe()
+    if state["available"] and not state["runtime"]["ok"]:
+        # The case that looks solved and is not: the node is passed through,
+        # so every check about the GPU passes, and the encode still fails
+        # because nothing above the kernel is installed. Do not send someone
+        # who has just finished passing a GPU through back to software.
+        return (
+            f"The preset asks for a hardware encoder and {state['nodes'][0]} is "
+            "passed through correctly — but the driver that sits on top of it "
+            "is not installed, which is why HandBrake still says the hardware "
+            "is not available. " + (state["fix"] or "adr-doctor --fix {ctid}")
+            + " installs it. Until then, 'Encode in software instead' below "
+            "will get the disc finished."
+        )
     if state["available"]:
         return (
-            "The preset asks for a hardware encoder and this container does "
-            f"have {state['nodes'][0]} — so the encoder itself is missing from "
-            "this HandBrake build rather than the GPU being absent. A software "
-            "preset (x264 or x265) will work."
+            "The preset asks for a hardware encoder, this container has "
+            f"{state['nodes'][0]}, and the driver for it is installed — so the "
+            "encoder is missing from this HandBrake build rather than from the "
+            "system. A software preset (x264 or x265) will work."
         )
     return (
         "The preset asks for a hardware encoder, and this container has no GPU. "
@@ -291,22 +304,43 @@ _HARDWARE_IN_NAME = ("qsv", "nvenc", "vce", "vaapi", "videotoolbox", "mf ")
 
 
 def _builtin_presets(exe: str) -> list[str]:
-    """Every preset HandBrake knows without importing a file."""
+    """Every preset HandBrake knows without importing a file.
+
+    ``--preset-list`` is laid out by indentation::
+
+        General/
+            Very Fast 1080p30
+                Small H.264 video (up to 1080p30) and AAC stereo audio,
+                in an MP4 container.
+
+    Categories sit at the left margin and end in a slash; names are one level
+    in; descriptions are one level further and wrap across lines. Guessing at
+    a range of indents catches the wrapped description lines too — which is
+    how "and Dolby Digital (AC-3) surround audio, in an MP4" ended up being
+    offered as something to encode with.
+
+    So the name level is measured rather than assumed: it is the smallest
+    indent any non-category line uses. That survives HandBrake changing its
+    spacing, which a hardcoded 4 would not.
+    """
     code, output = _run([exe, "--preset-list"], PRESET_TIMEOUT)
     if code == -1:
         return []
-    names = []
+
+    rows = []
     for line in output.splitlines():
         stripped = line.strip()
-        # HandBrake indents preset names under their category heading and
-        # follows each with a wrapped description; the names are the lines
-        # that are indented but not deeply, and carry no sentence punctuation.
-        if not stripped or stripped.endswith("/") or stripped.endswith("."):
-            continue
+        if not stripped or stripped.endswith("/"):
+            continue                       # blank, or a category heading
         indent = len(line) - len(line.lstrip())
-        if 2 <= indent <= 8 and len(stripped) < 60:
-            names.append(stripped)
-    return names
+        if indent == 0:
+            continue                       # a heading that forgot its slash
+        rows.append((indent, stripped))
+
+    if not rows:
+        return []
+    name_indent = min(indent for indent, _ in rows)
+    return [text for indent, text in rows if indent == name_indent]
 
 
 def software_alternatives(config) -> list[str]:

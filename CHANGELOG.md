@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.7.5
+
+**Passing the GPU through is only half of it.** 1.7.3 got the render node into
+the container and the service user into the group that owns it. Every check
+about hardware encoding then went green — and HandBrake still said
+`encqsvInit: qsv is not available on the system`, because Quick Sync does not
+talk to the kernel directly. It reaches the hardware through a VA-API driver
+and a Media SDK / oneVPL runtime, and a minimal container image ships neither.
+
+That failure looked solved, which made it worse than one that looks broken.
+The Doctor page reported a working GPU, and the encoder test told you the
+encoder was "missing from this HandBrake build" — advice that sends someone
+who has just finished passing a GPU through back to software encoding, over a
+missing driver.
+
+So the two halves are now told apart. The Doctor page fails, in as many words,
+when the node is present and the driver is not; the encoder test says which
+one is missing and what installs it; and `adr-doctor --fix` installs it,
+picking Intel's or AMD's stack from the PCI vendor of the render node rather
+than guessing. Nothing inside the container could have done this itself — the
+service runs unprivileged and apt needs root.
+
+**The software-preset dropdown was full of prose.** "and Dolby Digital (AC-3)
+surround audio, in an MP4" is not something you can encode with. HandBrake
+lays `--preset-list` out by indentation, and accepting a *range* of indents
+caught the wrapped description lines too. The name level is now measured — the
+smallest indent any non-category line uses — which also survives HandBrake
+changing its spacing.
+
 ## 1.7.4
 
 **`adr-doctor` refreshes itself.** 1.7.3 taught it to notice it was an old

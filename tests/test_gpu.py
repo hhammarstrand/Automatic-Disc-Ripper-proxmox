@@ -94,6 +94,96 @@ class TestReadingHandBrakesComplaint:
         assert gpu.mentions_hardware(None) is False
 
 
+@pytest.fixture(autouse=True)
+def _isolate_driver_dirs(monkeypatch, tmp_path_factory):
+    """Never let a test read the machine it happens to run on.
+
+    The driver directories are real system paths, so without this a test asking
+    "what happens when no driver is installed?" passes on a bare CI box and
+    fails on a developer laptop with Mesa. Every test starts from empty and
+    says so explicitly when it wants a driver.
+    """
+    empty = tmp_path_factory.mktemp("no-drivers")
+    monkeypatch.setattr(gpu, "VA_DRIVER_DIRS", (empty,))
+
+
+def _with_driver(monkeypatch, tmp_path, name="iHD_drv_video.so"):
+    """A driver directory holding one VA-API driver."""
+    directory = tmp_path / "dri"
+    directory.mkdir(exist_ok=True)
+    (directory / name).write_text("")
+    monkeypatch.setattr(gpu, "VA_DRIVER_DIRS", (directory,))
+    return directory
+
+
+class TestTheDriverOnTopOfTheNode:
+    """Passing the render node through is only half the job.
+
+    /dev/dri/renderD128 present and openable, and HandBrake still says
+    "qsv is not available on the system" — because Quick Sync reaches the
+    hardware through a VA-API driver, and a minimal container ships none.
+    """
+
+    def test_no_driver_installed_is_not_ok(self):
+        state = gpu.runtime_state()
+        assert state["ok"] is False
+        assert state["drivers"] == []
+        assert "adr-doctor --fix" in state["fix"]
+
+    def test_the_intel_driver_counts(self, monkeypatch, tmp_path):
+        _with_driver(monkeypatch, tmp_path, "iHD_drv_video.so")
+        state = gpu.runtime_state()
+        assert state["ok"] is True
+        assert state["drivers"] == ["iHD_drv_video.so"]
+        assert state["fix"] == ""
+
+    def test_the_older_intel_driver_counts_too(self, monkeypatch, tmp_path):
+        _with_driver(monkeypatch, tmp_path, "i965_drv_video.so")
+        assert gpu.runtime_state()["ok"] is True
+
+    def test_an_amd_driver_counts(self, monkeypatch, tmp_path):
+        _with_driver(monkeypatch, tmp_path, "radeonsi_drv_video.so")
+        assert gpu.runtime_state()["ok"] is True
+
+    def test_unrelated_files_are_not_drivers(self, monkeypatch, tmp_path):
+        directory = tmp_path / "dri"
+        directory.mkdir()
+        (directory / "README").write_text("")
+        (directory / "libsomething.so").write_text("")
+        monkeypatch.setattr(gpu, "VA_DRIVER_DIRS", (directory,))
+        assert gpu.va_drivers() == []
+
+    def test_a_missing_directory_is_not_an_error(self, monkeypatch, tmp_path):
+        monkeypatch.setattr(gpu, "VA_DRIVER_DIRS", (tmp_path / "absent",))
+        assert gpu.va_drivers() == []
+
+    def test_the_same_driver_in_two_places_is_listed_once(self, monkeypatch, tmp_path):
+        first, second = tmp_path / "a", tmp_path / "b"
+        for directory in (first, second):
+            directory.mkdir()
+            (directory / "iHD_drv_video.so").write_text("")
+        monkeypatch.setattr(gpu, "VA_DRIVER_DIRS", (first, second))
+        assert gpu.va_drivers() == ["iHD_drv_video.so"]
+
+    def test_a_working_node_with_no_driver_still_asks_to_be_fixed(
+        self, monkeypatch, tmp_path,
+    ):
+        """The failure that looks solved.
+
+        Every check about the passthrough passes — the node is there and
+        opens — and encoding fails anyway. If describe() reports this as
+        clean, nothing anywhere tells the user what is actually wrong.
+        """
+        node = tmp_path / "renderD128"
+        node.write_text("")
+        monkeypatch.setattr(gpu, "DRI_DIR", tmp_path)
+        state = gpu.describe()
+        assert state["available"] is True, "the node genuinely is passed through"
+        assert state["runtime"]["ok"] is False
+        assert "driver" in state["detail"]
+        assert state["fix"], "there is something to do about it"
+
+
 class TestDescribingTheContainer:
     def test_no_dri_directory_at_all(self, monkeypatch, tmp_path):
         monkeypatch.setattr(gpu, "DRI_DIR", tmp_path / "absent")
@@ -113,6 +203,7 @@ class TestDescribingTheContainer:
         node = tmp_path / "renderD128"
         node.write_text("")
         monkeypatch.setattr(gpu, "DRI_DIR", tmp_path)
+        _with_driver(monkeypatch, tmp_path)
         state = gpu.describe()
         assert state["available"] is True
         assert str(node) in state["detail"]

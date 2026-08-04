@@ -289,10 +289,31 @@ class TestHardwareEncoding:
         monkeypatch.setattr("adr.gpu.describe", lambda: {
             "available": True, "nodes": ["/dev/dri/renderD128"],
             "detail": "present", "fix": "",
+            "runtime": {"ok": True, "drivers": ["iHD_drv_video.so"],
+                        "detail": "", "fix": ""},
         })
         check = diagnostics.check_hardware_encoding(_config(tmp_path))
         assert check["status"] == "ok"
         assert "renderD128" in check["detail"]
+
+    def test_a_gpu_with_no_driver_is_not_reported_as_working(
+        self, tmp_path, monkeypatch,
+    ):
+        """Green here would be the most expensive kind of lie: the render node
+        genuinely is passed through, so the obvious check passes, and every
+        encode still dies at initialisation for a reason nothing on this page
+        would otherwise mention."""
+        monkeypatch.setattr("adr.gpu.preset_wants_hardware", lambda f, n: "qsv_h264")
+        monkeypatch.setattr("adr.gpu.describe", lambda: {
+            "available": True, "nodes": ["/dev/dri/renderD128"],
+            "detail": "present", "fix": "",
+            "runtime": {"ok": False, "drivers": [], "detail": "",
+                        "fix": "Run on the Proxmox host: adr-doctor --fix {ctid}"},
+        })
+        check = diagnostics.check_hardware_encoding(_config(tmp_path))
+        assert check["status"] == "fail"
+        assert "VA-API" in check["detail"]
+        assert "adr-doctor --fix" in check["fix"]
 
     def test_a_gpu_nobody_asked_for_is_not_a_problem(self, tmp_path, monkeypatch):
         """Noise about hardware someone never wanted trains people to ignore

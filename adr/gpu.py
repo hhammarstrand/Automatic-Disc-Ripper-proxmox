@@ -36,6 +36,18 @@ DRM_MAJOR = 226
 #: video encoder and against HandBrake's own complaints.
 HARDWARE_ENCODERS = ("qsv", "nvenc", "vce", "vaapi", "videotoolbox", "mf_")
 
+#: Where a VA-API driver lands. Multiarch first, because that is where Debian
+#: and Ubuntu put it; the others are for distributions that do not use it.
+VA_DRIVER_DIRS = (
+    Path("/usr/lib/x86_64-linux-gnu/dri"),
+    Path("/usr/lib/dri"),
+    Path("/usr/lib64/dri"),
+)
+
+#: The VA driver Quick Sync and VAAPI both go through. iHD covers Broadwell
+#: and later, i965 the older parts; either one means the stack is installed.
+INTEL_VA_DRIVERS = ("iHD_drv_video.so", "i965_drv_video.so")
+
 
 def render_nodes() -> list[str]:
     """Every render node visible in this container, sorted."""
@@ -61,13 +73,71 @@ def _openable(path: str) -> tuple[bool, int | None]:
                 os.close(fd)
 
 
+def va_drivers() -> list[str]:
+    """Every VA-API driver installed in this container, by file name."""
+    found: list[str] = []
+    for directory in VA_DRIVER_DIRS:
+        try:
+            entries = sorted(p.name for p in directory.iterdir())
+        except OSError:
+            continue
+        found += [name for name in entries if name.endswith("_drv_video.so")]
+    return sorted(set(found))
+
+
+def runtime_state() -> dict:
+    """Is the userspace half of hardware encoding installed?
+
+    Passing the render node through is only half the job, and it is the half
+    that looks finished. ``/dev/dri/renderD128`` present and openable, and
+    HandBrake still says ``encqsvInit: qsv is not available on the system`` —
+    because Quick Sync does not talk to the kernel directly. It goes through a
+    VA-API driver (``iHD_drv_video.so``) and a Media SDK / oneVPL runtime, and
+    a minimal container image ships neither.
+
+    That distinction is the whole point of this function. "The build has no
+    QSV encoder" and "the QSV runtime is not installed" produce the same
+    HandBrake error and have opposite fixes: one means give up the hardware
+    and re-encode in software, the other means install two packages. Telling
+    someone to abandon the GPU they just finished passing through, because a
+    driver is missing, is the worst answer available.
+
+    ``{"ok", "drivers": [...], "detail", "fix"}``.
+    """
+    drivers = va_drivers()
+    state = {"ok": bool(drivers), "drivers": drivers, "detail": "", "fix": ""}
+    if drivers:
+        state["detail"] = "VA-API driver(s) installed: " + ", ".join(drivers) + "."
+        return state
+    state["detail"] = (
+        "No VA-API driver is installed in this container, so the GPU cannot "
+        "actually be used for encoding even though the render node is there. "
+        "Quick Sync and VAAPI both reach the hardware through one of "
+        + " or ".join(INTEL_VA_DRIVERS)
+        + ", and a minimal container image ships neither."
+    )
+    state["fix"] = "Run on the Proxmox host: adr-doctor --fix {ctid}"
+    return state
+
+
 def describe() -> dict:
     """What hardware encoding this container can and cannot do.
 
-    ``{"available", "nodes": [...], "detail", "fix"}``. Never raises: this is
-    called from a diagnostic page, which is the last thing that should fail.
+    ``{"available", "nodes": [...], "runtime", "detail", "fix"}``. Never
+    raises: this is called from a diagnostic page, which is the last thing
+    that should fail.
+
+    ``available`` means the render node is there and can be opened — the
+    kernel half. ``runtime`` answers the userspace half separately, because
+    they fail independently and have nothing to do with each other.
     """
-    info: dict = {"available": False, "nodes": [], "detail": "", "fix": ""}
+    info: dict = {
+        "available": False,
+        "nodes": [],
+        "runtime": runtime_state(),
+        "detail": "",
+        "fix": "",
+    }
 
     if not DRI_DIR.exists():
         info["detail"] = (
@@ -93,7 +163,17 @@ def describe() -> dict:
         ok, err = _openable(node)
         if ok:
             info["available"] = True
-            info["detail"] = f"{node} is present and can be opened."
+            runtime = info["runtime"]
+            if runtime["ok"]:
+                info["detail"] = f"{node} is present and can be opened."
+            else:
+                # The node being fine is not the headline when the driver on
+                # top of it is missing — that is the thing still broken.
+                info["detail"] = (
+                    f"{node} is present and can be opened, but "
+                    + runtime["detail"][0].lower() + runtime["detail"][1:]
+                )
+                info["fix"] = runtime["fix"]
             return info
         # Told apart because they need different fixes: a cgroup denial is a
         # host-side line, a permission problem is a group membership.

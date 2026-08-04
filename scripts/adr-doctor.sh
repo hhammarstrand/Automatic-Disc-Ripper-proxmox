@@ -32,7 +32,7 @@ set -euo pipefail
 # "nothing wrong found", which is worse than failing: it is a clean bill of
 # health from a script that never looked. Compared against the container's own
 # version below.
-ADR_DOCTOR_VERSION="1.7.4"
+ADR_DOCTOR_VERSION="1.7.5"
 
 CT_MEDIA_PATH="${CT_MEDIA_PATH:-/mnt/media}"
 # The user the service runs as inside the container.
@@ -314,6 +314,90 @@ if [[ -d /dev/dri ]] && compgen -G "/dev/dri/renderD*" >/dev/null; then
                 fi
             fi
         done
+    fi
+
+    # ------------------------------------------------------------------- #
+    # The other half that passthrough alone does not solve: the driver.
+    #
+    # This is the failure that looks fixed. The node is passed through, the
+    # group is right, every check above is green — and HandBrake still says
+    # "encqsvInit: qsv is not available on the system", because Quick Sync
+    # does not talk to the kernel directly. It goes through a VA-API driver
+    # and a Media SDK / oneVPL runtime, and a minimal container image ships
+    # neither. Nothing inside the container can install them: the service
+    # runs unprivileged, and apt needs root.
+    #
+    # Which packages depends on whose GPU it is, so the PCI vendor decides.
+    # Installing Intel's media stack on an AMD box would be pure noise.
+    # ------------------------------------------------------------------- #
+    # Asked twice — before and after the install — so it lives in one place.
+    # shellcheck disable=SC2016  # $d belongs to the container's shell
+    ct_has_va_driver() {
+        pct exec "$CTID" -- sh -c '
+            for d in /usr/lib/x86_64-linux-gnu/dri /usr/lib/dri /usr/lib64/dri; do
+                ls "$d"/*_drv_video.so >/dev/null 2>&1 && exit 0
+            done
+            exit 1
+        ' >/dev/null 2>&1
+    }
+
+    if pct status "$CTID" 2>/dev/null | grep -q running; then
+        if ct_has_va_driver; then
+            msg_ok "The GPU driver stack is installed in the container"
+        else
+            # 0x8086 Intel, 0x1002 AMD. Read from the first render node,
+            # which is the one HandBrake would use.
+            gpu_vendor=""
+            for node in /dev/dri/renderD*; do
+                [[ -e "$node" ]] || continue
+                gpu_vendor="$(cat "/sys/class/drm/$(basename "$node")/device/vendor" 2>/dev/null || true)"
+                break
+            done
+
+            case "$gpu_vendor" in
+                0x8086) VA_PACKAGES="intel-media-va-driver-non-free intel-media-va-driver i965-va-driver libmfx1 libmfxgen1 libvpl2 vainfo" ;;
+                0x1002) VA_PACKAGES="mesa-va-drivers vainfo" ;;
+                *)      VA_PACKAGES="" ;;
+            esac
+
+            if [[ -z "$VA_PACKAGES" ]]; then
+                msg_warn "A GPU is passed through, but no VA-API driver is installed in the"
+                msg_warn "        container and its vendor (${gpu_vendor:-unknown}) is not one this"
+                msg_warn "        script knows how to install for. Hardware presets will fail;"
+                msg_warn "        a software preset (x264/x265) works regardless."
+            else
+                note_problem "The GPU is passed through but the container cannot use it:"
+                msg_warn "        no VA-API driver is installed, so HandBrake reports the"
+                msg_warn "        hardware as unavailable even though the render node is there."
+                if [[ "$FIX" -eq 1 ]]; then
+                    msg_info "Installing the GPU driver stack in CT ${CTID} — this downloads a few MB…"
+                    # Each package separately and best-effort on purpose. The
+                    # names differ across Debian and Ubuntu releases and some
+                    # live in non-free, which not every container has enabled.
+                    # One unavailable name must not take the others with it,
+                    # and any single VA driver is enough to succeed.
+                    # shellcheck disable=SC2016  # $1 belongs to the inner shell
+                    pct exec "$CTID" -- sh -c '
+                        export DEBIAN_FRONTEND=noninteractive
+                        apt-get update -qq >/dev/null 2>&1 || true
+                        for pkg in $1; do
+                            apt-get install -y -qq "$pkg" >/dev/null 2>&1 \
+                                && echo "  installed: $pkg"
+                        done
+                    ' _ "$VA_PACKAGES" || true
+
+                    if ct_has_va_driver; then
+                        note_fixed "installed the GPU driver stack in the container"
+                    else
+                        msg_error "        Could not install a VA-API driver. On Debian the best one"
+                        msg_error "        lives in non-free; enable it in the container's"
+                        msg_error "        /etc/apt/sources.list, or use a software preset."
+                    fi
+                else
+                    would_fix "install ${VA_PACKAGES%% *} and friends in the container"
+                fi
+            fi
+        fi
     fi
 else
     msg_ok "No GPU on the host — software encoding is the only option, which is fine"

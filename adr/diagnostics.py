@@ -115,10 +115,23 @@ def check_hardware_encoding(config) -> dict:
             "Not used: the preset encodes in software, which needs no GPU.",
         )
 
-    if state["available"]:
+    if state["available"] and state["runtime"]["ok"]:
         return _check(
             "hardware_encoding", "Hardware encoding", "ok",
             f"The preset uses '{wanted}' and {state['nodes'][0]} is available.",
+        )
+    if state["available"]:
+        # Green here would be a lie of the most expensive kind: the render
+        # node is genuinely passed through, so the obvious check passes, and
+        # every encode still dies at initialisation for a reason nothing on
+        # this page mentions.
+        return _check(
+            "hardware_encoding", "Hardware encoding", "fail",
+            f"The preset uses '{wanted}'. {state['nodes'][0]} is passed through "
+            "correctly, but no VA-API driver is installed, so the GPU cannot "
+            "encode anything. Every encode fails at initialisation until this "
+            "is fixed.",
+            state["fix"] or "Run on the Proxmox host: adr-doctor --fix {ctid}",
         )
     return _check(
         "hardware_encoding", "Hardware encoding", "fail",
