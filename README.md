@@ -26,8 +26,9 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Web dashboard** (port 8080) with live progress, job history, a Storage page for NAS setup, settings, and in-browser playback.
 - **Doctor page** that self-diagnoses drives, tools, keys and storage — and updates the app from GitHub with one button.
 - **Logs page** with the service's own log, filterable by level and text — no `pct exec`, no journald, no shell.
-- **Test the preset** without a disc: encodes two seconds of video with your real settings and says what HandBrake objected to.
-- **Hardware encoding**: `adr-doctor --fix` passes the host's GPU into the container, so a Quick Sync or NVENC preset works instead of failing on every title.
+- **Test encoding** without a disc: encodes two seconds of video with whatever is actually configured, and says what the encoder objected to.
+- **Hardware encoding, and the three ways it goes wrong**: the installer passes the host's GPU through and installs the driver stack; when Quick Sync still will not start, the encoder test finds out whether a VA-API driver name fixes it, whether ffmpeg can reach the same GPU, or whether software is the honest answer — by trying each, not by guessing.
+- **One set of encoding settings** — spoken language, quality, height cap — told to whichever encoder runs, so switching encoder does not silently change the result.
 - **Copy diagnostics**: one button produces everything needed to diagnose the install as a single paste, with keys and tokens removed.
 - **Television discs**: box sets are recognised from title durations and named `Show (Year)/Season 02/Show (Year) - S02E05.mp4`.
 - **Series mode**: set the show once, then feed a whole box set — the episode number carries across discs on its own.
@@ -36,7 +37,9 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Per-job logs** in the UI: what MakeMKV and HandBrake actually said, without SSH.
 - **Progress that answers the question**: time remaining, read speed and elapsed time for the rip, not just a percentage.
 - **Duplicate detection** against the library itself, the TMDb id and the disc label — optionally skipping the rip entirely.
-- **Retry** a failed job from whatever is still on disk — a broken NAS should not cost you a 40-minute rip.
+- **Retry** a failed job from whatever is still on disk — a broken NAS should not cost you a 40-minute rip. A rip that never finished is refused rather than encoded, because its files are truncated mid-frame.
+- **Encode again** with the settings as they are now, from the raw rip when it survives and from the finished file when it does not — and it says which, because the second is a generation lossier.
+- **Select and delete** several jobs at once, optionally with the files they produced: shown as a list of real paths first, and narrow enough that a library folder shared with other films comes out with those films intact.
 - **Says what is broken before you insert a disc**, with the fix, instead of letting every disc fail separately with the same reason.
 - **Survives a restart mid-job**: an interrupted encode picks itself up on the next start, and nothing is left saying "ripping" for ever.
 - **Notices a drive that has stopped answering** instead of waiting on it for the rest of the service's life.
@@ -109,9 +112,15 @@ Open that URL and you're done. Insert a disc to start ripping.
 ### What the installer does
 
 1. Downloads the Ubuntu 24.04 LXC template (if missing) and creates the container.
-2. Adds optical-drive passthrough to the container config (`/dev/sr*`, `/dev/sg*`).
+2. Adds optical-drive passthrough to the container config (`/dev/sr*`, `/dev/sg*`),
+   and orders guest autostart after the drive exists — otherwise passthrough
+   works right after installing and breaks on the next host reboot.
 3. Installs MakeMKV, HandBrakeCLI, Python, the app, and a `systemd` service.
 4. Fetches/stores the MakeMKV key and starts the service on boot.
+5. Runs `adr-doctor --fix` for everything else the host can offer: the GPU, the
+   group that owns the render node, the VA-API driver stack. Skipped silently
+   where there is nothing to do, and never fatal — a GPU that will not pass
+   through is no reason to fail an install that otherwise worked.
 
 ### Useful environment variables
 
@@ -425,7 +434,7 @@ Exit 3 is an initialisation failure, decided before any video is touched,
 which is why it is identical every time and why forty minutes of ripping is
 wasted before you see it.
 
-**Doctor → Encoding → Test the preset** answers it in seconds with no disc,
+**Doctor → Encoding → Test encoding** answers it in seconds with no disc,
 and **Doctor → Hardware encoding** says whether a GPU is reachable at all. The
 two are separate questions: a preset can want hardware that is present but
 unsupported by the build, and a container can have a GPU nobody's preset uses.

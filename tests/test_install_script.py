@@ -100,3 +100,27 @@ class TestTheSummaryTellsTheTruth:
         """An error while merely looking up the IP must not abort before the
         user's only copy of the generated password has been shown."""
         assert install.index("trap - EXIT") < install.index("Root pw:")
+
+
+class TestTheDocumentationMatchesTheScript:
+    """A README describing a capability the installer does not have is worse
+    than one that omits it: someone reads it, does not check, and concludes
+    the thing is broken."""
+
+    @pytest.fixture
+    def readme(self):
+        return Path("README.md").read_text()
+
+    def test_the_installer_steps_mention_the_repair_run(self, readme, install):
+        assert "adr-doctor --fix" in readme
+        assert "adr-doctor --fix --yes" in install
+
+    def test_the_boot_ordering_is_documented(self, readme):
+        """It is the fix for "the drive worked until I rebooted", which is the
+        single most confusing failure this project has."""
+        assert "guest autostart" in readme.lower()
+
+    def test_nothing_promises_a_test_of_the_preset_alone(self, readme):
+        """The encoder test covers whichever encoder is configured, and the
+        GPU path has no preset."""
+        assert "Test the preset" not in readme

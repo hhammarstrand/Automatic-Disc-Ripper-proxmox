@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.15.2
+
+**The README was describing an older application.** It promised a button
+called "Test the preset" that had been renamed, said hardware encoding was
+something `adr-doctor` did afterwards rather than something the installer now
+does, and listed none of what has been added since: one set of encoding
+settings for both encoders, encoding a job again, selecting and deleting
+several at once.
+
+A README that describes a capability the software does not have is worse than
+one that omits it — somebody reads it, does not check, and concludes the thing
+is broken. Tests now compare the two: the installer steps against the script,
+and the feature list against the names the interface actually uses.
+
 ## 1.15.1
 
 **Uninstalling now undoes installing, on both machines.** Installing touches
