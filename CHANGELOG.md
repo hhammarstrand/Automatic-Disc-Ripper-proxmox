@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.4.1
+
+**A film library inside the share was refused, even with the share mounted,
+writable and eight terabytes free.**
+
+`require_completed_mount` asks one question: is my NAS actually attached, or am
+I about to fill the container disk with films while believing otherwise. The
+check answered a narrower one — `os.path.ismount`, which is true only of the
+mount point itself. A share mounted at `/mnt/media` with the library at
+`/mnt/media/Filmer` therefore failed, because a folder inside a mount is never
+a mount point. Putting the library in a subfolder of the share is the ordinary
+way to arrange one.
+
+It now compares the filesystem the path is on against the container's root.
+That accepts the subfolder, and still refuses a directory that merely has the
+right name on the container's own disk — which is the whole reason the check
+exists. The Storage page used the same narrow test and had the same blind spot;
+both now agree, and say so in the same words.
+
+---
+
 ## 1.4.0
 
 **The app knew why every rip would fail and never said so until each one had.**

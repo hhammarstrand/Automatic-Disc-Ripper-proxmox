@@ -61,7 +61,7 @@ class TestStorageWarnings:
 
         assert len(data["warnings"]) == 1
         message = data["warnings"][0]
-        assert "not a mounted filesystem" in message
+        assert "on the container's own disk" in message
         assert "restart the container" in message.lower(), (
             "a bind-mount is captured at container start — the fix must be stated"
         )

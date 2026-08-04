@@ -1342,13 +1342,17 @@ def _register_api_routes(app: Flask) -> None:
         # has attached network storage (which is what require_completed_mount
         # records) and it is no longer there: then rips would quietly fill the
         # container disk instead of reaching the NAS.
-        if _config.require_completed_mount and completed["exists"] and not completed["is_mount"]:
+        # on_separate_filesystem, not is_mount: a library in a subfolder of the
+        # share is not a mount point, and that is the ordinary way to arrange
+        # one. The question is which filesystem the path is on.
+        if (_config.require_completed_mount and completed["exists"]
+                and not completed["on_separate_filesystem"]):
             warnings.append(
-                f"{completed['path']} is not a mounted filesystem. The share "
-                "is detached, so rips will refuse to start rather than fill "
-                "the container disk. A bind-mount is captured when the "
-                "container starts — if it was mounted afterwards, restart "
-                "the container."
+                f"{completed['path']} is on the container's own disk, not on "
+                "attached storage. The share is detached, so rips will refuse "
+                "to start rather than fill the container disk. A bind-mount is "
+                "captured when the container starts — if it was mounted "
+                "afterwards, restart the container."
             )
         if completed["exists"] and not completed["writable"]:
             warnings.append(

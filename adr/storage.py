@@ -75,6 +75,7 @@ def describe_path(path: str | Path) -> dict[str, Any]:
         "path": str(p),
         "exists": False,
         "is_mount": False,
+        "on_separate_filesystem": False,
         "source": None,
         "fstype": None,
         "is_network": False,
@@ -96,6 +97,19 @@ def describe_path(path: str | Path) -> dict[str, Any]:
 
     with contextlib.suppress(OSError):
         info["is_mount"] = os.path.ismount(str(p))
+
+    # Whether the path lives on a filesystem of its own, rather than on the
+    # container's root disk.
+    #
+    # This is the question "is my NAS actually attached" really asks, and
+    # os.path.ismount answers a narrower one: it is true only for the mount
+    # point itself. A library at /mnt/media/Filmer, inside a share mounted at
+    # /mnt/media, is not a mount point — and organising a library into a
+    # subfolder of the share is the normal thing to do. Comparing device ids
+    # gets it right for the subfolder and still says no for a directory that
+    # merely has the right name on the container disk.
+    with contextlib.suppress(OSError):
+        info["on_separate_filesystem"] = os.stat(str(p)).st_dev != os.stat("/").st_dev
 
     source, fstype = _mount_info(str(p))
     info["source"], info["fstype"] = source, fstype
@@ -124,10 +138,15 @@ def check_destination(path: str | Path, require_mount: bool = False) -> tuple[bo
     produces several GB, so discovering at the very end that the destination
     is missing, read-only, or an unmounted NAS wastes the whole run.
 
-    With *require_mount* the path must additionally be a real mount point.
-    ``adr-setup-nas`` turns that on, because for a NAS the difference between
-    "mounted" and "an empty directory on the container disk" is invisible
-    until the disk fills up.
+    With *require_mount* the path must additionally live on attached storage
+    rather than the container's own disk. ``adr-setup-nas`` turns that on,
+    because for a NAS the difference between "mounted" and "an empty directory
+    on the container disk" is invisible until the disk fills up.
+
+    That is a question about the *filesystem the path is on*, not about the
+    path being a mount point itself. A library at /mnt/media/Filmer inside a
+    share mounted at /mnt/media is not a mount point, and putting the library
+    in a subfolder of the share is the ordinary way to arrange one.
 
     Returns ``(ok, message)``; *message* is empty when ok.
     """
@@ -139,12 +158,13 @@ def check_destination(path: str | Path, require_mount: bool = False) -> tuple[bo
             "Check 'Completed MP4 folder' under Settings."
         )
 
-    if require_mount and not info["is_mount"]:
+    if require_mount and not info["on_separate_filesystem"]:
         return False, (
-            f"Destination {info['path']} is not a mounted filesystem. The NAS "
-            "share is not attached, so finished files would fill the container "
-            "disk instead. A bind-mount is captured when the container starts — "
-            "if the NAS was mounted afterwards, restart the container."
+            f"Destination {info['path']} is on the container's own disk, not on "
+            "attached storage. The NAS share is not mounted, so finished files "
+            "would fill the container disk instead. A bind-mount is captured "
+            "when the container starts — if the NAS was mounted afterwards, "
+            "restart the container."
         )
 
     if not info["writable"]:

@@ -144,7 +144,7 @@ class TestCheckDestination:
         """The NAS case: an unmounted share looks like an ordinary empty dir."""
         ok, msg = check_destination(tmp_path, require_mount=True)
         assert ok is False
-        assert "not a mounted filesystem" in msg
+        assert "on the container's own disk" in msg
         assert "restart the container" in msg
 
     def test_require_mount_accepts_a_real_mount_point(self):

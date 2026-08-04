@@ -98,7 +98,7 @@ def _destination_fix(detail: str) -> str:
     except the word destination, and one piece of generic advice for both
     helps with neither.
     """
-    if "not a mounted filesystem" in detail:
+    if "own disk, not on attached storage" in detail:
         return (
             "A bind-mount is captured when the container starts. If the share was "
             "mounted on the host afterwards, restart the container: pct reboot {ctid}. "

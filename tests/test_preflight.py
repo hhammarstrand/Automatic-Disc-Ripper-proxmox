@@ -10,6 +10,7 @@ promises a rip that then fails, or warns about one that would have worked. So
 the first tests here are about that agreement, not about the wording.
 """
 
+import pathlib
 import queue
 import types
 
@@ -65,7 +66,7 @@ class TestDestinationBlocker:
         films would quietly fill the container disk."""
         config.update({"require_completed_mount": True})
         detail = preflight.destination_blocker(config)
-        assert detail and "not a mounted filesystem" in detail
+        assert detail and "on the container's own disk" in detail
 
     def test_a_broken_plex_library_is_named_as_such(self, config, tmp_path):
         config.update({"plex_path": str(tmp_path / "no-library")})
@@ -193,7 +194,9 @@ class TestTheFixMatchesTheFault:
     """"Not mounted" and "not writable" need opposite actions."""
 
     def test_an_unmounted_share_says_restart_the_container(self):
-        fix = preflight._destination_fix("Destination /mnt/media is not a mounted filesystem.")
+        fix = preflight._destination_fix(
+            "Destination /mnt/media is on the container's own disk, not on attached storage.",
+        )
         assert "pct reboot" in fix
         assert "captured when the container starts" in fix
 
@@ -239,7 +242,7 @@ def test_rip_now_refuses_instead_of_making_another_red_job(config, monkeypatch):
     ok, message = mgr.rip_now("/dev/sr0")
     assert ok is False
     assert "Ripping would fail" in message
-    assert "not a mounted filesystem" in message
+    assert "on the container's own disk" in message
 
 
 # ------------------------------------------------------------------ #
@@ -268,7 +271,8 @@ class TestTheBanner:
         html = client.get("/").data.decode()
         assert "preflightBanner" in html
         assert "Ripping will fail" in html
-        assert "not a mounted filesystem" in html
+        # No apostrophe in the match: Jinja escapes it to &#39;.
+        assert "own disk, not on attached storage" in html
 
     def test_the_banner_carries_the_fix(self, client, config):
         config.update({"require_completed_mount": True})
@@ -279,7 +283,7 @@ class TestTheBanner:
         config.update({"require_completed_mount": True})
         payload = client.get("/api/preflight").get_json()
         assert payload["ok"] is False
-        assert "not a mounted filesystem" in payload["blockers"][0]["detail"]
+        assert "on the container's own disk" in payload["blockers"][0]["detail"]
 
     def test_the_api_says_ok_when_it_is(self, client):
         assert client.get("/api/preflight").get_json() == {"ok": True, "blockers": []}
@@ -298,3 +302,65 @@ class TestTheBanner:
         for _ in range(4):
             client.get("/api/preflight")
         assert len(calls) == 1
+
+
+# ------------------------------------------------------------------ #
+# A library inside the share
+# ------------------------------------------------------------------ #
+
+class TestASubfolderOfTheShareIsFine:
+    """The ordinary way to arrange a library, and it used to be refused.
+
+    require_completed_mount asks "is my NAS actually attached". The old check
+    answered a narrower question — os.path.ismount, true only for the mount
+    point itself. A share mounted at /mnt/media with the film library at
+    /mnt/media/Filmer therefore failed: a folder inside a mount is never a
+    mount point. The share was attached, writable and had eight terabytes
+    free, and every rip was refused anyway.
+    """
+
+    @pytest.fixture
+    def share(self):
+        """A real mount to put a subfolder in. /dev/shm is a tmpfs."""
+        import os
+        import shutil
+        import uuid
+
+        if not os.path.ismount("/dev/shm"):
+            pytest.skip("no tmpfs at /dev/shm to stand in for the share")
+        root = pathlib.Path("/dev/shm") / f"adr-test-{uuid.uuid4().hex[:8]}"
+        (root / "Filmer").mkdir(parents=True)
+        yield root
+        shutil.rmtree(root, ignore_errors=True)
+
+    def test_the_mount_point_itself_passes(self, share):
+        from adr.storage import check_destination
+
+        ok, message = check_destination("/dev/shm", require_mount=True)
+        assert ok, message
+
+    def test_a_subfolder_of_the_mount_passes_too(self, share):
+        from adr.storage import check_destination
+
+        ok, message = check_destination(share / "Filmer", require_mount=True)
+        assert ok, f"a library inside the share must be accepted: {message}"
+
+    def test_a_folder_on_the_container_disk_is_still_refused(self, tmp_path):
+        """The check must still catch what it exists to catch: a directory
+        with the right name on the wrong filesystem."""
+        from adr.storage import check_destination
+
+        ok, message = check_destination(tmp_path, require_mount=True)
+        assert ok is False
+        assert "own disk, not on attached storage" in message
+
+    def test_the_reported_setup_end_to_end(self, config, share, no_drive_blockers):
+        """Share mounted at one path, library in a subfolder of it."""
+        config.update({
+            "completed_path": str(share),
+            "plex_path": str(share / "Filmer"),
+            "require_completed_mount": True,
+            "stage_locally": False,
+        })
+        assert preflight.destination_blocker(config) is None
+        assert preflight.check(config).ok
