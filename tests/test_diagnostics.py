@@ -24,6 +24,7 @@ def _config(tmp_path, **overrides):
         "handbrake_preset_file": "",
         "auto_move_to_plex": True,
         "require_completed_mount": False,
+        "handbrake_path": "/usr/bin/HandBrakeCLI",
     }
     data.update(overrides)
     return types.SimpleNamespace(**data)
@@ -151,7 +152,7 @@ class TestRunChecks:
         ids = {c["id"] for c in result["checks"]}
         assert ids == {
             "drives", "tools", "preset", "makemkv_key", "audio_tools",
-            "destination", "scratch", "database",
+            "hardware_encoding", "destination", "scratch", "database",
         }
 
     def test_a_check_that_explodes_does_not_hide_the_others(self, tmp_path, monkeypatch):
@@ -160,7 +161,7 @@ class TestRunChecks:
         monkeypatch.setattr(diagnostics, "check_drives", _boom)
 
         result = diagnostics.run_checks(_config(tmp_path))
-        assert len(result["checks"]) == 8, "a broken drive must not hide a full disk"
+        assert len(result["checks"]) == 9, "a broken drive must not hide a full disk"
         drives = next(c for c in result["checks"] if c["id"] == "drives")
         assert drives["status"] == "warn"
         assert "sysfs went away" in drives["detail"]
@@ -254,3 +255,51 @@ class TestPreset:
         preset.write_text('{"PresetName": "Solo"}')
         check = diagnostics.check_preset(self._config_with(tmp_path, "Solo", preset))
         assert check["status"] == "ok"
+
+
+class TestHardwareEncoding:
+    """A preset that asks for a GPU the container does not have fails every
+    title of every disc, identically, at initialisation."""
+
+    def test_software_presets_need_no_gpu(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("adr.gpu.preset_wants_hardware", lambda f, n: "")
+        monkeypatch.setattr("adr.gpu.describe", lambda: {
+            "available": False, "nodes": [], "detail": "no /dev/dri", "fix": "",
+        })
+        check = diagnostics.check_hardware_encoding(
+            _config(tmp_path, handbrake_preset="Fast 1080p30"))
+        assert check["status"] == "ok"
+        assert "software" in check["detail"]
+
+    def test_a_hardware_preset_without_a_gpu_is_a_failure(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("adr.gpu.preset_wants_hardware", lambda f, n: "qsv_h264")
+        monkeypatch.setattr("adr.gpu.describe", lambda: {
+            "available": False, "nodes": [],
+            "detail": "/dev/dri does not exist in this container.",
+            "fix": "Run on the Proxmox host: adr-doctor --fix {ctid}",
+        })
+        check = diagnostics.check_hardware_encoding(
+            _config(tmp_path, handbrake_preset="Super HQ"))
+        assert check["status"] == "fail"
+        assert "qsv_h264" in check["detail"]
+        assert "adr-doctor --fix" in check["fix"]
+
+    def test_a_hardware_preset_with_a_gpu_passes(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("adr.gpu.preset_wants_hardware", lambda f, n: "qsv_h264")
+        monkeypatch.setattr("adr.gpu.describe", lambda: {
+            "available": True, "nodes": ["/dev/dri/renderD128"],
+            "detail": "present", "fix": "",
+        })
+        check = diagnostics.check_hardware_encoding(_config(tmp_path))
+        assert check["status"] == "ok"
+        assert "renderD128" in check["detail"]
+
+    def test_a_gpu_nobody_asked_for_is_not_a_problem(self, tmp_path, monkeypatch):
+        """Noise about hardware someone never wanted trains people to ignore
+        the page."""
+        monkeypatch.setattr("adr.gpu.preset_wants_hardware", lambda f, n: "")
+        monkeypatch.setattr("adr.gpu.describe", lambda: {
+            "available": True, "nodes": ["/dev/dri/renderD128"],
+            "detail": "present", "fix": "",
+        })
+        assert diagnostics.check_hardware_encoding(_config(tmp_path))["status"] == "ok"

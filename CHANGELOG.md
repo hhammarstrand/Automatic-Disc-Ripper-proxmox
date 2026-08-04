@@ -1,5 +1,44 @@
 # Changelog
 
+## 1.7.0
+
+**The preset wanted a GPU the container did not have.** The encoder test
+added in 1.6.1 found it on its first run against a real installation:
+
+```
+ERROR: encqsvInit: qsv is not available on the system
+ERROR: Failure to initialise thread 'Quick Sync Video encoder (Intel Media SDK)'
+```
+
+A preset exported from HandBrake on a desktop asks for that desktop's encoder.
+Inside an LXC it does not exist unless the GPU was passed through, so every
+title of every disc failed identically at initialisation.
+
+The advice for this was half an answer: *pick a software preset*. That throws
+away the hardware the person deliberately chose, when the fix is one host-side
+config line — the same kind of line that already passes the optical drive
+through.
+
+**`adr-doctor --fix` now passes the GPU through too**: the DRM character major
+and a bind of `/dev/dri`, offered only when the host actually has a render
+node, because binding a device that is not there would be noise.
+
+**Doctor gained a Hardware encoding check.** It reads the encoder out of the
+preset file rather than guessing from its name — "Super HQ 1080p30 Surround"
+says nothing about the encoder, and the encoder is the whole question — and it
+stays quiet when the preset encodes in software, because a red cross about
+hardware nobody asked for trains people to ignore the page.
+
+The encode test now tells the two situations apart. No GPU in the container
+names both ways out, with the command for each. A GPU that *is* there means
+the build lacks the encoder instead, which is a different sentence and a
+different fix. And a render node that exists but will not open is separated
+again: permission denied is the service user's groups, anything else is the
+device cgroup — three problems that look identical and need three different
+answers.
+
+---
+
 ## 1.6.1
 
 **"HandBrake exited with code 3" ten times in a row is one problem, not ten.**

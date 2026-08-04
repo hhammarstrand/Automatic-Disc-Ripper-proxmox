@@ -27,6 +27,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Doctor page** that self-diagnoses drives, tools, keys and storage — and updates the app from GitHub with one button.
 - **Logs page** with the service's own log, filterable by level and text — no `pct exec`, no journald, no shell.
 - **Test the preset** without a disc: encodes two seconds of video with your real settings and says what HandBrake objected to.
+- **Hardware encoding**: `adr-doctor --fix` passes the host's GPU into the container, so a Quick Sync or NVENC preset works instead of failing on every title.
 - **Copy diagnostics**: one button produces everything needed to diagnose the install as a single paste, with keys and tokens removed.
 - **Television discs**: box sets are recognised from title durations and named `Show (Year)/Season 02/Show (Year) - S02E05.mp4`.
 - **Series mode**: set the show once, then feed a whole box set — the episode number carries across discs on its own.
@@ -407,6 +408,36 @@ having failed.
 The token: in Plex, open any item → *Get Info* → *View XML*, and copy
 `X-Plex-Token` out of the URL. **Fetch libraries** then lists them so you pick
 one instead of guessing a section key.
+
+### Hardware encoding
+
+A preset exported from HandBrake on a desktop asks for that desktop's encoder
+— Intel Quick Sync, NVENC, VAAPI. Inside an LXC none of them exist unless the
+GPU was passed through, and HandBrake fails the same way on every title of
+every disc:
+
+```
+ERROR: encqsvInit: qsv is not available on the system
+Encode failed (error 3).
+```
+
+Exit 3 is an initialisation failure, decided before any video is touched,
+which is why it is identical every time and why forty minutes of ripping is
+wasted before you see it.
+
+**Doctor → Encoding → Test the preset** answers it in seconds with no disc,
+and **Doctor → Hardware encoding** says whether a GPU is reachable at all. The
+two are separate questions: a preset can want hardware that is present but
+unsupported by the build, and a container can have a GPU nobody's preset uses.
+
+`adr-doctor --fix <CTID>` on the Proxmox host adds the passthrough — the DRM
+character major and a bind of `/dev/dri` — alongside the optical drive it
+already handles. It only offers this when the host actually has a render node,
+because binding a device that is not there would be noise.
+
+If you would rather not, a software preset (`Fast 1080p30`, or anything x264
+or x265) needs nothing from the host. It is slower and that is the whole
+trade.
 
 ### Asking someone for help
 

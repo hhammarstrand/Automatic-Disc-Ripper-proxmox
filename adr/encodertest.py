@@ -51,10 +51,9 @@ _EXPLANATIONS = (
     (r"preset.*not found|invalid preset|unknown preset",
      "The preset name does not exist in the file that was imported. "
      "Settings → HandBrake preset must match a name inside the preset file."),
-    (r"nvenc|qsv|vce|videotoolbox|hardware",
-     "The preset asks for a hardware encoder. A container has no GPU access "
-     "unless it was given one, so pick a software preset — anything x264 or "
-     "x265 — under Settings → HandBrake preset."),
+    # Hardware is handled separately, by _hardware_advice: whether to pass the
+    # GPU through or change the preset depends on what the container has, and
+    # one sentence for both throws away a working answer.
     (r"unknown (video |audio )?encoder|encoder .* not (found|supported)|no such encoder",
      "This build of HandBrake was compiled without the encoder the preset "
      "asks for. Pick a preset that uses x264, which every build has."),
@@ -69,11 +68,44 @@ def _step(name: str, status: str, detail: str, fix: str = "") -> dict:
 
 def _explain(output: str) -> str:
     """Turn HandBrake's complaint into something to do about it."""
+    from adr import gpu
+
+    if gpu.mentions_hardware(output):
+        return _hardware_advice()
     lowered = output.lower()
     for pattern, advice in _EXPLANATIONS:
         if re.search(pattern, lowered):
             return advice
     return ""
+
+
+def _hardware_advice() -> str:
+    """What to do when the preset wants a GPU.
+
+    Two different answers, and which one is right depends on whether the
+    container has a render node. Telling someone to "use a software preset"
+    when the hardware is one config line away throws away the reason they
+    chose that preset; telling them to pass a GPU through when the host has
+    none wastes their evening.
+    """
+    from adr import gpu
+
+    state = gpu.describe()
+    if state["available"]:
+        return (
+            "The preset asks for a hardware encoder and this container does "
+            f"have {state['nodes'][0]} — so the encoder itself is missing from "
+            "this HandBrake build rather than the GPU being absent. A software "
+            "preset (x264 or x265) will work."
+        )
+    return (
+        "The preset asks for a hardware encoder, and this container has no GPU. "
+        + state["detail"]
+        + " Either pass the GPU through — " + (state["fix"] or "adr-doctor --fix {ctid}")
+        + " — or pick a software preset such as 'Fast 1080p30' under "
+        "Settings → HandBrake preset. Software is slower but needs nothing "
+        "from the host."
+    )
 
 
 def _meaningful(output: str, limit: int = 6) -> str:

@@ -153,6 +153,50 @@ if [[ ${#HOST_SR[@]} -gt 0 ]]; then
 fi
 
 # ----------------------------------------------------------------------------- #
+# 3b. The GPU, for hardware encoding
+#
+# A HandBrake preset exported from a desktop usually asks for that desktop's
+# encoder — Quick Sync, NVENC, VAAPI. Inside an LXC none of them exist unless
+# the GPU was passed through, and HandBrake fails identically on every title of
+# every disc: "encqsvInit: qsv is not available on the system", exit 3, forty
+# minutes after the disc went in.
+#
+# Hardware encoding goes through a DRM render node, character major 226. Only
+# offered when the host actually has one: adding a bind for a device that is
+# not there would be noise, and 'optional' would hide it anyway.
+# ----------------------------------------------------------------------------- #
+if [[ -d /dev/dri ]] && compgen -G "/dev/dri/renderD*" >/dev/null; then
+    declare -a WANT_GPU=(
+        "lxc.cgroup2.devices.allow: c ${DRM_MAJOR:-226}:* rwm"
+        "lxc.mount.entry: /dev/dri dev/dri none bind,optional,create=dir"
+    )
+    MISSING_GPU=()
+    for rule in "${WANT_GPU[@]}"; do
+        grep -qxF "$rule" "$CONF" || MISSING_GPU+=("$rule")
+    done
+
+    if [[ ${#MISSING_GPU[@]} -eq 0 ]]; then
+        msg_ok "GPU is passed through (hardware encoding available)"
+    else
+        note_problem "The host has a GPU this container cannot use:"
+        for node in /dev/dri/renderD*; do
+            [[ -e "$node" ]] && printf '          %s\n' "$node"
+        done
+        msg_warn "        A HandBrake preset that asks for Quick Sync, NVENC or VAAPI"
+        msg_warn "        fails on every title until this is passed through."
+        if [[ "$FIX" -eq 1 ]]; then
+            printf '%s\n' "${MISSING_GPU[@]}" >> "$CONF"
+            note_fixed "added GPU passthrough (${#MISSING_GPU[@]} line(s))"
+            NEEDS_RESTART=1
+        else
+            would_fix "append them"
+        fi
+    fi
+else
+    msg_ok "No GPU on the host — software encoding is the only option, which is fine"
+fi
+
+# ----------------------------------------------------------------------------- #
 # 4. Boot ordering — the "worked until I rebooted" bug
 # ----------------------------------------------------------------------------- #
 DROPIN=/etc/systemd/system/pve-guests.service.d/adr-optical.conf

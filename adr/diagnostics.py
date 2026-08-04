@@ -89,6 +89,45 @@ def check_audio_tools(config) -> dict:
     )
 
 
+def check_hardware_encoding(config) -> dict:
+    """Whether a preset that wants a GPU can have one.
+
+    Only interesting when a preset actually asks for hardware. Most people
+    encode in software and a red cross about a GPU they never wanted is noise
+    — but for someone whose preset asks for Quick Sync, this is the whole
+    reason every disc fails.
+    """
+    from adr import gpu
+    from adr.encodertest import _preset_file
+
+    wanted = gpu.preset_wants_hardware(_preset_file(config), config.handbrake_preset)
+    state = gpu.describe()
+
+    if not wanted:
+        if state["available"]:
+            return _check(
+                "hardware_encoding", "Hardware encoding", "ok",
+                f"A GPU is available ({state['nodes'][0]}), though the current "
+                "preset does not ask for one.",
+            )
+        return _check(
+            "hardware_encoding", "Hardware encoding", "ok",
+            "Not used: the preset encodes in software, which needs no GPU.",
+        )
+
+    if state["available"]:
+        return _check(
+            "hardware_encoding", "Hardware encoding", "ok",
+            f"The preset uses '{wanted}' and {state['nodes'][0]} is available.",
+        )
+    return _check(
+        "hardware_encoding", "Hardware encoding", "fail",
+        f"The preset uses '{wanted}', which needs a GPU. {state['detail']} "
+        "Every encode will fail at initialisation until this is fixed.",
+        state["fix"] or "Settings → HandBrake preset, or adr-doctor --fix {ctid}",
+    )
+
+
 def check_makemkv_key() -> dict:
     """MakeMKV refuses to read a disc without a registration key."""
     from adr.makemkv_key import read_existing_key
@@ -327,6 +366,7 @@ def run_checks(config) -> dict:
         ("preset", lambda: check_preset(config)),
         ("makemkv_key", lambda: check_makemkv_key()),
         ("audio_tools", lambda: check_audio_tools(config)),
+        ("hardware_encoding", lambda: check_hardware_encoding(config)),
         ("destination", lambda: check_destination_path(config)),
         ("scratch", lambda: check_scratch(config)),
         ("database", lambda: check_database(config)),
