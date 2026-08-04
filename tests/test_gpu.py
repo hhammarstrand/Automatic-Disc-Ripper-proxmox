@@ -472,3 +472,50 @@ class TestDescribingTheContainer:
         monkeypatch.setattr(gpu, "DRI_DIR", Path("/proc/self/mem"))
         state = gpu.describe()
         assert isinstance(state["available"], bool)
+
+
+class TestTheRuntimeCanBeTheWrongOne:
+    """Having a Quick Sync runtime is not the same as having the right one.
+
+    The oneVPL GPU runtime refuses a Gen 9.5 chip outright; the older Media
+    SDK stops at Gen 11. HandBrake's error is identical either way — "qsv is
+    not available on the system" — so a stack that is present and wrong looks
+    exactly like a stack that is present and right, and the encoder test is
+    the only thing that can tell them apart. The note exists so its answer has
+    a next step.
+    """
+
+    def test_one_runtime_names_what_it_covers_and_what_it_does_not(self):
+        note = gpu._runtime_coverage_note(
+            gpu.VENDOR_INTEL, ["/usr/lib/x86_64-linux-gnu/libmfxhw64.so.1"],
+        )
+        assert "libmfx1" in note
+        assert "Comet Lake" in note
+        assert "libmfxgen1" in note          # the one to try next
+
+    def test_the_other_runtime_points_the_other_way(self):
+        note = gpu._runtime_coverage_note(
+            gpu.VENDOR_INTEL, ["/usr/lib/x86_64-linux-gnu/libmfx-gen.so.1.2"],
+        )
+        assert "libmfxgen1" in note
+        assert "Alder Lake" in note
+        assert "libmfx1" in note
+
+    def test_both_installed_needs_no_warning(self):
+        """The dispatcher picks. There is nothing to say."""
+        assert gpu._runtime_coverage_note(
+            gpu.VENDOR_INTEL, ["libmfxhw64.so.1", "libmfx-gen.so.1.2"],
+        ) == ""
+
+    def test_neither_installed_is_handled_elsewhere(self):
+        assert gpu._runtime_coverage_note(gpu.VENDOR_INTEL, []) == ""
+
+    def test_amd_is_not_told_about_quick_sync(self):
+        assert gpu._runtime_coverage_note(
+            gpu.VENDOR_AMD, ["libmfxhw64.so.1"],
+        ) == ""
+
+    def test_every_runtime_this_module_looks_for_is_described(self):
+        """A runtime added to the probe without an entry here would produce a
+        KeyError in the middle of a diagnostic."""
+        assert set(gpu.RUNTIME_COVERAGE) == set(gpu.QSV_RUNTIME_LIBS)

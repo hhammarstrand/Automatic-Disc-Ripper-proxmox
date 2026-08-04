@@ -70,6 +70,41 @@ else
 fi
 
 # ----------------------------------------------------------------------------- #
+# The GPU's userspace half
+#
+# Ubuntu's handbrake-cli *is* built with Quick Sync: the source package
+# build-depends on libvpl-dev, the oneVPL dispatcher. What it ships is a
+# loader, and a loader needs something to load. Without a runtime HandBrake
+# says "encqsvInit: qsv is not available on the system" — exactly what it says
+# on a machine with no GPU at all, which is how this went undiagnosed.
+#
+# Two runtimes exist and they cover different silicon. libmfx1 is the older
+# Media SDK (libmfxhw64.so) and is what Gen 9 through Gen 11 needs — Skylake
+# to Comet Lake and Ice Lake. libmfxgen1 is the oneVPL GPU runtime
+# (libmfx-gen.so), which starts at Alder Lake. Installing both and letting the
+# dispatcher pick costs a few megabytes and removes a question nobody should
+# have to answer about their own processor.
+#
+# Best-effort, one package at a time: the names differ across releases, some
+# live in components a given container has not enabled, and any one of them
+# missing must not take the others with it. The Doctor page checks the result
+# and the encoder test proves it by encoding two seconds of video.
+msg_info "Installing the GPU media stack (hardware encoding)…"
+GPU_INSTALLED=""
+for pkg in intel-media-va-driver-non-free intel-media-va-driver i965-va-driver \
+           libmfx1 libmfxgen1 libvpl2 mesa-va-drivers vainfo; do
+    if apt-get install -y -qq "$pkg" >/dev/null 2>&1; then
+        GPU_INSTALLED="${GPU_INSTALLED} ${pkg}"
+    fi
+done
+if [[ -n "$GPU_INSTALLED" ]]; then
+    msg_ok "GPU media stack installed:${GPU_INSTALLED}"
+else
+    msg_warn "Could not install any GPU media packages — encoding will use the CPU."
+    msg_warn "    Settings → Encoding → Test encoder will say so in words."
+fi
+
+# ----------------------------------------------------------------------------- #
 # MakeMKV from the heyarje PPA (no compilation)
 #
 # https://launchpad.net/~heyarje/+archive/ubuntu/makemkv-beta

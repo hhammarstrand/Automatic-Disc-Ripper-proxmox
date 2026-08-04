@@ -239,6 +239,7 @@ def runtime_state() -> dict:
         state["ok"] = True
         installed = ", ".join(drivers + libs) or "none found"
         state["detail"] = f"The GPU driver stack is installed: {installed}."
+        state["detail"] += _runtime_coverage_note(vendor, libs)
         return state
 
     detail = (
@@ -265,6 +266,42 @@ def runtime_state() -> dict:
     state["detail"] = detail
     state["fix"] = "Run on the Proxmox host: adr-doctor --fix {ctid}"
     return state
+
+
+#: Which Quick Sync runtime covers which silicon, and the package that ships
+#: it. Having one of them is not the same as having the right one: the oneVPL
+#: GPU runtime refuses a Gen 9.5 chip outright, and the Media SDK stops at
+#: Gen 11. HandBrake's answer is the same either way — "qsv is not available
+#: on the system" — so a stack that is *present* can still be the wrong one,
+#: and that is a much harder thing to see than a stack that is missing.
+RUNTIME_COVERAGE = {
+    "libmfxhw64.so": ("libmfx1", "Gen 9 to Gen 11 — Skylake through Comet Lake and Ice Lake"),
+    "libmfx-gen.so": ("libmfxgen1", "Alder Lake and later, including Xe and Arc"),
+}
+
+
+def _runtime_coverage_note(vendor: str, libs: list[str]) -> str:
+    """Say which chips the installed Quick Sync runtime actually covers.
+
+    Only when exactly one of the two is installed, because that is the case
+    where "installed" and "usable" come apart. Both present means the
+    dispatcher picks, and there is nothing to warn about.
+    """
+    if vendor != VENDOR_INTEL:
+        return ""
+    present = [name for name in QSV_RUNTIME_LIBS
+               if any(name in lib for lib in libs)]
+    if len(present) != 1:
+        return ""
+    package, covers = RUNTIME_COVERAGE[present[0]]
+    other = next(name for name in QSV_RUNTIME_LIBS if name != present[0])
+    other_package, other_covers = RUNTIME_COVERAGE[other]
+    return (
+        f" The Quick Sync runtime installed is {package} ({present[0]}), which "
+        f"covers {covers}. If the encoder test still finds no hardware encoder, "
+        f"this processor is likely {other_covers} — install {other_package} as "
+        "well and test again."
+    )
 
 
 def vainfo() -> dict:

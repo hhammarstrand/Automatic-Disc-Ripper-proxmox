@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.17.1
+
+**The container never installed the GPU's userspace half.** Ubuntu's
+`handbrake-cli` *is* built with Quick Sync — the source package build-depends
+on `libvpl-dev`, the oneVPL dispatcher — so the long-standing belief that
+HandBrake simply cannot use the GPU on this platform was wrong. What ships is
+a loader, and a loader needs a runtime to load. The installer put in
+HandBrake, MakeMKV, ffmpeg and cdparanoia, and nothing at all for the GPU, so
+HandBrake said "encqsvInit: qsv is not available on the system" — which is
+also exactly what it says on a machine with no GPU.
+
+The installer now installs the media stack: the Intel VA-API driver, both
+Quick Sync runtimes, and the AMD equivalent. Best-effort, one package at a
+time, because the names differ across releases and one unavailable name must
+not take the others with it.
+
+**And having a runtime is not the same as having the right one.** There are
+two, covering different silicon: `libmfx1` (`libmfxhw64.so`) for Gen 9 through
+Gen 11 — Skylake to Comet Lake and Ice Lake — and `libmfxgen1`
+(`libmfx-gen.so`) for Alder Lake and later. Either one alone satisfied the
+"is a runtime installed" check while being refused by the actual chip, and
+HandBrake reports that identically to having neither. The Doctor page now
+names which one is installed, what it covers, and which to add if the encoder
+test still finds nothing.
+
 ## 1.17.0
 
 **The service ripped an empty drive every time it started.** Container comes
