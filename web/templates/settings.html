@@ -817,10 +817,10 @@ function saveSettings(e) {
                 if (restart) restart.classList.remove('d-none');
             }
         } else {
-            alert('Could not save: ' + (result.error || 'Unknown error'));
+            notify('Could not save: ' + (result.error || 'Unknown error'), 'danger');
         }
     })
-    .catch(err => alert('Error: ' + err.message));
+    .catch(err => notify('Error: ' + err.message, 'danger'));
 
     return false;
 }
@@ -879,7 +879,7 @@ function loadPresets() {
         })
         .catch(err => {
             console.error('Failed to load presets:', err);
-            alert('Could not fetch presets: ' + err.message);
+            notify('Could not fetch presets: ' + err.message, 'danger');
         })
         .finally(() => {
             refreshBtn.disabled = false;
@@ -920,18 +920,25 @@ if (encoderBackend) {
 
 // ---- Hidden drives management ----
 function unhideDrive(driveLetter) {
-    if (!confirm('Show drive ' + driveLetter + ' on the dashboard again?')) return;
-    fetch('/api/drives/' + encodeURIComponent(driveLetter) + '/toggle', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({disabled: false}),
-    })
-    .then(r => r.json())
-    .then(data => {
-        if (data.ok) location.reload();
-        else alert('Could not change: ' + (data.error || 'Unknown error'));
-    })
-    .catch(err => alert('Error: ' + err.message));
+    confirmAction({
+        title: 'Show this drive again?',
+        body: `Drive <code>${driveLetter}</code> will reappear on the dashboard.`,
+        confirmLabel: 'Show it',
+    }).then(confirmed => {
+        if (!confirmed) return;
+
+        fetch('/api/drives/' + encodeURIComponent(driveLetter) + '/toggle', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({disabled: false}),
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.ok) location.reload();
+            else notify('Could not change: ' + (data.error || 'Unknown error'), 'danger');
+        })
+        .catch(err => notify('Error: ' + err.message, 'danger'));
+    });
 }
 
 // ---- Notifications ----

@@ -3,6 +3,89 @@
  */
 
 // ------------------------------------------------------------------ //
+// Saying things, and asking things
+//
+// The browser's alert() and confirm() were used sixty-odd times here. They
+// block the page, they look nothing like it, and on a phone they are a
+// full-screen system dialog for "3 jobs removed". These are the replacements
+// and every call site uses them.
+//
+// notify() is for something that has happened: it appears, it does not stop
+// anyone doing the next thing, and it goes away. Failures stay until they are
+// dismissed, because a message you did not read is the same as no message and
+// the ones that matter are the ones that went wrong.
+//
+// confirmAction() is for something about to happen. It returns a promise
+// rather than a boolean, which is the one place these are not a drop-in
+// replacement — and worth it, because it can then show the *detail* of what
+// is about to happen instead of cramming a list of file paths into a string.
+// ------------------------------------------------------------------ //
+
+const TOAST_MILLISECONDS = 5000;
+
+function notify(message, kind = 'info') {
+    const host = document.getElementById('toastHost');
+    if (!host) { console.log(message); return; }   // a page without base.html
+
+    const icons = {
+        success: 'bi-check-circle-fill',
+        danger: 'bi-exclamation-octagon-fill',
+        warning: 'bi-exclamation-triangle-fill',
+        info: 'bi-info-circle-fill',
+    };
+    const element = document.createElement('div');
+    element.className = `toast align-items-center border-0 adr-toast adr-toast-${kind}`;
+    element.setAttribute('role', 'alert');
+    element.innerHTML = `
+        <div class="d-flex">
+            <div class="toast-body">
+                <i class="bi ${icons[kind] || icons.info} me-2"></i>${escapeHtml(message)}
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto"
+                    data-bs-dismiss="toast" aria-label="Close"></button>
+        </div>`;
+    host.appendChild(element);
+
+    // A failure stays put. Everything else has said its piece in five seconds.
+    const toast = new bootstrap.Toast(element, {
+        autohide: kind !== 'danger',
+        delay: TOAST_MILLISECONDS,
+    });
+    element.addEventListener('hidden.bs.toast', () => element.remove());
+    toast.show();
+}
+
+function confirmAction({title, body, detail = '', confirmLabel = 'Confirm', danger = false}) {
+    return new Promise(resolve => {
+        const element = document.getElementById('confirmModal');
+        if (!element) { resolve(window.confirm(body)); return; }
+
+        document.getElementById('confirmTitle').textContent = title;
+        document.getElementById('confirmBody').innerHTML = body;
+
+        // The detail pane exists so a delete can list the actual paths. A
+        // count is not something anyone can check; a list is.
+        const detailPane = document.getElementById('confirmDetail');
+        detailPane.textContent = detail;
+        detailPane.classList.toggle('d-none', !detail);
+
+        const go = document.getElementById('confirmGo');
+        go.textContent = confirmLabel;
+        go.className = 'btn ' + (danger ? 'btn-danger' : 'btn-primary');
+
+        const modal = bootstrap.Modal.getOrCreateInstance(element);
+        let answer = false;
+        const accept = () => { answer = true; modal.hide(); };
+        go.addEventListener('click', accept, {once: true});
+        element.addEventListener('hidden.bs.modal', () => {
+            go.removeEventListener('click', accept);
+            resolve(answer);
+        }, {once: true});
+        modal.show();
+    });
+}
+
+// ------------------------------------------------------------------ //
 // Auto-refresh active jobs every 5 seconds
 // ------------------------------------------------------------------ //
 
@@ -146,35 +229,49 @@ function updateQueueSize() {
 // ------------------------------------------------------------------ //
 
 function cancelJob(jobId) {
-    if (!confirm('Are you sure you want to cancel job #' + jobId + '?')) return;
+    confirmAction({
+        title: "Cancel this job?",
+        body: 'Are you sure you want to cancel job #' + jobId + '?',
+        confirmLabel: "Cancel the job",
+        danger: true,
+    }).then(confirmed => {
+        if (!confirmed) return;
 
-    fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) {
-                location.reload();
-            } else {
-                alert('Could not cancel: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(err => alert('Error: ' + err.message));
+        fetch(`/api/jobs/${jobId}/cancel`, { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    location.reload();
+                } else {
+                    notify('Could not cancel: ' + (data.error || 'Unknown error'), 'danger');
+                }
+            })
+            .catch(err => notify('Error: ' + err.message, 'danger'));
+    });
 }
 
 function toggleDrive(driveLetter, disable) {
     const action = disable ? 'disable' : 'enable';
-    if (!confirm(`Do you want to ${action} drive ${driveLetter}?`)) return;
+    confirmAction({
+        title: "Change this drive?",
+        body: `Do you want to ${action} drive ${driveLetter}?`,
+        confirmLabel: "Yes, do it",
+        danger: false,
+    }).then(confirmed => {
+        if (!confirmed) return;
 
-    fetch('/api/drives/toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device: driveLetter, disabled: disable }),
-    })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) location.reload();
-            else alert('Could not change: ' + (data.error || 'Unknown error'));
+        fetch('/api/drives/toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device: driveLetter, disabled: disable }),
         })
-        .catch(err => alert('Error: ' + err.message));
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) location.reload();
+                else notify('Could not change: ' + (data.error || 'Unknown error'), 'danger');
+            })
+            .catch(err => notify('Error: ' + err.message, 'danger'));
+    });
 }
 
 // ------------------------------------------------------------------ //
@@ -194,10 +291,10 @@ function ripNow(driveLetter) {
     })
         .then(r => r.json().then(d => ({ ok: r.ok, d })))
         .then(({ ok, d }) => {
-            if (!ok) { alert(d.message || 'Could not start the rip.'); return; }
+            if (!ok) { notify(d.message || 'Could not start the rip.', 'danger'); return; }
             setTimeout(() => location.reload(), 800);
         })
-        .catch(err => alert('Error: ' + err.message));
+        .catch(err => notify('Error: ' + err.message, 'danger'));
 }
 
 // ------------------------------------------------------------------ //
@@ -206,19 +303,26 @@ function ripNow(driveLetter) {
 
 function toggleEject(driveLetter, enable) {
     const label = enable ? 'enable auto-eject' : 'disable auto-eject';
-    if (!confirm(`Do you want to ${label} for drive ${driveLetter}?`)) return;
+    confirmAction({
+        title: "Change this drive?",
+        body: `Do you want to ${label} for drive ${driveLetter}?`,
+        confirmLabel: "Yes, do it",
+        danger: false,
+    }).then(confirmed => {
+        if (!confirmed) return;
 
-    fetch('/api/drives/eject-toggle', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ device: driveLetter, auto_eject: enable }),
-    })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) location.reload();
-            else alert('Could not change eject setting: ' + (data.error || 'Unknown error'));
+        fetch('/api/drives/eject-toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device: driveLetter, auto_eject: enable }),
         })
-        .catch(err => alert('Error: ' + err.message));
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) location.reload();
+                else notify('Could not change eject setting: ' + (data.error || 'Unknown error'), 'danger');
+            })
+            .catch(err => notify('Error: ' + err.message, 'danger'));
+    });
 }
 
 // ------------------------------------------------------------------ //
@@ -234,10 +338,10 @@ function ejectDrive(driveLetter) {
         .then(r => r.json())
         .then(data => {
             if (!data.ok) {
-                alert('Could not eject: ' + (data.error || 'Unknown error'));
+                notify('Could not eject: ' + (data.error || 'Unknown error'), 'danger');
             }
         })
-        .catch(err => alert('Error: ' + err.message));
+        .catch(err => notify('Error: ' + err.message, 'danger'));
 }
 
 // ------------------------------------------------------------------ //
@@ -259,10 +363,10 @@ function saveDriveLabel(driveLetter) {
             if (data.ok) {
                 location.reload();
             } else {
-                alert('Could not save label: ' + (data.error || 'Unknown error'));
+                notify('Could not save label: ' + (data.error || 'Unknown error'), 'danger');
             }
         })
-        .catch(err => alert('Error: ' + err.message));
+        .catch(err => notify('Error: ' + err.message, 'danger'));
 }
 
 // ------------------------------------------------------------------ //
@@ -270,36 +374,50 @@ function saveDriveLabel(driveLetter) {
 // ------------------------------------------------------------------ //
 
 function clearHistory() {
-    if (!confirm('Clear all completed, failed, and cancelled jobs from history?')) return;
+    confirmAction({
+        title: "Clear the history?",
+        body: 'Clear all completed, failed, and cancelled jobs from history?',
+        confirmLabel: "Clear it",
+        danger: true,
+    }).then(confirmed => {
+        if (!confirmed) return;
 
-    fetch('/api/history/clear', { method: 'POST' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) {
-                alert(`${data.deleted} jobs deleted.`);
-                location.reload();
-            } else {
-                alert('Could not clear: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(err => alert('Error: ' + err.message));
+        fetch('/api/history/clear', { method: 'POST' })
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    notify(`${data.deleted} jobs deleted.`, 'success');
+                    location.reload();
+                } else {
+                    notify('Could not clear: ' + (data.error || 'Unknown error'), 'danger');
+                }
+            })
+            .catch(err => notify('Error: ' + err.message, 'danger'));
+    });
 }
 
 function deleteJob(jobId) {
-    if (!confirm('Delete job #' + jobId + '?')) return;
+    confirmAction({
+        title: "Delete this job?",
+        body: 'Delete job #' + jobId + '?',
+        confirmLabel: "Delete",
+        danger: true,
+    }).then(confirmed => {
+        if (!confirmed) return;
 
-    fetch(`/api/jobs/${jobId}`, { method: 'DELETE' })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) {
-                const row = document.querySelector(`tr[data-status] td:first-child`);
-                // Simple approach: reload page
-                location.reload();
-            } else {
-                alert('Could not delete: ' + (data.error || 'Unknown error'));
-            }
-        })
-        .catch(err => alert('Error: ' + err.message));
+        fetch(`/api/jobs/${jobId}`, { method: 'DELETE' })
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    const row = document.querySelector(`tr[data-status] td:first-child`);
+                    // Simple approach: reload page
+                    location.reload();
+                } else {
+                    notify('Could not delete: ' + (data.error || 'Unknown error'), 'danger');
+                }
+            })
+            .catch(err => notify('Error: ' + err.message, 'danger'));
+    });
 }
 
 // ------------------------------------------------------------------ //
@@ -315,27 +433,34 @@ function togglePlexMove(jobId, checked) {
         .then(r => r.json())
         .then(data => {
             if (!data.ok) {
-                alert('Could not change Plex flag: ' + (data.error || 'Unknown error'));
+                notify('Could not change Plex flag: ' + (data.error || 'Unknown error'), 'danger');
             }
         })
-        .catch(err => alert('Error: ' + err.message));
+        .catch(err => notify('Error: ' + err.message, 'danger'));
 }
 
 function moveToPlexManual(jobId) {
-    if (!confirm('Move files to the Plex folder?')) return;
-    fetch(`/api/jobs/${jobId}/move-to-plex`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-    })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) {
-                location.reload();
-            } else {
-                alert('Could not move: ' + (data.error || 'Unknown error'));
-            }
+    confirmAction({
+        title: "Move to Plex?",
+        body: 'Move files to the Plex folder?',
+        confirmLabel: "Move",
+        danger: false,
+    }).then(confirmed => {
+        if (!confirmed) return;
+        fetch(`/api/jobs/${jobId}/move-to-plex`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
         })
-        .catch(err => alert('Error: ' + err.message));
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    location.reload();
+                } else {
+                    notify('Could not move: ' + (data.error || 'Unknown error'), 'danger');
+                }
+            })
+            .catch(err => notify('Error: ' + err.message, 'danger'));
+    });
 }
 
 // ------------------------------------------------------------------ //
@@ -417,23 +542,30 @@ function searchTmdb() {
 
 function applyRematch(tmdbId) {
     const jobId = document.getElementById('rematchJobId').value;
-    if (!confirm('Re-match this job to the selected movie?')) return;
+    confirmAction({
+        title: "Re-match this job?",
+        body: 'Re-match this job to the selected movie?',
+        confirmLabel: "Re-match",
+        danger: false,
+    }).then(confirmed => {
+        if (!confirmed) return;
 
-    fetch(`/api/jobs/${jobId}/rematch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tmdb_id: tmdbId }),
-    })
-        .then(r => r.json())
-        .then(data => {
-            if (data.ok) {
-                bootstrap.Modal.getInstance(document.getElementById('rematchModal')).hide();
-                location.reload();
-            } else {
-                alert('Could not re-match: ' + (data.error || 'Unknown error'));
-            }
+        fetch(`/api/jobs/${jobId}/rematch`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tmdb_id: tmdbId }),
         })
-        .catch(err => alert('Error: ' + err.message));
+            .then(r => r.json())
+            .then(data => {
+                if (data.ok) {
+                    bootstrap.Modal.getInstance(document.getElementById('rematchModal')).hide();
+                    location.reload();
+                } else {
+                    notify('Could not re-match: ' + (data.error || 'Unknown error'), 'danger');
+                }
+            })
+            .catch(err => notify('Error: ' + err.message, 'danger'));
+    });
 }
 
 // ------------------------------------------------------------------ //
@@ -780,17 +912,17 @@ function saveSeries() {
     // No job id: the modal was opened to start the mode rather than to fix a
     // single disc.
     if (!jobId) {
-        if (!payload.show) { alert('Enter the show name first.'); return; }
+        if (!payload.show) { notify('Enter the show name first.', 'success'); return; }
         fetch('/api/series-mode', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({active: true, ...payload}),
         }).then(r => r.json().then(d => ({ok: r.ok, d})))
           .then(({ok, d}) => {
-              if (!ok) { alert(d.error || 'Could not start series mode.'); return; }
+              if (!ok) { notify(d.error || 'Could not start series mode.', 'danger'); return; }
               location.reload();
           })
-          .catch(err => alert('Error: ' + err.message));
+          .catch(err => notify('Error: ' + err.message, 'danger'));
         return;
     }
 
@@ -801,10 +933,10 @@ function saveSeries() {
     })
     .then(r => r.json().then(d => ({ok: r.ok, d})))
     .then(({ok, d}) => {
-        if (!ok) { alert(d.error || 'Could not change this job.'); return; }
+        if (!ok) { notify(d.error || 'Could not change this job.', 'danger'); return; }
         location.reload();
     })
-    .catch(err => alert('Error: ' + err.message));
+    .catch(err => notify('Error: ' + err.message, 'danger'));
 }
 
 // ------------------------------------------------------------------ //
@@ -832,13 +964,20 @@ function startSeriesMode() {
 }
 
 function stopSeriesMode() {
-    if (!confirm('Turn off TV series mode? Discs will be identified as films again.')) return;
-    fetch('/api/series-mode', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({active: false}),
-    }).then(() => location.reload())
-      .catch(err => alert('Error: ' + err.message));
+    confirmAction({
+        title: "Turn off series mode?",
+        body: 'Turn off TV series mode? Discs will be identified as films again.',
+        confirmLabel: "Turn it off",
+        danger: false,
+    }).then(confirmed => {
+        if (!confirmed) return;
+        fetch('/api/series-mode', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({active: false}),
+        }).then(() => location.reload())
+          .catch(err => notify('Error: ' + err.message, 'danger'));
+    });
 }
 
 function fixNextEpisode(current) {
@@ -854,25 +993,32 @@ function fixNextEpisode(current) {
         body: JSON.stringify({episode: parseInt(value, 10)}),
     }).then(r => r.json().then(d => ({ok: r.ok, d})))
       .then(({ok, d}) => {
-          if (!ok) { alert(d.error || 'Could not change the counter.'); return; }
+          if (!ok) { notify(d.error || 'Could not change the counter.', 'danger'); return; }
           location.reload();
       })
-      .catch(err => alert('Error: ' + err.message));
+      .catch(err => notify('Error: ' + err.message, 'danger'));
 }
 
 function markAsMovie(jobId) {
-    if (!confirm('Treat this disc as a film again? Files will be named "Title (Year)".')) return;
-    fetch('/api/jobs/' + jobId + '/content-type', {
-        method: 'POST',
-        headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({content_type: 'movie'}),
-    })
-    .then(r => r.json().then(d => ({ok: r.ok, d})))
-    .then(({ok, d}) => {
-        if (!ok) { alert(d.error || 'Could not change this job.'); return; }
-        location.reload();
-    })
-    .catch(err => alert('Error: ' + err.message));
+    confirmAction({
+        title: "Treat as a film?",
+        body: 'Treat this disc as a film again? Files will be named "Title (Year)".',
+        confirmLabel: "Yes, a film",
+        danger: false,
+    }).then(confirmed => {
+        if (!confirmed) return;
+        fetch('/api/jobs/' + jobId + '/content-type', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({content_type: 'movie'}),
+        })
+        .then(r => r.json().then(d => ({ok: r.ok, d})))
+        .then(({ok, d}) => {
+            if (!ok) { notify(d.error || 'Could not change this job.', 'danger'); return; }
+            location.reload();
+        })
+        .catch(err => notify('Error: ' + err.message, 'danger'));
+    });
 }
 
 // ------------------------------------------------------------------ //
@@ -889,19 +1035,26 @@ function retryJob(jobId) {
         .then(r => r.json())
         .then(plan => {
             if (!plan.can_retry) {
-                alert(plan.reason);
+                notify(plan.reason, 'success');
                 return;
             }
-            if (!confirm(plan.reason + '\n\nGo ahead?')) return;
+            confirmAction({
+                title: "Retry this job?",
+                body: plan.reason + '\n\nGo ahead?',
+                confirmLabel: "Retry",
+                danger: false,
+            }).then(confirmed => {
+                if (!confirmed) return;
 
-            return fetch('/api/jobs/' + jobId + '/retry', {method: 'POST'})
-                .then(r => r.json().then(d => ({ok: r.ok, d})))
-                .then(({ok, d}) => {
-                    if (ok && d.ok) location.reload();
-                    else alert(d.message || d.error || 'Retry failed.');
-                });
-        })
-        .catch(err => alert('Error: ' + err.message));
+                return fetch('/api/jobs/' + jobId + '/retry', {method: 'POST'})
+                    .then(r => r.json().then(d => ({ok: r.ok, d})))
+                    .then(({ok, d}) => {
+                        if (ok && d.ok) location.reload();
+                        else notify(d.message || d.error || 'Retry failed.', 'danger');
+                    });
+            });
+})
+        .catch(err => notify('Error: ' + err.message, 'danger'));
 }
 
 function copyErrorText() {

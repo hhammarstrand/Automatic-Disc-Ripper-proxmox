@@ -210,7 +210,7 @@
             </tr>
             {% endfor %}
             {% if not jobs %}
-            <tr><td colspan="12" class="text-center text-secondary py-4">No jobs recorded yet</td></tr>
+            <tr><td colspan="14" class="text-center text-secondary py-4">No jobs recorded yet</td></tr>
             {% endif %}
         </tbody>
     </table>
@@ -280,8 +280,14 @@ function deleteSelected(deleteFiles) {
     if (!ids.length) return;
 
     if (!deleteFiles) {
-        if (!confirm(`Remove ${ids.length} job(s) from the history? The files stay where they are.`)) return;
-        return doDelete(ids, false);
+        confirmAction({
+            title: 'Remove from the history?',
+            body: `${ids.length} job(s) will be removed from this list. ` +
+                  `<strong>The files stay where they are.</strong>`,
+            confirmLabel: 'Remove',
+            danger: true,
+        }).then(confirmed => { if (confirmed) doDelete(ids, false); });
+        return;
     }
 
     fetch('/api/jobs/delete-preview', {
@@ -293,20 +299,29 @@ function deleteSelected(deleteFiles) {
         .then(preview => {
             const files = (preview.files || []).concat(preview.raw || []);
             if (!files.length) {
-                if (!confirm(`No files were found for these ${ids.length} job(s). Remove them from the history anyway?`)) return;
-                return doDelete(ids, false);
+                return confirmAction({
+                    title: 'Nothing found to delete',
+                    body: `No files were found for these ${ids.length} job(s) — they ` +
+                          `may already be gone. Remove them from the history anyway?`,
+                    confirmLabel: 'Remove anyway',
+                    danger: true,
+                }).then(confirmed => { if (confirmed) doDelete(ids, false); });
             }
             // Naming them, not counting them. "12 files" is not something
-            // anyone can check; a list of paths is.
-            const shown = files.slice(0, 12).join('\n');
-            const more = files.length > 12 ? `\n…and ${files.length - 12} more` : '';
-            if (!confirm(
-                `Permanently delete ${files.length} file(s), ${preview.size}?\n\n` +
-                `${shown}${more}\n\nThis cannot be undone.`
-            )) return;
-            doDelete(ids, true);
+            // anyone can check; a list of paths is — and the detail pane of
+            // the dialog exists so the list does not have to be crammed into
+            // a sentence.
+            return confirmAction({
+                title: 'Delete these files permanently?',
+                body: `<strong>${files.length} file(s), ${preview.size}</strong> will be ` +
+                      `deleted from disk, and the job(s) removed from the history. ` +
+                      `<span class="text-danger">This cannot be undone.</span>`,
+                detail: files.join('\n'),
+                confirmLabel: 'Delete them',
+                danger: true,
+            }).then(confirmed => { if (confirmed) doDelete(ids, true); });
         })
-        .catch(err => alert('Could not check what would be deleted: ' + err.message));
+        .catch(err => notify('Could not check what would be deleted: ' + err.message, 'danger'));
 }
 
 function doDelete(ids, deleteFiles) {
@@ -317,7 +332,7 @@ function doDelete(ids, deleteFiles) {
     })
         .then(r => r.json())
         .then(data => {
-            if (!data.ok) { alert('Could not delete: ' + (data.error || 'unknown error')); return; }
+            if (!data.ok) { notify('Could not delete: ' + (data.error || 'unknown error'), 'danger'); return; }
             let message = `${data.deleted} job(s) removed`;
             if (deleteFiles) message += `, ${data.files_deleted} file(s) deleted`;
             if (data.failed && data.failed.length) {
@@ -326,10 +341,10 @@ function doDelete(ids, deleteFiles) {
             if (data.skipped && data.skipped.length) {
                 message += `\n\nSkipped:\n` + data.skipped.join('\n');
             }
-            alert(message);
+            notify(message, 'success');
             location.reload();
         })
-        .catch(err => alert('Error: ' + err.message));
+        .catch(err => notify('Error: ' + err.message, 'danger'));
 }
 
 // ---- Encoding again -------------------------------------------------------
@@ -343,17 +358,23 @@ function reencodeJob(jobId) {
     fetch(`/api/jobs/${jobId}/reencode`)
         .then(r => r.json())
         .then(plan => {
-            if (!plan.can_reencode) { alert(plan.reason); return; }
-            if (!confirm(`${plan.reason}\n\nEncode again now?`)) return;
-            return fetch(`/api/jobs/${jobId}/reencode`, {method: 'POST'})
-                .then(r => r.json().then(d => ({ok: r.ok, d})))
-                .then(({ok, d}) => {
-                    if (!ok || !d.ok) { alert(d.message || 'Could not start.'); return; }
-                    alert(`Queued ${d.queued} file(s) for encoding.`);
-                    location.reload();
-                });
+            if (!plan.can_reencode) { notify(plan.reason, 'warning'); return; }
+            return confirmAction({
+                title: 'Encode this again?',
+                body: plan.reason,
+                confirmLabel: 'Encode again',
+            }).then(confirmed => {
+                if (!confirmed) return;
+                return fetch(`/api/jobs/${jobId}/reencode`, {method: 'POST'})
+                    .then(r => r.json().then(d => ({ok: r.ok, d})))
+                    .then(({ok, d}) => {
+                        if (!ok || !d.ok) { notify(d.message || 'Could not start.', 'danger'); return; }
+                        notify(`Queued ${d.queued} file(s) for encoding.`, 'success');
+                        location.reload();
+                    });
+            });
         })
-        .catch(err => alert('Error: ' + err.message));
+        .catch(err => notify('Error: ' + err.message, 'danger'));
 }
 </script>
 <script>

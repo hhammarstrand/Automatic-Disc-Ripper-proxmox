@@ -291,3 +291,41 @@ a.text-info:hover {
     opacity: 0.45;
     filter: grayscale(0.7);
 }
+
+
+/* ---- Toasts and dialogs ----
+ *
+ * Bootstrap's toast and modal both default to a light surface, the same
+ * light-page assumption that made the active tab unreadable. Restated here
+ * for the same reason, and once — every page shares them. */
+.adr-toast {
+    background-color: var(--adr-card) !important;
+    color: var(--adr-text) !important;
+    border-left: 4px solid var(--adr-accent) !important;
+}
+.adr-toast-success { border-left-color: var(--adr-success) !important; }
+.adr-toast-warning { border-left-color: var(--adr-warning) !important; }
+.adr-toast-danger  { border-left-color: var(--adr-danger) !important; }
+.adr-toast .toast-body { color: var(--adr-text) !important; }
+.adr-toast-success .bi { color: var(--adr-success); }
+.adr-toast-warning .bi { color: var(--adr-warning); }
+.adr-toast-danger .bi  { color: var(--adr-danger); }
+.adr-toast-info .bi    { color: var(--adr-accent); }
+
+.modal-content {
+    background-color: var(--adr-card) !important;
+    color: var(--adr-text) !important;
+    border: 1px solid var(--adr-border) !important;
+}
+.modal-header, .modal-footer {
+    border-color: var(--adr-border) !important;
+}
+/* The detail pane in a confirmation: a list of file paths about to be
+ * deleted, which has to be readable at a glance and scrollable when long. */
+#confirmDetail {
+    background-color: var(--adr-bg) !important;
+    color: var(--adr-text-muted) !important;
+    border: 1px solid var(--adr-border);
+    white-space: pre-wrap;
+    word-break: break-all;
+}
