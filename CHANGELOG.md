@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.13.1
+
+**"Unknown error" was usually the API answering in the wrong key.** Routes had
+grown two conventions for reporting a failure — `{"error": …}` in some,
+`{"ok": false, "message": …}` in others — and each button in the front-end read
+whichever one its author knew about. Where the two disagreed the person got
+"Unknown error" on screen while the real reason sat in the response, in a key
+nobody was reading.
+
+Every failure now carries `ok`, `error` and `message`, the last two holding the
+same sentence. Redundant on the wire, free at the point of use, and the right
+trade for a message whose entire job is to be read.
+
+The browser side stopped guessing too: twenty-three copies of `data.error ||
+'Unknown error'` became one `reasonFrom()` that reads either. The specific
+fallbacks were kept — "Could not start the rip." says what was being attempted
+in a way no generic sentence can — they simply read both keys now.
+
+Tests check both halves, and that neither convention can come back.
+
 ## 1.13.0
 
 A polish pass over the whole application: every menu, every setting, and the

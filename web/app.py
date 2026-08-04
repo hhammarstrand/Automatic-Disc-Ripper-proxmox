@@ -77,6 +77,23 @@ def _isotime(value) -> str:
         return ""
 
 
+def fail(message: str, status: int = 400):
+    """A failed API response, in the one shape everything understands.
+
+    This exists because the API grew two conventions. Some routes answered a
+    failure with ``{"error": …}`` and some with ``{"ok": false, "message":
+    …}``, and the front-end reads whichever the author of that button happened
+    to know about. Where the two disagreed the user got "unknown error" — the
+    real reason had been sent, in a key nobody was reading.
+
+    So every failure now carries all three. ``ok`` for code that checks a
+    boolean, ``error`` and ``message`` holding the same sentence for code that
+    reads either. Redundant on the wire and free at the point of use, which is
+    the right trade for a message whose whole job is to be read.
+    """
+    return jsonify({"ok": False, "error": message, "message": message}), status
+
+
 def _job_ids(data: dict) -> list[int]:
     """The job ids in a request body, ignoring anything that is not one.
 
@@ -410,7 +427,7 @@ def _register_api_routes(app: Flask) -> None:
         try:
             job = session.get(Job, job_id)
             if not job:
-                return jsonify({"error": "Job not found"}), 404
+                return fail("Job not found", 404)
             return jsonify(job.to_dict())
         finally:
             session.close()
@@ -424,9 +441,9 @@ def _register_api_routes(app: Flask) -> None:
         try:
             job = session.get(Job, job_id)
             if not job:
-                return jsonify({"error": "Job not found"}), 404
+                return fail("Job not found", 404)
             if job.status in (JobStatus.DONE, JobStatus.CANCELLED):
-                return jsonify({"error": "Job already finished"}), 400
+                return fail("Job already finished", 400)
             job.status = JobStatus.CANCELLED
             job.completed_at = utcnow()
             session.commit()
@@ -520,7 +537,7 @@ def _register_api_routes(app: Flask) -> None:
         ok = eject_drive(dl)
         if ok:
             return jsonify({"ok": True})
-        return jsonify({"ok": False, "error": f"Could not eject {dl}"}), 500
+        return fail(f"Could not eject {dl}", 500)
 
     def _set_label(drive_letter: str):
         """Set a custom label for a drive. Body: {"label": "My Drive"}"""
@@ -559,7 +576,7 @@ def _register_api_routes(app: Flask) -> None:
         drive card was missing.
         """
         if not _pipeline_manager:
-            return jsonify({"ok": False, "message": "The pipeline is not running."}), 503
+            return fail("The pipeline is not running.", 503)
         ok, message = _pipeline_manager.rip_now(normalize_drive(drive_letter))
         return jsonify({"ok": ok, "message": message}), (200 if ok else 409)
 
@@ -607,7 +624,7 @@ def _register_api_routes(app: Flask) -> None:
         except SQLAlchemyError as exc:
             session.rollback()
             logger.error("Failed to clear history: %s", exc)
-            return jsonify({"error": str(exc)}), 500
+            return fail(str(exc), 500)
         finally:
             session.close()
 
@@ -655,7 +672,7 @@ def _register_api_routes(app: Flask) -> None:
         ids = _job_ids(data)
         delete_files = bool(data.get("delete_files"))
         if not ids:
-            return jsonify({"error": "No jobs given"}), 400
+            return fail("No jobs given", 400)
 
         session = get_session()
         deleted_jobs, deleted_files, failed, skipped = 0, [], [], []
@@ -680,7 +697,7 @@ def _register_api_routes(app: Flask) -> None:
         except SQLAlchemyError as exc:
             session.rollback()
             logger.error("Bulk delete failed: %s", exc)
-            return jsonify({"error": str(exc)}), 500
+            return fail(str(exc), 500)
         finally:
             remaining = {row[0] for row in session.query(Job.id).all()}
             session.close()
@@ -714,26 +731,22 @@ def _register_api_routes(app: Flask) -> None:
         try:
             job = session.get(Job, job_id)
             if not job:
-                return jsonify({"error": "Job not found"}), 404
+                return fail("Job not found", 404)
 
             plan = reencode.plan(job, _config)
             if request.method == "GET":
                 return jsonify(plan)
             if not plan["can_reencode"]:
-                return jsonify({"ok": False, "message": plan["reason"]}), 409
+                return fail(plan["reason"], 409)
             if _pipeline_manager is None or _pipeline_manager.encode_queue is None:
-                return jsonify({
-                    "ok": False,
-                    "message": "The encoder is not running, so nothing could be queued.",
-                }), 503
+                return fail(
+                    "The encoder is not running, so nothing could be queued.", 503)
 
             queued = reencode.start(
                 job, session, _config, _pipeline_manager.encode_queue)
             session.commit()
             if not queued:
-                return jsonify({
-                    "ok": False, "message": "Nothing could be queued.",
-                }), 409
+                return fail("Nothing could be queued.", 409)
             return jsonify({
                 "ok": True, "queued": queued, "source": plan["source"],
                 "message": plan["reason"],
@@ -741,7 +754,7 @@ def _register_api_routes(app: Flask) -> None:
         except SQLAlchemyError as exc:
             session.rollback()
             logger.error("Re-encode of job %s failed: %s", job_id, exc)
-            return jsonify({"error": str(exc)}), 500
+            return fail(str(exc), 500)
         finally:
             session.close()
 
@@ -752,9 +765,9 @@ def _register_api_routes(app: Flask) -> None:
         try:
             job = session.get(Job, job_id)
             if not job:
-                return jsonify({"error": "Job not found"}), 404
+                return fail("Job not found", 404)
             if job.status not in TERMINAL_STATUSES:
-                return jsonify({"error": "Can only delete finished jobs"}), 400
+                return fail("Can only delete finished jobs", 400)
             session.delete(job)
             session.commit()
             # The log belongs to the job; leaving it behind would accumulate
@@ -764,7 +777,7 @@ def _register_api_routes(app: Flask) -> None:
         except SQLAlchemyError as exc:
             session.rollback()
             logger.error("Failed to delete job %s: %s", job_id, exc)
-            return jsonify({"error": str(exc)}), 500
+            return fail(str(exc), 500)
         finally:
             session.close()
 
@@ -782,13 +795,13 @@ def _register_api_routes(app: Flask) -> None:
         data = request.get_json() or {}
         content_type = str(data.get("content_type", "")).strip().lower()
         if content_type not in ("movie", "series"):
-            return jsonify({"error": "content_type must be 'movie' or 'series'"}), 400
+            return fail("content_type must be 'movie' or 'series'", 400)
 
         session = get_session()
         try:
             job = session.get(Job, job_id)
             if not job:
-                return jsonify({"error": "Job not found"}), 404
+                return fail("Job not found", 404)
             if job.status in (JobStatus.ENCODING, JobStatus.DONE):
                 return jsonify({
                     "error": "Encoding has already started, so the filenames are set. "
@@ -801,7 +814,7 @@ def _register_api_routes(app: Flask) -> None:
                     job.series_season = max(0, int(data.get("season", 1)))
                     job.series_first_episode = max(1, int(data.get("first_episode", 1)))
                 except (TypeError, ValueError):
-                    return jsonify({"error": "season and first_episode must be numbers"}), 400
+                    return fail("season and first_episode must be numbers", 400)
 
                 # The show, when the user picked one from the TV search. The
                 # title on the job came from TMDb's *movie* search, which for a
@@ -838,7 +851,7 @@ def _register_api_routes(app: Flask) -> None:
             })
         except SQLAlchemyError as exc:
             session.rollback()
-            return jsonify({"error": str(exc)}), 500
+            return fail(str(exc), 500)
         finally:
             session.close()
 
@@ -873,7 +886,7 @@ def _register_api_routes(app: Flask) -> None:
                 tmdb_id=int(data["tmdb_id"]) if str(data.get("tmdb_id") or "").isdigit() else None,
             )
         except (TypeError, ValueError) as exc:
-            return jsonify({"error": str(exc)}), 400
+            return fail(str(exc), 400)
         return jsonify(result)
 
     @app.route("/api/series-mode/next-episode", methods=["POST"])
@@ -889,7 +902,7 @@ def _register_api_routes(app: Flask) -> None:
         try:
             episode = int(data.get("episode"))
         except (TypeError, ValueError):
-            return jsonify({"error": "episode must be a number"}), 400
+            return fail("episode must be a number", 400)
         return jsonify(seriesmode.set_next_episode(_config, episode))
 
     @app.route("/api/tmdb/search-tv")
@@ -903,9 +916,9 @@ def _register_api_routes(app: Flask) -> None:
 
         query = request.args.get("query", "").strip()
         if not query:
-            return jsonify({"error": "query is required"}), 400
+            return fail("query is required", 400)
         if not _config.tmdb_api_key:
-            return jsonify({"error": "No TMDb API key configured."}), 400
+            return fail("No TMDb API key configured.", 400)
         return jsonify({"results": search_series(query, _config.tmdb_api_key)})
 
     @app.route("/api/tmdb/season")
@@ -922,7 +935,7 @@ def _register_api_routes(app: Flask) -> None:
             tmdb_id = int(request.args.get("tmdb_id", ""))
             season = int(request.args.get("season", ""))
         except ValueError:
-            return jsonify({"error": "tmdb_id and season must be numbers"}), 400
+            return fail("tmdb_id and season must be numbers", 400)
         if not _config.tmdb_api_key:
             return jsonify({"episodes": []})
         return jsonify({"episodes": get_season_episodes(tmdb_id, season, _config.tmdb_api_key)})
@@ -941,14 +954,14 @@ def _register_api_routes(app: Flask) -> None:
         try:
             job = session.get(Job, job_id)
             if not job:
-                return jsonify({"error": "Job not found"}), 404
+                return fail("Job not found", 404)
 
             decision = _retry.plan(job, _config)
             if request.method == "GET":
                 return jsonify(decision)
 
             if not decision["can_retry"]:
-                return jsonify({"ok": False, "message": decision["reason"]}), 409
+                return fail(decision["reason"], 409)
 
             if decision["resume"] == _retry.RESUME_TRANSFER:
                 ok, message = _retry.retry_transfer(job, session, _config)
@@ -957,10 +970,8 @@ def _register_api_routes(app: Flask) -> None:
                 )
 
             if not _pipeline_manager:
-                return jsonify({
-                    "ok": False,
-                    "message": "The encoder is not running, so nothing can be queued.",
-                }), 503
+                return fail(
+                    "The encoder is not running, so nothing can be queued.", 503)
             queued = _retry.requeue_encode(
                 job, session, _config, _pipeline_manager.encode_queue,
             )
@@ -972,7 +983,7 @@ def _register_api_routes(app: Flask) -> None:
         except SQLAlchemyError as exc:
             session.rollback()
             logger.error("Retry failed for job %s: %s", job_id, exc)
-            return jsonify({"error": str(exc)}), 500
+            return fail(str(exc), 500)
         finally:
             session.close()
 
@@ -986,7 +997,7 @@ def _register_api_routes(app: Flask) -> None:
         session = get_session()
         try:
             if not session.get(Job, job_id):
-                return jsonify({"error": "Job not found"}), 404
+                return fail("Job not found", 404)
         finally:
             session.close()
 
@@ -1004,7 +1015,7 @@ def _register_api_routes(app: Flask) -> None:
         try:
             job = session.get(Job, job_id)
             if not job:
-                return jsonify({"error": "Job not found"}), 404
+                return fail("Job not found", 404)
             if not job.output_path:
                 return jsonify({"files": []})
             out = Path(job.output_path)
@@ -1046,12 +1057,12 @@ def _register_api_routes(app: Flask) -> None:
         query = request.args.get("q", "").strip()
         year = request.args.get("year", type=int)
         if not query:
-            return jsonify({"error": "Missing query parameter 'q'"}), 400
+            return fail("Missing query parameter 'q'", 400)
 
         import requests as req
         api_key = _config.tmdb_api_key if _config else ""
         if not api_key:
-            return jsonify({"error": "No TMDb API key configured"}), 400
+            return fail("No TMDb API key configured", 400)
 
         params = {
             "api_key": api_key,
@@ -1083,7 +1094,7 @@ def _register_api_routes(app: Flask) -> None:
             return jsonify({"results": results})
         except (req.RequestException, ValueError, KeyError) as exc:
             logger.warning("TMDb search failed: %s", exc)
-            return jsonify({"error": str(exc)}), 500
+            return fail(str(exc), 500)
 
     @app.route("/api/jobs/<int:job_id>/rematch", methods=["POST"])
     def api_rematch_job(job_id: int):
@@ -1098,17 +1109,17 @@ def _register_api_routes(app: Flask) -> None:
         data = request.get_json() or {}
         tmdb_id = data.get("tmdb_id")
         if not tmdb_id:
-            return jsonify({"error": "Missing tmdb_id"}), 400
+            return fail("Missing tmdb_id", 400)
 
         api_key = _config.tmdb_api_key if _config else ""
         if not api_key:
-            return jsonify({"error": "No TMDb API key configured"}), 400
+            return fail("No TMDb API key configured", 400)
 
         session = get_session()
         try:
             job = session.get(Job, job_id)
             if not job:
-                return jsonify({"error": "Job not found"}), 404
+                return fail("Job not found", 404)
 
             # Fetch movie details from TMDb
             detail_resp = req.get(
@@ -1158,7 +1169,7 @@ def _register_api_routes(app: Flask) -> None:
         except (req.RequestException, SQLAlchemyError, ValueError, KeyError, OSError) as exc:
             session.rollback()
             logger.warning("Re-match failed for job %s: %s", job_id, exc)
-            return jsonify({"error": str(exc)}), 500
+            return fail(str(exc), 500)
         finally:
             session.close()
 
@@ -1174,19 +1185,19 @@ def _register_api_routes(app: Flask) -> None:
         """Toggle the move_to_plex flag on a job."""
         data = request.get_json() or {}
         if "move_to_plex" not in data:
-            return jsonify({"error": "Missing move_to_plex"}), 400
+            return fail("Missing move_to_plex", 400)
         session = get_session()
         try:
             job = session.get(Job, job_id)
             if not job:
-                return jsonify({"error": "Job not found"}), 404
+                return fail("Job not found", 404)
             job.move_to_plex = bool(data["move_to_plex"])
             session.commit()
             return jsonify({"ok": True, "move_to_plex": job.move_to_plex})
         except SQLAlchemyError as exc:
             session.rollback()
             logger.error("Failed to toggle plex flag for job %s: %s", job_id, exc)
-            return jsonify({"error": str(exc)}), 500
+            return fail(str(exc), 500)
         finally:
             session.close()
 
@@ -1194,16 +1205,16 @@ def _register_api_routes(app: Flask) -> None:
     def api_move_to_plex(job_id: int):
         """Manually move a completed job's output to the Plex library."""
         if not _config or not _config.plex_path:
-            return jsonify({"error": "Plex path not configured"}), 400
+            return fail("Plex path not configured", 400)
         session = get_session()
         try:
             job = session.get(Job, job_id)
             if not job:
-                return jsonify({"error": "Job not found"}), 404
+                return fail("Job not found", 404)
             if job.plex_path:
-                return jsonify({"error": "Already moved to Plex"}), 400
+                return fail("Already moved to Plex", 400)
             if not job.output_path:
-                return jsonify({"error": "No output path"}), 400
+                return fail("No output path", 400)
             # Force the flag on so move_to_plex() proceeds
             job.move_to_plex = True
             session.commit()
@@ -1212,11 +1223,11 @@ def _register_api_routes(app: Flask) -> None:
             if ok:
                 return jsonify({"ok": True, "plex_path": job.plex_path})
             else:
-                return jsonify({"error": "Move failed — see log"}), 500
+                return fail("Move failed — see log", 500)
         except (OSError, SQLAlchemyError) as exc:
             session.rollback()
             logger.error("Failed to move job %s to Plex: %s", job_id, exc)
-            return jsonify({"error": str(exc)}), 500
+            return fail(str(exc), 500)
         finally:
             session.close()
 
@@ -1316,17 +1327,16 @@ def _register_api_routes(app: Flask) -> None:
         data = request.get_json(silent=True) or {}
         explicit = str(data.get("key", "")).strip() or None
         if explicit and not makemkv_key.is_valid_key(explicit):
-            return jsonify({"ok": False, "error": "Key is malformed (expected T-...)"}), 400
+            return fail("Key is malformed (expected T-...)", 400)
         try:
             key = makemkv_key.ensure_key(explicit)
         except Exception as exc:  # noqa: BLE001 — surface any fetch/IO failure to the UI
             logger.warning("MakeMKV key refresh failed: %s", exc)
-            return jsonify({"ok": False, "error": str(exc)}), 500
+            return fail(str(exc), 500)
         if not key:
-            return jsonify({
-                "ok": False,
-                "error": "Could not obtain a key. Check internet access or paste one manually.",
-            }), 502
+            return fail(
+                "Could not obtain a key. Check internet access or paste one "
+                "manually.", 502)
         # Never echo the full secret back to the browser — just confirm + show a hint.
         return jsonify({"ok": True, "key_hint": key[:6] + "…" + key[-4:]})
 
@@ -1374,7 +1384,7 @@ def _register_api_routes(app: Flask) -> None:
             str(data.get("url", "")), str(data.get("token", "")),
         )
         if error:
-            return jsonify({"ok": False, "error": error}), 400
+            return fail(error, 400)
         return jsonify({"ok": True, "sections": sections})
 
     @app.route("/api/plex/refresh", methods=["POST"])
@@ -1469,7 +1479,7 @@ def _register_api_routes(app: Flask) -> None:
         # Only devices this container can actually see. The endpoint takes a
         # path and opens it, so it must not accept an arbitrary one.
         if device not in _sr_devices():
-            return jsonify({"error": f"Unknown optical device '{device}'."}), 400
+            return fail(f"Unknown optical device '{device}'.", 400)
 
         if not deep:
             return jsonify(drivetest.probe_drive(device, deep=False))
@@ -1489,7 +1499,7 @@ def _register_api_routes(app: Flask) -> None:
         device = (request.args.get("device") or "").strip()
         state = drivetest.probe_status(device)
         if state is None:
-            return jsonify({"error": f"No probe has been run for '{device}'."}), 404
+            return fail(f"No probe has been run for '{device}'.", 404)
         return jsonify(state)
 
     @app.route("/api/logs")
@@ -1567,19 +1577,16 @@ def _register_api_routes(app: Flask) -> None:
         options = encodertest.software_alternatives(_config)
         if not wanted:
             if not options:
-                return jsonify({
-                    "ok": False,
-                    "message": "HandBrake offered no software presets to switch to.",
-                }), 409
+                return fail(
+                    "HandBrake offered no software presets to switch to.", 409)
             wanted = options[0]
         elif options and wanted not in options:
             # Only presets this HandBrake actually has, and only software ones:
             # the endpoint exists to escape a hardware preset, not to set an
             # arbitrary string that fails the same way.
-            return jsonify({
-                "ok": False,
-                "message": f"'{wanted}' is not one of the software presets HandBrake offers.",
-            }), 400
+            return fail(
+                f"'{wanted}' is not one of the software presets HandBrake "
+                "offers.", 400)
 
         previous = _config.handbrake_preset
         previous_backend = _config.encoder_backend
@@ -1597,12 +1604,10 @@ def _register_api_routes(app: Flask) -> None:
             _config.update({
                 "handbrake_preset": previous, "encoder_backend": previous_backend,
             })
+            said = f"'{wanted}' could not encode either, so nothing was changed."
             return jsonify({
-                "ok": False,
-                "preset": wanted,
-                "reverted_to": previous,
-                "message": f"'{wanted}' could not encode either, so nothing was changed.",
-                "test": result,
+                "ok": False, "error": said, "message": said,
+                "preset": wanted, "reverted_to": previous, "test": result,
             }), 409
 
         logger.info("Preset changed from %r to %r after a hardware failure",
@@ -1647,11 +1652,9 @@ def _register_api_routes(app: Flask) -> None:
 
         state = vaapi.probe(_config)
         if not state["ok"]:
-            return jsonify({
-                "ok": False,
-                "message": "ffmpeg could not encode on the GPU, so nothing was "
-                           "changed. " + state["detail"],
-            }), 409
+            return fail(
+                "ffmpeg could not encode on the GPU, so nothing was changed. "
+                + state["detail"], 409)
 
         data = request.get_json(silent=True) or {}
         codec = str(data.get("codec", "")).strip().lower()
@@ -1727,11 +1730,10 @@ def _register_api_routes(app: Flask) -> None:
             # Proved, not assumed. Leaving settings in place that have just
             # been shown not to work is worse than the state we started in.
             _config.update(previous)
+            said = ("That combination did not encode after all, so nothing "
+                    "was changed.")
             return jsonify({
-                "ok": False,
-                "message": "That combination did not encode after all, so "
-                           "nothing was changed.",
-                "test": result,
+                "ok": False, "error": said, "message": said, "test": result,
             }), 409
 
         logger.info("HandBrake GPU enabled: encoder=%r LIBVA_DRIVER_NAME=%r",
@@ -1860,11 +1862,11 @@ def _register_api_routes(app: Flask) -> None:
         data = request.get_json() or {}
         kind = str(data.get("kind", "")).lower()
         if kind not in _storage.NAS_PORTS:
-            return jsonify({"error": "kind must be 'nfs' or 'smb'"}), 400
+            return fail("kind must be 'nfs' or 'smb'", 400)
         host = str(data.get("host", "")).strip()
         share = str(data.get("share", "")).strip()
         if not host or not share:
-            return jsonify({"error": "host and share are required"}), 400
+            return fail("host and share are required", 400)
 
         # The password is used to render the command and then dropped; it is
         # never written to the config, the database or the log.
@@ -1920,13 +1922,13 @@ def _register_api_routes(app: Flask) -> None:
         """Update settings from JSON body."""
         data = request.get_json()
         if not data:
-            return jsonify({"error": "No data provided"}), 400
+            return fail("No data provided", 400)
 
         # Reject unknown keys outright — prevents config injection via the
         # unauthenticated API.
         unknown = set(data.keys()) - _ALLOWED_SETTINGS_KEYS
         if unknown:
-            return jsonify({"error": f"Unknown setting(s): {', '.join(sorted(unknown))}"}), 400
+            return fail(f"Unknown setting(s): {', '.join(sorted(unknown))}", 400)
 
         # Basic validation
         errors = []
@@ -1956,7 +1958,7 @@ def _register_api_routes(app: Flask) -> None:
         if "audio_cd_format" in data and data["audio_cd_format"] not in ("flac", "mp3"):
             errors.append("audio_cd_format must be 'flac' or 'mp3'")
         if errors:
-            return jsonify({"error": "; ".join(errors)}), 400
+            return fail("; ".join(errors), 400)
 
         _config.update(data)
 

@@ -754,7 +754,7 @@ function refreshMakemkvKey() {
             status.className = 'form-text text-success';
             input.value = '';
         } else {
-            status.textContent = '✗ ' + (body.error || 'Failed to set key');
+            status.textContent = '✗ ' + (reasonFrom(body, 'Failed to set key'));
             status.className = 'form-text text-danger';
         }
     })
@@ -822,7 +822,7 @@ function saveSettings(e) {
                 if (restart) restart.classList.remove('d-none');
             }
         } else {
-            notify('Could not save: ' + (result.error || 'Unknown error'), 'danger');
+            notify('Could not save: ' + (reasonFrom(result)), 'danger');
         }
     })
     .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -940,7 +940,7 @@ function unhideDrive(driveLetter) {
         .then(r => r.json())
         .then(data => {
             if (data.ok) location.reload();
-            else notify('Could not change: ' + (data.error || 'Unknown error'), 'danger');
+            else notify('Could not change: ' + (reasonFrom(data)), 'danger');
         })
         .catch(err => notify('Error: ' + err.message, 'danger'));
     });

@@ -21,6 +21,18 @@
 // is about to happen instead of cramming a list of file paths into a string.
 // ------------------------------------------------------------------ //
 
+// The reason a request failed, whichever key it arrived under.
+//
+// The server now sends both `error` and `message` on every failure, so this
+// is a belt to that braces — but it is also the one place to change if a
+// route ever forgets, instead of twenty-three copies of `data.error ||
+// 'Unknown error'` scattered across the front-end, each of which reads only
+// the key its author happened to know about.
+function reasonFrom(payload, fallback = 'the server did not say why') {
+    if (!payload) return fallback;
+    return payload.error || payload.message || fallback;
+}
+
 const TOAST_MILLISECONDS = 5000;
 
 function notify(message, kind = 'info') {
@@ -243,7 +255,7 @@ function cancelJob(jobId) {
                 if (data.ok) {
                     location.reload();
                 } else {
-                    notify('Could not cancel: ' + (data.error || 'Unknown error'), 'danger');
+                    notify('Could not cancel: ' + (reasonFrom(data)), 'danger');
                 }
             })
             .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -268,7 +280,7 @@ function toggleDrive(driveLetter, disable) {
             .then(r => r.json())
             .then(data => {
                 if (data.ok) location.reload();
-                else notify('Could not change: ' + (data.error || 'Unknown error'), 'danger');
+                else notify('Could not change: ' + (reasonFrom(data)), 'danger');
             })
             .catch(err => notify('Error: ' + err.message, 'danger'));
     });
@@ -291,7 +303,7 @@ function ripNow(driveLetter) {
     })
         .then(r => r.json().then(d => ({ ok: r.ok, d })))
         .then(({ ok, d }) => {
-            if (!ok) { notify(d.message || 'Could not start the rip.', 'danger'); return; }
+            if (!ok) { notify(reasonFrom(d, 'Could not start the rip.'), 'danger'); return; }
             setTimeout(() => location.reload(), 800);
         })
         .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -319,7 +331,7 @@ function toggleEject(driveLetter, enable) {
             .then(r => r.json())
             .then(data => {
                 if (data.ok) location.reload();
-                else notify('Could not change eject setting: ' + (data.error || 'Unknown error'), 'danger');
+                else notify('Could not change eject setting: ' + (reasonFrom(data)), 'danger');
             })
             .catch(err => notify('Error: ' + err.message, 'danger'));
     });
@@ -338,7 +350,7 @@ function ejectDrive(driveLetter) {
         .then(r => r.json())
         .then(data => {
             if (!data.ok) {
-                notify('Could not eject: ' + (data.error || 'Unknown error'), 'danger');
+                notify('Could not eject: ' + (reasonFrom(data)), 'danger');
             }
         })
         .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -363,7 +375,7 @@ function saveDriveLabel(driveLetter) {
             if (data.ok) {
                 location.reload();
             } else {
-                notify('Could not save label: ' + (data.error || 'Unknown error'), 'danger');
+                notify('Could not save label: ' + (reasonFrom(data)), 'danger');
             }
         })
         .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -389,7 +401,7 @@ function clearHistory() {
                     notify(`${data.deleted} jobs deleted.`, 'success');
                     location.reload();
                 } else {
-                    notify('Could not clear: ' + (data.error || 'Unknown error'), 'danger');
+                    notify('Could not clear: ' + (reasonFrom(data)), 'danger');
                 }
             })
             .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -413,7 +425,7 @@ function deleteJob(jobId) {
                     // Simple approach: reload page
                     location.reload();
                 } else {
-                    notify('Could not delete: ' + (data.error || 'Unknown error'), 'danger');
+                    notify('Could not delete: ' + (reasonFrom(data)), 'danger');
                 }
             })
             .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -433,7 +445,7 @@ function togglePlexMove(jobId, checked) {
         .then(r => r.json())
         .then(data => {
             if (!data.ok) {
-                notify('Could not change Plex flag: ' + (data.error || 'Unknown error'), 'danger');
+                notify('Could not change Plex flag: ' + (reasonFrom(data)), 'danger');
             }
         })
         .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -456,7 +468,7 @@ function moveToPlexManual(jobId) {
                 if (data.ok) {
                     location.reload();
                 } else {
-                    notify('Could not move: ' + (data.error || 'Unknown error'), 'danger');
+                    notify('Could not move: ' + (reasonFrom(data)), 'danger');
                 }
             })
             .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -561,7 +573,7 @@ function applyRematch(tmdbId) {
                     bootstrap.Modal.getInstance(document.getElementById('rematchModal')).hide();
                     location.reload();
                 } else {
-                    notify('Could not re-match: ' + (data.error || 'Unknown error'), 'danger');
+                    notify('Could not re-match: ' + (reasonFrom(data)), 'danger');
                 }
             })
             .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -919,7 +931,7 @@ function saveSeries() {
             body: JSON.stringify({active: true, ...payload}),
         }).then(r => r.json().then(d => ({ok: r.ok, d})))
           .then(({ok, d}) => {
-              if (!ok) { notify(d.error || 'Could not start series mode.', 'danger'); return; }
+              if (!ok) { notify(reasonFrom(d, 'Could not start series mode.'), 'danger'); return; }
               location.reload();
           })
           .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -933,7 +945,7 @@ function saveSeries() {
     })
     .then(r => r.json().then(d => ({ok: r.ok, d})))
     .then(({ok, d}) => {
-        if (!ok) { notify(d.error || 'Could not change this job.', 'danger'); return; }
+        if (!ok) { notify(reasonFrom(d, 'Could not change this job.'), 'danger'); return; }
         location.reload();
     })
     .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -993,7 +1005,7 @@ function fixNextEpisode(current) {
         body: JSON.stringify({episode: parseInt(value, 10)}),
     }).then(r => r.json().then(d => ({ok: r.ok, d})))
       .then(({ok, d}) => {
-          if (!ok) { notify(d.error || 'Could not change the counter.', 'danger'); return; }
+          if (!ok) { notify(reasonFrom(d, 'Could not change the counter.'), 'danger'); return; }
           location.reload();
       })
       .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -1014,7 +1026,7 @@ function markAsMovie(jobId) {
         })
         .then(r => r.json().then(d => ({ok: r.ok, d})))
         .then(({ok, d}) => {
-            if (!ok) { notify(d.error || 'Could not change this job.', 'danger'); return; }
+            if (!ok) { notify(reasonFrom(d, 'Could not change this job.'), 'danger'); return; }
             location.reload();
         })
         .catch(err => notify('Error: ' + err.message, 'danger'));
@@ -1050,7 +1062,7 @@ function retryJob(jobId) {
                     .then(r => r.json().then(d => ({ok: r.ok, d})))
                     .then(({ok, d}) => {
                         if (ok && d.ok) location.reload();
-                        else notify(d.message || d.error || 'Retry failed.', 'danger');
+                        else notify(reasonFrom(d, 'Retry failed.'), 'danger');
                     });
             });
 })

@@ -332,7 +332,7 @@ function doDelete(ids, deleteFiles) {
     })
         .then(r => r.json())
         .then(data => {
-            if (!data.ok) { notify('Could not delete: ' + (data.error || 'unknown error'), 'danger'); return; }
+            if (!data.ok) { notify('Could not delete: ' + (reasonFrom(data)), 'danger'); return; }
             let message = `${data.deleted} job(s) removed`;
             if (deleteFiles) message += `, ${data.files_deleted} file(s) deleted`;
             if (data.failed && data.failed.length) {
@@ -368,7 +368,7 @@ function reencodeJob(jobId) {
                 return fetch(`/api/jobs/${jobId}/reencode`, {method: 'POST'})
                     .then(r => r.json().then(d => ({ok: r.ok, d})))
                     .then(({ok, d}) => {
-                        if (!ok || !d.ok) { notify(d.message || 'Could not start.', 'danger'); return; }
+                        if (!ok || !d.ok) { notify(reasonFrom(d), 'danger'); return; }
                         notify(`Queued ${d.queued} file(s) for encoding.`, 'success');
                         location.reload();
                     });
