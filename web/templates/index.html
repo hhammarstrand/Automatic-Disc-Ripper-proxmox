@@ -133,8 +133,17 @@
                 {% endfor %}
             {% else %}
                 <div class="alert alert-secondary">
-                    <i class="bi bi-info-circle me-1"></i>
-                    No optical drives found. Make sure you have a DVD drive connected.
+                    <div class="fw-semibold mb-1">
+                        <i class="bi bi-info-circle me-1"></i>No optical drive is visible here
+                    </div>
+                    <div class="small">
+                        Usually the drive is connected and simply not passed into
+                        this container — classically after a host reboot, because a
+                        device that did not exist yet at start is skipped silently.
+                        On the Proxmox host:
+                        <code>adr-doctor --fix &lt;CTID&gt;</code>.
+                        The <a href="/doctor">Doctor</a> page checks the rest.
+                    </div>
                 </div>
             {% endif %}
         </div>
@@ -298,7 +307,9 @@
             {% else %}
                 <div class="alert alert-secondary">
                     <i class="bi bi-hourglass me-1"></i>
-                    No active jobs. Insert a DVD disc to start ripping automatically.
+                    Nothing running. Put a disc in and it starts on its own — a DVD
+                    or Blu-ray is transcoded, an audio CD becomes tagged FLAC or
+                    MP3, and a data disc becomes an ISO image.
                 </div>
             {% endif %}
         </div>
@@ -417,7 +428,7 @@
                                 </tr>
                                 {% endfor %}
                                 {% if not recent_jobs %}
-                                <tr><td colspan="5" class="text-center text-secondary">No completed jobs yet</td></tr>
+                                <tr><td colspan="5" class="text-center text-secondary py-4">Nothing finished yet</td></tr>
                                 {% endif %}
                             </tbody>
                         </table>

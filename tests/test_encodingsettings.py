@@ -169,3 +169,25 @@ class TestBothEncodersActuallyReadThem:
         assert "--audio-lang-list swe" in recorded
         assert "--maxHeight 1080" in recorded
         assert "-q 20" in recorded
+
+
+class TestTheStatusLineDescribesTheRightProgram:
+    """A line that describes the encoder which is *not* going to run is worse
+    than no line: it is confidently wrong about the one thing it exists to
+    report."""
+
+    def test_handbrake_defers_to_its_preset(self):
+        said = encodingsettings.describe(
+            _config(encoder_backend="handbrake"))
+        assert "preset's own quality" in said
+
+    def test_the_gpu_path_has_no_preset_to_defer_to(self):
+        said = encodingsettings.describe(_config(encoder_backend="vaapi"))
+        assert "preset" not in said
+        assert "encoder's default quality" in said
+
+    def test_a_set_quality_is_named_whichever_encoder_runs(self):
+        for backend in ("handbrake", "vaapi"):
+            said = encodingsettings.describe(
+                _config(encoder_backend=backend, video_quality=20))
+            assert "quality 20" in said

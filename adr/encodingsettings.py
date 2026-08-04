@@ -91,14 +91,26 @@ def handbrake_overrides(config) -> list[str]:
 
 
 def describe(config) -> str:
-    """One line saying what the shared settings will do, for the UI."""
+    """One line saying what the shared settings will do, for the UI.
+
+    Worded against the encoder that will run, because "the preset's own
+    quality" is a sentence about a file the GPU path never opens — and a
+    status line that describes the wrong program is worse than none.
+    """
     parts = []
     language = _language(config)
     parts.append(f"audio in {language}" if language else "the disc's own audio order")
+
     height = _int(getattr(config, "max_height", 0))
     parts.append(f"capped at {height}p" if height else "the source resolution")
+
     quality = clamp_quality(getattr(config, "video_quality", 0))
-    parts.append(f"quality {quality}" if quality else "the preset's own quality")
+    if quality:
+        parts.append(f"quality {quality}")
+    elif getattr(config, "encoder_backend", "handbrake") == "vaapi":
+        parts.append("the encoder's default quality")
+    else:
+        parts.append("the preset's own quality")
     return ", ".join(parts)
 
 

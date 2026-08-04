@@ -1620,6 +1620,22 @@ def _register_api_routes(app: Flask) -> None:
             "test": result,
         })
 
+    @app.route("/api/encoder/backend")
+    def api_encoder_backend():
+        """Which encoder is configured, and what it has been told to produce.
+
+        The Encoding card used to say "does the preset resolve, and can
+        HandBrake encode with it" regardless of what was configured — so with
+        the GPU backend selected the page described a program that was not
+        going to run and a preset nothing was going to read.
+        """
+        from adr.encoderfactory import describe_backend
+
+        return jsonify({
+            "backend": _config.encoder_backend,
+            "description": describe_backend(_config),
+        })
+
     @app.route("/api/encoder/gpu-option")
     def api_encoder_gpu_option():
         """Can ffmpeg encode on the GPU, when HandBrake cannot?

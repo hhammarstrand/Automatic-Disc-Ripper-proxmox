@@ -202,3 +202,31 @@ class TestOnePageReadsLikeTheNext:
         html = client.get("/history").get_data(as_text=True)
         heading = re.search(r"<h4[^>]*>(?:<i[^>]*></i>)?\s*([^<]+)", html).group(1)
         assert heading.strip() == "History"
+
+
+class TestTheEmptyPagesStillHelp:
+    """The first thing a new install shows is every empty state at once. They
+    are the only instructions most people will read, and until this pass two
+    of them named DVDs — in an application that also rips Blu-rays, audio CDs
+    and data discs — while a third blamed a disconnected drive for what is
+    almost always passthrough."""
+
+    def test_the_dashboard_says_what_a_disc_will_do(self, client):
+        html = client.get("/").get_data(as_text=True)
+        assert "Nothing running" in html
+        for kind in ("Blu-ray", "audio CD", "data disc"):
+            assert kind in html, f"the empty state never mentions a {kind}"
+
+    def test_a_missing_drive_points_at_the_usual_cause(self, client):
+        """"Make sure you have a DVD drive connected" is almost never it: the
+        drive is connected and not passed into the container, and the fix is a
+        command nobody guesses."""
+        html = client.get("/").get_data(as_text=True)
+        assert "adr-doctor --fix" in html
+        assert "passed into" in html
+
+    @pytest.mark.parametrize("path", PAGES)
+    def test_no_page_promises_only_dvds(self, client, path):
+        html = client.get(path).get_data(as_text=True)
+        assert "DVD disc" not in html
+        assert "DVD drive" not in html

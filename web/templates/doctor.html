@@ -75,16 +75,19 @@
   <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
     <span><i class="bi bi-camera-reels me-1"></i>Encoding</span>
     <button class="btn btn-sm btn-outline-primary" id="encoderTestBtn" onclick="testEncoder()">
-      <i class="bi bi-play-circle me-1"></i>Test the preset
+      <i class="bi bi-play-circle me-1"></i>Test encoding
     </button>
   </div>
   <div class="card-body">
     <p class="small text-secondary mb-2">
-      A preset HandBrake cannot satisfy fails the same way on every title of
-      every disc — exit code 3, forty minutes after the disc went in, once per
-      title. The same question can be answered here in seconds with no disc:
-      does the preset resolve, and can HandBrake actually encode two seconds of
-      video with it.
+      Settings an encoder cannot satisfy fail the same way on every title of
+      every disc — forty minutes after the disc went in, once per title, with
+      the reason on a line of output nobody sees. The same question is
+      answered here in seconds and with no disc: it encodes two seconds of
+      video with whatever is actually configured, and says what happened.
+    </p>
+    <p class="small text-secondary mb-2" id="encoderBackendLine">
+      <span class="spinner-border spinner-border-sm me-2"></span>Asking what is configured…
     </p>
     <div id="encoderResult"></div>
     <div id="encoderHbGpu" class="d-none mt-3 p-3 rounded border border-success">
@@ -372,6 +375,21 @@ function pollProbe(device, box, render, fail, startedAt) {
       setTimeout(() => pollProbe(device, box, render, fail, startedAt), PROBE_POLL_MS);
     })
     .catch(err => fail('Lost contact with the server: ' + err.message));
+}
+
+// What is actually configured, said plainly above the test — so the card
+// describes the encoder that will run rather than the one it was written for.
+function loadEncoderBackend() {
+    fetch('/api/encoder/backend')
+        .then(r => r.json())
+        .then(d => {
+            document.getElementById('encoderBackendLine').innerHTML =
+                '<i class="bi bi-info-circle me-1"></i>Currently: <strong>' +
+                escapeHtml(d.description) + '</strong>';
+        })
+        .catch(() => {
+            document.getElementById('encoderBackendLine').classList.add('d-none');
+        });
 }
 
 function testEncoder() {
@@ -718,6 +736,7 @@ document.addEventListener('DOMContentLoaded', () => {
   loadDrives();
   loadChecks();
   checkUpdate();
+  loadEncoderBackend();
 });
 </script>
 {% endblock %}

@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.14.0
+
+The polish pass, continued — the example config, the Doctor page, and the
+first thing a new install shows.
+
+**`config/adr.yaml.example` is grouped the way the Settings page is.** It had
+been three themed sections followed by an alphabetical blob of forty keys,
+which told a reader nothing about what belonged with what. It now has the same
+five sections as the Settings tabs, in the same order, each with a paragraph
+saying why the settings under it exist. Two ways of configuring one
+application should agree on how it is organised.
+
+**The Doctor's encoding card describes the encoder that will actually run.**
+It said "does the preset resolve, and can HandBrake encode with it" regardless
+of what was configured — so with the GPU backend selected it described a
+program that was not going to run and a preset nothing was going to read. It
+now states what is configured, in a line above the test, and the button says
+"Test encoding" rather than "Test the preset", which was only ever half true.
+
+**The empty states are the only instructions most people read.** Two of them
+named DVDs, in an application that also rips Blu-rays, audio CDs and data
+discs. A third blamed a disconnected drive for what is almost always
+passthrough — the drive is connected, the container cannot see it, and the fix
+is a command nobody guesses. All three say something useful now.
+
 ## 1.13.1
 
 **"Unknown error" was usually the API answering in the wrong key.** Routes had
