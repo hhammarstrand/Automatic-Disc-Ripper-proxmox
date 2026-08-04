@@ -45,9 +45,17 @@ def manager(tmp_path):
     return mgr
 
 
+def _media(monkeypatch, state, detail=""):
+    monkeypatch.setattr(
+        "adr.disc.media_status",
+        lambda d: {"ready": state == "ready", "state": state,
+                   "detail": detail or f"{d} is {state}."},
+    )
+
+
 @pytest.fixture
 def loaded(monkeypatch):
-    monkeypatch.setattr("adr.disc._has_media", lambda d: True)
+    _media(monkeypatch, "ready")
     monkeypatch.setattr("adr.disc._blkid_label", lambda d: "THE_MATRIX")
 
 
@@ -67,7 +75,7 @@ class TestItStarts:
         assert manager.drive_pipelines["/dev/sr0"].calls[0]["manual"] is True
 
     def test_an_unlabelled_disc_still_starts(self, manager, monkeypatch):
-        monkeypatch.setattr("adr.disc._has_media", lambda d: True)
+        _media(monkeypatch, "ready")
         monkeypatch.setattr("adr.disc._blkid_label", lambda d: None)
         ok, message = manager.rip_now("/dev/sr0")
         assert ok is True
@@ -94,13 +102,27 @@ class TestItRefuses:
         assert ok is False
         assert "disabled" in message
 
-    def test_an_empty_drive_points_at_the_doctor_page(self, manager, monkeypatch):
-        """'No disc' and 'the container cannot open the drive' look identical
-        from here, so the message names the place that can tell them apart."""
-        monkeypatch.setattr("adr.disc._has_media", lambda d: False)
+    def test_an_empty_drive_says_so_in_words(self, manager, monkeypatch):
+        """Not "no readable disc", which covered an empty tray, an open tray,
+        a missing device node and a cgroup denial with one sentence — and only
+        one of the four is fixed by putting a disc in."""
+        _media(monkeypatch, "empty",
+               "There is no disc in /dev/sr0. Put one in and try again.")
         monkeypatch.setattr("adr.disc._blkid_label", lambda d: None)
         ok, message = manager.rip_now("/dev/sr0")
         assert ok is False
-        assert "No readable disc" in message
-        assert "Doctor" in message
+        assert message == "There is no disc in /dev/sr0. Put one in and try again."
         assert manager.drive_pipelines["/dev/sr0"].calls == []
+
+    def test_each_reason_gets_its_own_sentence(self, manager, monkeypatch):
+        monkeypatch.setattr("adr.disc._blkid_label", lambda d: None)
+        for state, detail in [
+            ("tray_open", "The tray of /dev/sr0 is open. Close it with a disc in it."),
+            ("missing", "There is no /dev/sr0 in this container."),
+            ("denied", "/dev/sr0 exists but this container is not allowed to open it."),
+            ("not_ready", "/dev/sr0 is still reading the disc."),
+        ]:
+            _media(monkeypatch, state, detail)
+            ok, message = manager.rip_now("/dev/sr0")
+            assert ok is False
+            assert message == detail

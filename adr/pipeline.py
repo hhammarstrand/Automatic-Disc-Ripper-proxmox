@@ -853,6 +853,19 @@ class DrivePipeline:
         if normalize_drive(drive) in self._config.disabled_drives:
             logger.info("Drive %s is disabled — ignoring disc event", drive)
             return
+        # Confirm there is actually something in the drive before a job exists.
+        #
+        # The watcher used to say "disc present" for an empty tray — a
+        # non-blocking open of an optical drive succeeds either way — so the
+        # service came up, started a job on an empty drive, and failed it with
+        # a MakeMKV exit code. A red job for a drive nobody had put a disc in
+        # is worse than no job: it needs clearing, and it says nothing.
+        from adr.disc import NOTHING_TO_RIP, media_status
+
+        state = media_status(drive)
+        if state["state"] in NOTHING_TO_RIP:
+            logger.info("Ignoring disc event for %s: %s", drive, state["detail"])
+            return
         if not manual:
             Notifier(self._config).disc_inserted(drive, volume_name)
         thread = threading.Thread(
@@ -1738,7 +1751,7 @@ class PipelineManager:
         Ejecting and reinserting works — but asking someone to walk to the
         machine to re-trigger software is not a fix.
         """
-        from adr.disc import _blkid_label, _has_media
+        from adr.disc import _blkid_label, media_status
 
         pipeline = self.drive_pipelines.get(drive)
         if pipeline is None:
@@ -1747,11 +1760,12 @@ class PipelineManager:
             return False, f"{drive} is disabled under Settings."
         if pipeline.is_busy:
             return False, f"{drive} is already ripping."
-        if not _has_media(drive):
-            return False, (
-                f"No readable disc in {drive}. If one is loaded, the container "
-                "may not be able to open the drive — see the Doctor page."
-            )
+        # In the drive's own words. "No readable disc" covered an empty tray,
+        # an open tray, a missing device node and a cgroup denial with one
+        # sentence, and only one of the four is fixed by putting a disc in.
+        state = media_status(drive)
+        if not state["ready"]:
+            return False, state["detail"]
 
         # The same gate the rip itself would hit thirty seconds from now.
         # Letting it start anyway produces a red job saying what could have

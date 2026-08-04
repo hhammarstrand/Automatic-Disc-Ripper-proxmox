@@ -81,6 +81,9 @@ class MakeMKVRipper:
         #: Why the last :meth:`scan_disc` came back empty, in MakeMKV's own
         #: words where it gave any. Empty after a scan that found titles.
         self.last_scan_error: str = ""
+        #: The last error MakeMKV printed during a rip. An exit code alone is
+        #: not an explanation, and this nearly always is one.
+        self.last_message_error: str = ""
 
         if not os.path.isfile(self._exe):
             logger.warning("MakeMKV not found at %s", self._exe)
@@ -218,6 +221,7 @@ class MakeMKVRipper:
             RipResult with success status, file list, and metadata.
         """
         result = RipResult()
+        self.last_message_error = ""     # this rip's, not the previous one's
         source = self._make_dev_source(drive_letter)
 
         # Prepare output directory
@@ -425,7 +429,14 @@ class MakeMKVRipper:
                         len(result.mkv_files), output_dir,
                     )
                 else:
-                    result.error = "MakeMKV exited OK but produced no MKV files"
+                    result.error = (
+                        "MakeMKV finished without an error but wrote no files. "
+                        "Every title on the disc was shorter than the minimum "
+                        f"title length ({self._min_length}s), or the disc holds "
+                        "no video titles at all."
+                        + (f" MakeMKV said: {self.last_message_error}"
+                           if self.last_message_error else "")
+                    )
                     logger.warning(result.error)
             elif _stalled[0]:
                 result.error = (
@@ -437,11 +448,14 @@ class MakeMKVRipper:
                 )
                 logger.error(result.error)
             else:
-                result.error = f"MakeMKV exited with code {proc.returncode}"
+                result.error = self._explain_failure(proc.returncode)
                 logger.error(result.error)
 
         except FileNotFoundError:
-            result.error = f"MakeMKV executable not found: {self._exe}"
+            result.error = (
+                f"MakeMKV is not installed at {self._exe}. Settings → Advanced "
+                "→ MakeMKV path, or reinstall it in the container."
+            )
             logger.error(result.error)
         except (subprocess.SubprocessError, OSError) as exc:
             result.error = str(exc)
@@ -620,6 +634,34 @@ class MakeMKVRipper:
             return None
         return None
 
+    def _explain_failure(self, returncode: int) -> str:
+        """Why the rip failed, in words rather than in an exit code.
+
+        "MakeMKV exited with code 1" is the whole of what the History page used
+        to show for every failure there is. MakeMKV itself is more helpful than
+        that on its way out — the last error it printed is nearly always the
+        real answer — so that is what leads, and the code follows for the cases
+        where it said nothing.
+        """
+        said = self.last_message_error
+        if returncode < 0:
+            # Negative means killed by a signal: SIGTERM from an update or a
+            # restart, SIGKILL from the OOM killer.
+            return (
+                f"The rip was stopped before it finished (signal {-returncode}). "
+                "That is what a service restart, an update, or the kernel "
+                "running out of memory looks like from here. The files already "
+                "written are incomplete — rip the disc again."
+            )
+        if said:
+            return f"MakeMKV could not rip this disc: {said}"
+        return (
+            f"MakeMKV gave up (exit code {returncode}) without saying why. The "
+            "usual causes are a dirty or scratched disc, a disc this drive "
+            "cannot read, or an expired MakeMKV key — the Doctor page checks "
+            "the last one."
+        )
+
     def _log_message(self, line: str) -> None:
         """Log a MSG: line, and pass it to the job log if one is attached."""
         parsed = self.parse_message(line)
@@ -628,6 +670,7 @@ class MakeMKVRipper:
             return
         msg_text, is_error = parsed
         if is_error:
+            self.last_message_error = msg_text
             logger.warning("MakeMKV: %s", msg_text)
         else:
             logger.debug("MakeMKV: %s", msg_text)

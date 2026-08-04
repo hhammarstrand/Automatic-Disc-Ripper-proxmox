@@ -75,12 +75,16 @@ exit 3
     result = _ripper(tmp_path, script).rip("/dev/sr0", job_id=1)
     assert not result.success
     # Exit code, not a stall: it was talking the whole time.
-    assert "exited with code 3" in result.error
+    assert "exit code 3" in result.error
+    assert "stopped responding" not in result.error
 
 
 def test_a_quick_failure_is_reported_as_itself(tmp_path, fast_watchdog):
+    """The code is still named — it is the only handle for a web search — but
+    it no longer stands alone as the whole explanation."""
     result = _ripper(tmp_path, "exit 7\n").rip("/dev/sr0", job_id=1)
-    assert "exited with code 7" in result.error
+    assert "exit code 7" in result.error
+    assert "dirty or scratched disc" in result.error
 
 
 def test_a_missing_binary_is_reported(tmp_path, fast_watchdog):
@@ -93,7 +97,8 @@ def test_a_missing_binary_is_reported(tmp_path, fast_watchdog):
     ))
     result = r.rip("/dev/sr0", job_id=1)
     assert not result.success
-    assert "not found" in result.error
+    assert "not installed" in result.error
+    assert "Settings" in result.error
 
 
 def test_the_timeout_is_generous_by_default():

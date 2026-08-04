@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.17.0
+
+**The service ripped an empty drive every time it started.** Container comes
+up with nothing in the tray, a job appears, and forty seconds later it is red
+with a MakeMKV exit code in it. Pressing Rip on an empty drive did the same.
+
+One line caused it. `open(device, O_RDONLY | O_NONBLOCK)` on an optical drive
+is *specified* to succeed with an empty tray — that is how you are meant to
+open one in order to ask what is in it — and the media check read a successful
+open as "a disc is loaded". So the drive was reported loaded from the moment
+the service came up, the watcher fired its startup event, and a job started on
+an empty drive. Everything downstream was working correctly on a false
+premise.
+
+It now asks the drive. `CDROM_DRIVE_STATUS` answers exactly this question and
+outranks everything else, including the host's sysfs — which, inside an LXC,
+is what `/sys/block/sr0/size` reads from and can be stale. Drives that do not
+implement the ioctl (some USB enclosures) still fall back to the old
+inference. A disc that is spinning up still counts as present, because the
+watcher fires on the *transition* and dropping that event would lose the
+insertion entirely.
+
+**And the errors are sentences now.** "No readable disc in /dev/sr0" used to
+cover four different problems — an empty tray, an open tray, a device node the
+passthrough never created, and a cgroup denial — of which exactly one is fixed
+by putting a disc in. Each has its own message, saying what to do:
+
+* *There is no disc in /dev/sr0. Put one in and try again.*
+* *The tray of /dev/sr0 is open. Close it with a disc in it.*
+* *There is no /dev/sr0 in this container. The drive was not passed through
+  when the container started — run 'adr-doctor --fix <CTID>' on the Proxmox
+  host, or restart the container.*
+* *[…] is still reading the disc. Give it a few seconds and try again.*
+
+A rip that fails for real is no longer reported as an exit code either.
+MakeMKV's own last error leads, because it is nearly always the actual answer;
+where it said nothing, the message names the usual causes instead of the
+number. A rip killed by a signal — a restart or an update mid-rip — says so,
+and says the files are incomplete.
+
 ## 1.16.5
 
 **"Och den blev på engelska."** The spoken language was set — in the HandBrake

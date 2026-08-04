@@ -60,7 +60,10 @@ def manager(app_config):
 
 @pytest.fixture
 def client(app_config, manager, monkeypatch):
-    monkeypatch.setattr("adr.disc._has_media", lambda d: True)
+    monkeypatch.setattr(
+        "adr.disc.media_status",
+        lambda d: {"ready": True, "state": "ready", "detail": ""},
+    )
     monkeypatch.setattr("adr.disc._blkid_label", lambda d: "THE_MATRIX")
     monkeypatch.setattr("web.app.eject_drive", lambda d: True)
     init_db()

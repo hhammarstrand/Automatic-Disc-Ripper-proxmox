@@ -236,7 +236,10 @@ def test_rip_now_refuses_instead_of_making_another_red_job(config, monkeypatch):
     mgr.drive_pipelines = {"/dev/sr0": pipeline}
     mgr.rip_now = pipeline_mod.PipelineManager.rip_now.__get__(mgr)
 
-    monkeypatch.setattr("adr.disc._has_media", lambda d: True)
+    monkeypatch.setattr(
+        "adr.disc.media_status",
+        lambda d: {"ready": True, "state": "ready", "detail": ""},
+    )
     monkeypatch.setattr("adr.disc._blkid_label", lambda d: "HAPPY_FEET_TWO")
 
     ok, message = mgr.rip_now("/dev/sr0")

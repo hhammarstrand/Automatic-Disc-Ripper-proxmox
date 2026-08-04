@@ -79,23 +79,55 @@ _SPINNING_UP_ERRNOS = frozenset({errno.EIO, errno.EBUSY})
 _denied_devices: set[str] = set()
 
 
-def _probe_device(device: str) -> tuple[bool, int | None]:
-    """Try to open *device* without blocking.
+# <linux/cdrom.h>. The drive's own answer to "is there a disc in you", which
+# is the only authoritative one — everything else here is inference.
+CDROM_DRIVE_STATUS = 0x5326
+CDSL_CURRENT = 0x7FFFFFFF
+CDS_NO_INFO = 0
+CDS_NO_DISC = 1
+CDS_TRAY_OPEN = 2
+CDS_DRIVE_NOT_READY = 3
+CDS_DISC_OK = 4
 
-    Returns ``(reachable, errno)``. *reachable* is False only when the kernel
-    refused us access to the device itself — inside an LXC that means the
-    container's device cgroup is denying it, which is a configuration problem
-    and not a disc that happens to be absent. An empty tray or a drive still
-    spinning up is reachable; *errno* says which.
+
+def _drive_status(fd: int) -> int | None:
+    """What the drive says about its tray, or None if it will not say.
+
+    Some USB enclosures do not implement the ioctl at all, which is why the
+    caller still has fallbacks. On a normal SATA drive this is exact.
+    """
+    import fcntl
+
+    try:
+        return int(fcntl.ioctl(fd, CDROM_DRIVE_STATUS, CDSL_CURRENT))
+    except (OSError, ValueError):
+        return None
+
+
+def _probe_device(device: str) -> tuple[bool, int | None, int | None]:
+    """Try to open *device* without blocking, and ask what is in it.
+
+    Returns ``(reachable, errno, status)``. *reachable* is False only when the
+    kernel refused us access to the device itself — inside an LXC that means
+    the container's device cgroup is denying it, which is a configuration
+    problem and not a disc that happens to be absent. An empty tray or a drive
+    still spinning up is reachable; *errno* says which.
+
+    *status* is the CDS_* constant above, and it is the point of this function.
+    O_NONBLOCK on an optical drive is specified to succeed with an empty tray —
+    that is how you are meant to open one in order to query it — so a
+    successful open says nothing whatsoever about whether a disc is loaded.
+    Reading it as "media present" is what made the service start ripping an
+    empty drive the moment the container came up.
     """
     fd = None
     try:
         fd = os.open(device, os.O_RDONLY | os.O_NONBLOCK)
-        return True, None
+        return True, None, _drive_status(fd)
     except OSError as exc:
         if exc.errno in _EMPTY_TRAY_ERRNOS or exc.errno in _SPINNING_UP_ERRNOS:
-            return True, exc.errno
-        return False, exc.errno
+            return True, exc.errno, None
+        return False, exc.errno, None
     finally:
         if fd is not None:
             with contextlib.suppress(OSError):
@@ -113,7 +145,7 @@ def _has_media(device: str) -> bool:
     the kernel capacity used, which is what catches audio CDs and label-less
     Blu-rays that blkid cannot see.
     """
-    reachable, err = _probe_device(device)
+    reachable, err, status = _probe_device(device)
     if not reachable:
         if device not in _denied_devices:
             _denied_devices.add(device)
@@ -133,11 +165,96 @@ def _has_media(device: str) -> bool:
         return False
     _denied_devices.discard(device)
 
+    # The drive's own answer, where it gave one. It outranks everything below:
+    # sysfs is the host's and can be stale, and a successful non-blocking open
+    # means only that the device node works.
+    if status in (CDS_NO_DISC, CDS_TRAY_OPEN):
+        return False
+    if status == CDS_DISC_OK:
+        return True
+
     if err in _SPINNING_UP_ERRNOS:
         return True          # the drive is busy with a disc it is spinning up
-    if _device_capacity(device) > 0:
-        return True
-    return err is None       # open() succeeded outright → media present
+    if status == CDS_DRIVE_NOT_READY:
+        return False         # still waking up; the next poll will say properly
+    # Nothing authoritative left. sysfs is the host's, so a positive capacity
+    # is at least evidence that a disc is in this physical drive — and access
+    # to it has already been confirmed above.
+    return _device_capacity(device) > 0
+
+
+#: States where starting a job would certainly fail, and waiting will not
+#: change that. "not_ready" is deliberately absent: a drive spinning up a disc
+#: someone has just pushed in reports it, and dropping that event would lose
+#: the insertion entirely — the watcher fires on the *transition*, so there is
+#: no second chance.
+NOTHING_TO_RIP = frozenset({"missing", "denied", "empty", "tray_open"})
+
+
+def media_status(device: str) -> dict:
+    """Whether *device* has a disc ready to rip, and if not, why.
+
+    Returns ``{"ready", "state", "detail"}``. *detail* is written to be shown
+    to a person as it is: the previous answer to "there is no disc in the
+    drive" was MakeMKV failing forty seconds later with an exit code, and an
+    exit code is not an explanation.
+
+    The states are distinct because the thing to do about them is distinct.
+    An empty tray needs a disc; a missing device node needs the passthrough
+    fixed on the host; a drive still spinning up needs ten seconds.
+    """
+    if not os.path.exists(device):
+        return {
+            "ready": False, "state": "missing",
+            "detail": (
+                f"There is no {device} in this container. The drive was not "
+                "passed through when the container started — run "
+                "'adr-doctor --fix <CTID>' on the Proxmox host, or restart the "
+                "container."
+            ),
+        }
+
+    reachable, err, status = _probe_device(device)
+    if not reachable:
+        name = errno.errorcode.get(err, err)
+        return {
+            "ready": False, "state": "denied",
+            "detail": (
+                f"{device} exists but this container is not allowed to open it "
+                f"({name}). The device cgroup is denying access — run "
+                "'adr-doctor --fix <CTID>' on the Proxmox host."
+            ),
+        }
+
+    if status == CDS_TRAY_OPEN:
+        return {
+            "ready": False, "state": "tray_open",
+            "detail": f"The tray of {device} is open. Close it with a disc in it.",
+        }
+    if status == CDS_NO_DISC:
+        return {
+            "ready": False, "state": "empty",
+            "detail": f"There is no disc in {device}. Put one in and try again.",
+        }
+    if status == CDS_DRIVE_NOT_READY or err in _SPINNING_UP_ERRNOS:
+        return {
+            "ready": False, "state": "not_ready",
+            "detail": (
+                f"{device} is still reading the disc. Give it a few seconds and "
+                "try again."
+            ),
+        }
+
+    if _has_media(device):
+        return {"ready": True, "state": "ready", "detail": f"A disc is loaded in {device}."}
+
+    return {
+        "ready": False, "state": "empty",
+        "detail": (
+            f"No readable disc in {device}. The drive answered but reported no "
+            "media — if a disc is loaded, it may be one this drive cannot read."
+        ),
+    }
 
 
 #: Devices whose blkid call has already timed out, and when.
@@ -250,7 +367,7 @@ def diagnose_passthrough() -> dict:
         if entry["node_present"]:
             # Same probe the watcher uses, so a clean report here means the
             # watcher will also act on discs in this drive.
-            reachable, err = _probe_device(dev)
+            reachable, err, _status = _probe_device(dev)
             entry["openable"] = reachable
             if not reachable:
                 entry["error"] = f"{errno.errorcode.get(err, err)}: {os.strerror(err)}"
