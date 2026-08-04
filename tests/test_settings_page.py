@@ -126,3 +126,69 @@ class TestTheMarkupHoldsTogether:
         assert len(panes) == 5
         inside = sum(p.count('class="card mb-4"') for p in panes)
         assert inside == page.count('class="card mb-4"')
+
+
+class TestTheCopyReadsAsOneVoice:
+    """Seventeen cards were written over months, and it showed: Title Case on
+    some headers and sentence case on others, hints inside labels on two
+    fields and underneath on the rest, config keys leaking into labels. None
+    of it is a bug and all of it makes a page feel unfinished.
+    """
+
+    #: Words that keep their capitals wherever they appear.
+    PROPER = {
+        "Plex", "MakeMKV", "HandBrake", "HandBrakeCLI", "TMDb", "TV", "GPU",
+        "MP3", "URL", "ISO", "cdparanoia", "ffmpeg", "Audio", "CDs",
+    }
+
+    def _headers(self, page):
+        return re.findall(r'card-header"><i class="bi [^"]+"></i>([^<]+)</div>', page)
+
+    def _labels(self, page):
+        return re.findall(r'<label class="form-label">([^<]+)</label>', page)
+
+    def test_the_headers_are_sentence_case(self, page):
+        """"Drive Labels" next to "Data discs" reads as two people having
+        written the page, which is what happened."""
+        wrong = []
+        for header in self._headers(page):
+            words = header.strip().split()
+            for word in words[1:]:
+                bare = word.strip("()/,")
+                if bare and bare[0].isupper() and bare not in self.PROPER:
+                    wrong.append(header.strip())
+        assert not wrong, f"Title Case headers: {sorted(set(wrong))}"
+
+    def test_no_label_carries_its_own_hint(self, page):
+        """"Quality (0 = leave it to the preset)" puts under the label what
+        every other field puts beneath it."""
+        offenders = [
+            label for label in self._labels(page)
+            if "=" in label or "(optional)" in label.lower()
+        ]
+        assert not offenders, offenders
+
+    def test_no_label_is_a_config_key(self, page):
+        """A field called "Watch folder output path" is named after the
+        setting rather than after what it does."""
+        offenders = [label for label in self._labels(page) if "_" in label]
+        assert not offenders, offenders
+
+    def test_no_label_ends_in_punctuation(self, page):
+        offenders = [
+            label for label in self._labels(page)
+            if label.strip().endswith((":", ".", "…"))
+        ]
+        assert not offenders, offenders
+
+    def test_every_card_has_a_header(self, page):
+        """A card with no header is a group of settings with no name."""
+        assert page.count('class="card mb-4"') == len(self._headers(page))
+
+    def test_the_tool_paths_are_together(self, page):
+        """Two of the four used to be filed under Audio CDs, because that is
+        what needed them first. Where a program lives is not an audio-CD
+        setting, and splitting them is how a page stops being findable."""
+        section = page.split("Where the tools live")[1].split("</div>\n    </div>")[0]
+        for tool in ("makemkv_path", "handbrake_path", "ffmpeg_path", "cdparanoia_path"):
+            assert f'name="{tool}"' in section, f"{tool} is somewhere else"

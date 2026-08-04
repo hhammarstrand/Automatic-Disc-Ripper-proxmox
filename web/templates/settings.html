@@ -76,7 +76,7 @@
         <div class="card-header"><i class="bi bi-collection-play me-1"></i>Plex</div>
         <div class="card-body">
             <div class="mb-3">
-                <label class="form-label">Plex movie library path</label>
+                <label class="form-label">Plex film library</label>
                 <input type="text" class="form-control"
                        name="plex_path" value="{{ config.plex_path }}">
                 <div class="form-text">
@@ -85,7 +85,7 @@
                 </div>
             </div>
             <div class="mb-3">
-                <label class="form-label">Plex TV library path</label>
+                <label class="form-label">Plex TV library</label>
                 <input type="text" class="form-control"
                        name="tv_path" value="{{ config.tv_path }}">
                 <div class="form-text">
@@ -226,7 +226,7 @@
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Quality (0 = leave it to the preset)</label>
+                        <label class="form-label">Quality</label>
                         <input type="number" class="form-control" name="video_quality"
                                value="{{ config.video_quality }}" min="0" max="35">
                         <div class="form-text">
@@ -236,7 +236,7 @@
                         </div>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Cap height (0 = leave the source alone)</label>
+                        <label class="form-label">Maximum height</label>
                         <input type="number" class="form-control" name="max_height"
                                value="{{ config.max_height }}" min="0" max="2160">
                         <div class="form-text">1080 halves the size of a 4K rip. Never upscales.</div>
@@ -273,7 +273,7 @@
                         </select>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Render node (optional)</label>
+                        <label class="form-label">Render node</label>
                         <input type="text" class="form-control" name="vaapi_device"
                                value="{{ config.vaapi_device }}" placeholder="/dev/dri/renderD128">
                         <div class="form-text">Empty means the first one found.</div>
@@ -295,7 +295,7 @@
                     </div>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">HandBrake preset file (optional)</label>
+                    <label class="form-label">HandBrake preset file</label>
                     <input type="text" class="form-control"
                            name="handbrake_preset_file" value="{{ config.handbrake_preset_file }}">
                     <div class="form-text">
@@ -353,7 +353,7 @@
     </div>
     <!-- Drive labels -->
     <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-tag me-1"></i>Drive Labels</div>
+        <div class="card-header"><i class="bi bi-tag me-1"></i>Drive labels</div>
         <div class="card-body">
             {% if all_drives %}
             <p class="form-text mb-3">Give your DVD/Blu-ray drives custom names to easily tell them apart.</p>
@@ -387,7 +387,7 @@
     </div>
     <!-- Hidden drives -->
     <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-eye-slash me-1"></i>Hidden Drives</div>
+        <div class="card-header"><i class="bi bi-eye-slash me-1"></i>Hidden drives</div>
         <div class="card-body" id="hiddenDrivesCard">
             {% if hidden_drives %}
             <p class="form-text mb-3">These drives are hidden from the dashboard. Click to show them again.</p>
@@ -475,23 +475,11 @@
                     <div class="form-text">Ignored when the format is FLAC.</div>
                 </div>
                 <div class="col-md-4 mb-3">
-                    <label class="form-label">Music folder</label>
+                    <label class="form-label">Where albums go</label>
                     <input type="text" class="form-control" name="music_path"
                            value="{{ config.music_path }}"
                            placeholder="{{ defaults.music_path }}">
                     <div class="form-text">Empty uses the folder shown.</div>
-                </div>
-            </div>
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">cdparanoia</label>
-                    <input type="text" class="form-control" name="cdparanoia_path"
-                           value="{{ config.cdparanoia_path }}">
-                </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">ffmpeg</label>
-                    <input type="text" class="form-control" name="ffmpeg_path"
-                           value="{{ config.ffmpeg_path }}">
                 </div>
             </div>
         </div>
@@ -514,7 +502,7 @@
                 </div>
             </div>
             <div class="mb-3">
-                <label class="form-label">Image folder</label>
+                <label class="form-label">Where images go</label>
                 <input type="text" class="form-control" name="data_disc_path"
                        value="{{ config.data_disc_path }}"
                        placeholder="{{ defaults.data_disc_path }}">
@@ -542,7 +530,7 @@
     </div>
     <!-- MakeMKV registration key -->
     <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-key me-1"></i>MakeMKV key</div>
+        <div class="card-header"><i class="bi bi-key me-1"></i>MakeMKV registration key</div>
         <div class="card-body">
             <p class="text-muted small mb-2">
                 MakeMKV needs a registration key. While MakeMKV is in beta a free key is
@@ -628,10 +616,10 @@
     </div>
     <!-- Watch folder -->
     <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-folder-symlink me-1"></i>Watch Folder</div>
+        <div class="card-header"><i class="bi bi-folder-symlink me-1"></i>Watch folder</div>
         <div class="card-body">
             <div class="mb-3">
-                <label class="form-label">Watched folder</label>
+                <label class="form-label">Folder to watch</label>
                 <input type="text" class="form-control"
                        name="watch_path" value="{{ config.watch_path }}">
                 <div class="form-text">
@@ -640,7 +628,7 @@
                 </div>
             </div>
             <div class="mb-3">
-                <label class="form-label">Watch folder output path</label>
+                <label class="form-label">Where converted files go</label>
                 <input type="text" class="form-control"
                        name="watch_output_path" value="{{ config.watch_output_path }}">
                 <div class="form-text">Leave empty to use the same output folder as ripped discs (completed_path).</div>
@@ -657,7 +645,7 @@
         <div class="tab-pane fade" id="pane-advanced" role="tabpanel" aria-labelledby="tab-advanced">
         <!-- Web UI -->
         <div class="card mb-4">
-            <div class="card-header"><i class="bi bi-globe me-1"></i>Web Interface</div>
+            <div class="card-header"><i class="bi bi-globe me-1"></i>Web interface</div>
             <div class="card-body">
                 <div class="row">
                     <div class="col-md-6 mb-3">
@@ -700,11 +688,28 @@
                     <label class="form-label">MakeMKV</label>
                     <input type="text" class="form-control"
                            name="makemkv_path" value="{{ config.makemkv_path }}">
+                    <div class="form-text">Reads the disc.</div>
                 </div>
                 <div class="col-md-6 mb-3">
                     <label class="form-label">HandBrakeCLI</label>
                     <input type="text" class="form-control"
                            name="handbrake_path" value="{{ config.handbrake_path }}">
+                    <div class="form-text">Transcodes video.</div>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">ffmpeg</label>
+                    <input type="text" class="form-control" name="ffmpeg_path"
+                           value="{{ config.ffmpeg_path }}">
+                    <div class="form-text">
+                        Encodes audio CDs, and video too when the encoder is set
+                        to the GPU.
+                    </div>
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">cdparanoia</label>
+                    <input type="text" class="form-control" name="cdparanoia_path"
+                           value="{{ config.cdparanoia_path }}">
+                    <div class="form-text">Reads audio CD tracks.</div>
                 </div>
             </div>
         </div>
@@ -715,7 +720,7 @@
     <!-- Save -->
     <div class="d-flex gap-2">
         <button type="submit" class="btn btn-primary">
-            <i class="bi bi-check-lg me-1"></i>Save Settings
+            <i class="bi bi-check-lg me-1"></i>Save settings
         </button>
         <span id="saveStatus" class="align-self-center text-success d-none">
             <i class="bi bi-check-circle"></i> Saved!

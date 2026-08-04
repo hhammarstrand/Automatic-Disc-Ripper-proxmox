@@ -396,6 +396,46 @@ if [[ -n "${NAS_URL:-}" ]]; then
 fi
 
 # ----------------------------------------------------------------------------- #
+# Everything the host can still do for the container
+#
+# adr-doctor knows about several things this script does not: passing a GPU
+# through, joining the service user to the group that owns the render node,
+# installing the VA-API driver stack inside the container. All of it is
+# host-side, all of it is tested, and none of it was happening on a fresh
+# install — so a machine with perfectly good Intel graphics finished the
+# installer with software encoding and no hint that anything else was
+# available.
+#
+# Running it here rather than duplicating the logic: two implementations of
+# "pass the GPU through" would drift, and this one already knows how to do
+# nothing when there is nothing to do.
+#
+# Non-fatal, deliberately. A GPU that cannot be passed through is not a reason
+# to fail an install that otherwise worked — and the summary below is the only
+# copy of the generated root password.
+# ----------------------------------------------------------------------------- #
+if [[ -x /usr/local/sbin/adr-doctor ]]; then
+    echo
+    msg_info "Checking what else this host can offer the container…"
+    if /usr/local/sbin/adr-doctor --fix --yes "$CT_ID"; then
+        :
+    else
+        msg_warn "Some host-side checks did not complete. Nothing above is lost;"
+        msg_warn "re-run when convenient:  adr-doctor --fix ${CT_ID}"
+    fi
+
+    # --yes lets it restart the container, which it has to when it changed the
+    # passthrough — those lines only take effect at start. The summary below
+    # then asks the container for its IP address, and a container three
+    # seconds into booting has not got one yet: the install would end by
+    # printing "<container-ip>" for a machine that is perfectly fine.
+    for _ in $(seq 1 45); do
+        if pct exec "$CT_ID" -- hostname -I 2>/dev/null | grep -q '[0-9]'; then break; fi
+        sleep 1
+    done
+fi
+
+# ----------------------------------------------------------------------------- #
 # Done
 # ----------------------------------------------------------------------------- #
 # Clear the failure trap first: from here on the install has succeeded, and an

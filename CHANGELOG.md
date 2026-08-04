@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.13.0
+
+A polish pass over the whole application: every menu, every setting, and the
+install itself.
+
+**No more browser dialogs.** `alert()` and `confirm()` were used sixty-four
+times. They block the page, they look nothing like it, and on a phone they are
+a full-screen system dialog announcing "3 jobs removed". Messages are toasts
+now — failures stay until dismissed, everything else says its piece and goes.
+Confirmations are a real modal with a title and a verb on the button instead of
+"OK", and a detail pane, which is what pays for the change: the delete
+confirmation lists the actual file paths rather than cramming them into a
+string.
+
+**A fresh install now finishes what the host can do for the container.**
+`adr-doctor` knows about passing a GPU through, joining the service user to
+the group that owns the render node, and installing the VA-API driver stack —
+and none of it was happening on a new install, so a machine with perfectly good
+Intel graphics finished the installer with software encoding and no hint that
+anything else was available. The installer runs it, non-fatally, and waits for
+the container to come back before printing the summary, because `--yes` lets it
+restart and a container three seconds into booting has no IP address yet.
+
+**The settings page reads as one voice.** Title Case on some headers and
+sentence case on others, hints inside two labels and underneath the rest,
+config keys leaking into labels ("Watch folder output path"), and two of the
+four tool paths filed under Audio CDs because that is what needed them first.
+All four now sit together in Advanced, each saying what its program is for.
+
+**And so do the other pages.** "Job History" under a nav item called History
+told you nothing you did not know; "Save Settings" sat beside "Send a test
+notification". The dashboard was the only page with no heading of its own.
+
+Tests hold all of it: contrast ratios computed from the stylesheet, every page
+parsed as a document, every script parsed by node, headings and buttons checked
+for sentence case, and the installer checked for what it reaches for. Two of
+those found something the moment they were written — a template whose
+JavaScript contained the characters backslash-n instead of newlines, and the
+history table's empty-state row spanning twelve of fourteen columns.
+
 ## 1.12.0
 
 **The active tab was unreadable, and that one is mine.** Bootstrap's active tab

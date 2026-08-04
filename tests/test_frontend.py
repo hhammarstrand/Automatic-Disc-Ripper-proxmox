@@ -151,3 +151,54 @@ class TestTheEmptyStates:
         columns = html.split("<thead>")[1].split("</thead>")[0].count("<th")
         spans = {int(s) for s in re.findall(r'colspan="(\d+)"', html)}
         assert spans == {columns}
+
+
+class TestOnePageReadsLikeTheNext:
+    """Written over months, the pages drifted apart: "Job History" beside
+    "Service log", "Save Settings" beside "Send a test notification". None of
+    it is a bug and all of it makes an application feel unfinished.
+    """
+
+    #: Words that keep their capitals wherever they land.
+    PROPER = {
+        "Plex", "MakeMKV", "HandBrake", "HandBrakeCLI", "TMDb", "TV", "GPU",
+        "MP3", "URL", "ISO", "NAS", "GitHub", "Proxmox", "Doctor", "Audio",
+        "CDs", "Settings", "Dashboard", "History", "Storage", "Logs",
+        "Encoding", "Discs", "Library", "Integrations", "Advanced",
+    }
+
+    def _sentence_case_offenders(self, phrases):
+        wrong = []
+        for phrase in phrases:
+            words = phrase.strip().split()
+            for word in words[1:]:
+                bare = word.strip("()/,.—-")
+                if bare and bare[0].isupper() and bare not in self.PROPER:
+                    wrong.append(phrase.strip())
+        return sorted(set(wrong))
+
+    @pytest.mark.parametrize("path", PAGES)
+    def test_every_page_names_itself(self, client, path):
+        """Otherwise the browser tab is the only thing saying where you are."""
+        html = client.get(path).get_data(as_text=True)
+        assert re.search(r"<h4[^>]*>", html), f"{path} has no heading"
+
+    @pytest.mark.parametrize("path", PAGES)
+    def test_the_headings_are_sentence_case(self, client, path):
+        html = client.get(path).get_data(as_text=True)
+        headings = re.findall(r"<h4[^>]*>(?:<i[^>]*></i>)?\s*([^<]+)", html)
+        assert not self._sentence_case_offenders(headings)
+
+    @pytest.mark.parametrize("path", PAGES)
+    def test_the_buttons_are_sentence_case(self, client, path):
+        html = client.get(path).get_data(as_text=True)
+        labels = re.findall(
+            r"<button[^>]*>\s*(?:<i[^>]*></i>)?\s*([A-Za-z][^<]{2,40}?)\s*<", html)
+        assert not self._sentence_case_offenders(labels)
+
+    def test_no_heading_merely_repeats_the_navigation(self, client):
+        """"Job History" under a nav item called History is a line of text
+        that tells you nothing you did not already know."""
+        html = client.get("/history").get_data(as_text=True)
+        heading = re.search(r"<h4[^>]*>(?:<i[^>]*></i>)?\s*([^<]+)", html).group(1)
+        assert heading.strip() == "History"
