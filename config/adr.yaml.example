@@ -32,6 +32,10 @@ handbrake_path: /usr/bin/HandBrakeCLI
 handbrake_preset: Fast 1080p30
 handbrake_preset_file: ''
 log_level: INFO
+# Where the service log and per-job logs are written. Empty means a logs/
+# folder beside the database — on the container's own disk, never the NAS,
+# which would mean a network write per log line.
+log_path: ''
 main_feature_only: true
 makemkv_path: /usr/bin/makemkvcon
 max_encode_jobs: 1

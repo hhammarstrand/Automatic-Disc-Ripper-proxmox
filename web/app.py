@@ -203,6 +203,19 @@ def _register_ui_routes(app: Flask) -> None:
         finally:
             session.close()
 
+    @app.route("/logs")
+    def logs():
+        """The service log, in the browser.
+
+        Everything the application says went to journald and nowhere else,
+        which needs a shell to read — so every diagnosis so far has ended with
+        "paste me the output of journalctl". It keeps its own copy now.
+        """
+        from adr import applog
+
+        return render_template("logs.html", log=applog.describe(_config),
+                               levels=applog.LEVELS)
+
     @app.route("/history")
     def history():
         """Job history, a page at a time.
@@ -1288,6 +1301,35 @@ def _register_api_routes(app: Flask) -> None:
             return jsonify({"error": f"No probe has been run for '{device}'."}), 404
         return jsonify(state)
 
+    @app.route("/api/logs")
+    def api_logs():
+        """The tail of the service log, filtered."""
+        from adr import applog
+
+        try:
+            lines = min(max(int(request.args.get("lines", 200)), 1), 2000)
+        except (TypeError, ValueError):
+            lines = 200
+        return jsonify(applog.read_tail(
+            _config,
+            lines=lines,
+            level=(request.args.get("level") or "").strip(),
+            search=(request.args.get("search") or "").strip(),
+        ))
+
+    @app.route("/api/diagnostics/bundle")
+    def api_diagnostics_bundle():
+        """Everything needed to diagnose this installation, as one text block.
+
+        Plain text on purpose: it is meant to be copied into a message to
+        somebody, not parsed. Secrets are redacted in adr/bundle.py — this is
+        made to be pasted in public.
+        """
+        from adr import bundle
+
+        text = bundle.build(_config, _pipeline_manager)
+        return app.response_class(text, mimetype="text/plain; charset=utf-8")
+
     @app.route("/api/preflight")
     def api_preflight():
         """Whether a rip started right now would finish.
@@ -1438,7 +1480,7 @@ def _register_api_routes(app: Flask) -> None:
         "handbrake_extra_args", "max_encode_jobs", "transcode_enabled",
         "drives", "tmdb_api_key",
         "watch_path", "watch_output_path", "watch_interval", "web_host",
-        "web_port", "log_level", "disabled_drives", "eject_after_rip",
+        "web_port", "log_level", "log_path", "disabled_drives", "eject_after_rip",
         "no_eject_drives", "main_feature_only", "plex_path", "tv_path",
         "series_detection", "series_min_minutes", "series_max_minutes",
         "series_min_episodes", "skip_duplicates",

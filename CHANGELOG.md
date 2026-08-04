@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.6.0
+
+**Every diagnosis of this application ended with "paste me the output of
+journalctl".** That needs a shell on the Proxmox host. The person looking at
+the dashboard on their phone does not have one. That is a design failure, not
+a support process — and it is the reason the last week of problems each took
+several days instead of one message.
+
+**A Logs page.** The application keeps its own rotating log beside the
+database, so the web UI reads it in-process with no privileges and no journald
+group membership. Filter by level — asking for WARNING keeps the ERRORs, which
+is the point of asking — or search for a device path or a job number.
+Tracebacks are kept whole with the line they belong to, because a traceback
+filtered down to its first line is not a traceback. The tail is read backwards
+from the end of the file, so a log from a month of uptime still opens
+instantly.
+
+**Copy diagnostics**, one button, on the Logs page and linked from Doctor. It
+produces the whole picture as one block of plain text: version and host, every
+setting, all the self-checks with their fixes, where each storage path really
+points and whether it is on the share or the container disk, the drives, the
+last three failures *with the tool output that explains them*, and the end of
+the service log. Plain text because it is meant to be read by a person in a
+message, not parsed.
+
+Nothing that could authenticate as you survives in it. The redaction is a
+whitelist of setting names known to be harmless rather than a blacklist of
+suspicious ones, because the two mistakes are not symmetric: a setting left
+out costs a follow-up question, a leaked token costs you the account. Tests
+assert that each of the TMDb key, the Plex token, the notification token and
+the notification URL — which for several providers *is* the credential —
+cannot be found anywhere in the output.
+
+---
+
 ## 1.5.1
 
 **"One or more tracks failed to encode" is true of every encode failure there

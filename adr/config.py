@@ -47,6 +47,10 @@ _DEFAULTS: dict[str, Any] = {
     "web_host": "0.0.0.0",
     "web_port": 8080,
     "log_level": "INFO",
+    # Where the service log and the per-job logs are written. Empty means a
+    # logs/ folder beside the database, on the container's own disk — never
+    # the NAS, which would mean a network write per log line.
+    "log_path": "",
     "disabled_drives": [],
     "eject_after_rip": True,
     "no_eject_drives": [],
@@ -320,6 +324,10 @@ class Config:
     @property
     def log_level(self) -> str:
         return self._data["log_level"]
+
+    @property
+    def log_path(self) -> str:
+        return self._data.get("log_path", "") or ""
 
     @property
     def disabled_drives(self) -> list[str]:

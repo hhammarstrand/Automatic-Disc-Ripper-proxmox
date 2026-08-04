@@ -25,6 +25,8 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Automatic MakeMKV key:** fetches the current free beta key, or accepts your own.
 - **Web dashboard** (port 8080) with live progress, job history, a Storage page for NAS setup, settings, and in-browser playback.
 - **Doctor page** that self-diagnoses drives, tools, keys and storage — and updates the app from GitHub with one button.
+- **Logs page** with the service's own log, filterable by level and text — no `pct exec`, no journald, no shell.
+- **Copy diagnostics**: one button produces everything needed to diagnose the install as a single paste, with keys and tokens removed.
 - **Television discs**: box sets are recognised from title durations and named `Show (Year)/Season 02/Show (Year) - S02E05.mp4`.
 - **Series mode**: set the show once, then feed a whole box set — the episode number carries across discs on its own.
 - **Notifications** to ntfy, Gotify, Discord or a webhook when a disc finishes or fails — the pipeline is unattended, so it tells you.
@@ -404,6 +406,31 @@ having failed.
 The token: in Plex, open any item → *Get Info* → *View XML*, and copy
 `X-Plex-Token` out of the URL. **Fetch libraries** then lists them so you pick
 one instead of guessing a section key.
+
+### Asking someone for help
+
+Every diagnosis of this application used to end the same way: *paste me the
+output of `journalctl`*. That needs a shell on the Proxmox host, which the
+person looking at the dashboard on their phone does not have — a design
+failure, not a support process.
+
+Two things fix it, both in the web UI.
+
+**The Logs page** shows the service's own log. The application keeps its own
+rotating copy beside the database, so reading it needs no privileges and no
+journald group. Filter by level — asking for WARNING keeps the ERRORs too —
+or search for a device path or a job number. Tracebacks stay whole, because a
+traceback cut down to its first line is not a traceback.
+
+**Copy diagnostics** puts the whole picture in the clipboard as one block of
+plain text: version, every setting, all the self-checks, where storage really
+points and whether it is mounted, the drives, the last three failures *with
+their tool output*, and the end of the service log.
+
+API keys and tokens are removed before it leaves. The redaction is a whitelist
+— a value is shown only if its name is known to be harmless — because the two
+mistakes are not symmetric: a missing setting costs a follow-up question, a
+leaked token costs you the account.
 
 ### Before something fails
 
@@ -902,6 +929,7 @@ ruff check .       # lint
 
 ```
 adr/        Core package (config, disc, disctype, ripper, encoder, identify, pipeline,
+            applog, bundle, preflight, progress, recovery,
             watcher, audiocd, musicbrainz, isobackup, series, seriesmode, naming,
             duplicates, retry, joblog, notify, plex, makemkv_key, storage,
             diagnostics, drivetest, updater)

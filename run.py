@@ -34,6 +34,12 @@ def main() -> None:
     config = Config(args.config)
     setup_logging(config.log_level)
 
+    # The application's own log, in a file the web UI can read. Everything
+    # said here has only ever gone to journald, which needs a shell to read —
+    # so every diagnosis so far has ended with "paste me journalctl".
+    from adr import applog
+    log_file = applog.configure(config)
+
     logger.info("=" * 60)
     # From the package, not a literal: a startup banner that disagrees with
     # what is installed makes every "which version is this?" question worse.
@@ -44,6 +50,8 @@ def main() -> None:
     logger.info("MakeMKV: %s", config.makemkv_path)
     logger.info("HandBrake: %s", config.handbrake_path)
     logger.info("Raw path: %s", config.raw_path)
+    if log_file:
+        logger.info("Log file: %s", log_file)
     logger.info("Completed path: %s", config.completed_path)
 
     # Initialise database

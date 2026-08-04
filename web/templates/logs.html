@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Logs — Automatic Disc Ripper{% endblock %}
+
+{% block content %}
+<h4 class="mb-1"><i class="bi bi-journal-text me-2"></i>Service log</h4>
+<p class="text-secondary small">
+  What the application itself is saying. This used to exist only in journald,
+  which needs a shell on the Proxmox host to read — so the answer to "why did
+  that fail" was always one <code>pct exec</code> away from the person looking
+  at the dashboard.
+</p>
+
+<!-- The one button that ends a support conversation before it starts. -->
+<div class="card mb-4 border-primary">
+  <div class="card-body d-flex flex-wrap gap-3 align-items-center justify-content-between">
+    <div>
+      <h6 class="mb-1"><i class="bi bi-clipboard-check me-1"></i>Copy everything</h6>
+      <div class="small text-secondary">
+        Version, settings, self-checks, storage, drives, the last failures with
+        their tool output, and the end of this log — as one block of text.
+        API keys and tokens are removed, so it is safe to paste anywhere.
+      </div>
+    </div>
+    <div class="d-flex gap-2">
+      <button class="btn btn-primary" id="copyBundleBtn" onclick="copyBundle()">
+        <i class="bi bi-clipboard me-1"></i>Copy diagnostics
+      </button>
+      <a class="btn btn-outline-secondary" href="/api/diagnostics/bundle" target="_blank">
+        <i class="bi bi-box-arrow-up-right me-1"></i>Open
+      </a>
+    </div>
+  </div>
+  <div id="bundleStatus" class="card-footer small d-none"></div>
+</div>
+
+<div class="row g-2 align-items-end mb-3">
+  <div class="col-auto">
+    <label class="form-label small mb-1">Level</label>
+    <select class="form-select form-select-sm" id="logLevel" onchange="loadLogs()">
+      <option value="">Everything</option>
+      {% for level in levels %}
+      <option value="{{ level }}"{% if level == 'INFO' %} selected{% endif %}>{{ level }} and above</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col">
+    <label class="form-label small mb-1">Contains</label>
+    <input type="search" class="form-control form-control-sm" id="logSearch"
+           placeholder="handbrake, /dev/sr0, job 14…" oninput="debouncedLoad()">
+  </div>
+  <div class="col-auto">
+    <label class="form-label small mb-1">Lines</label>
+    <select class="form-select form-select-sm" id="logLines" onchange="loadLogs()">
+      <option>200</option><option>500</option><option>1000</option><option>2000</option>
+    </select>
+  </div>
+  <div class="col-auto">
+    <div class="form-check form-switch mb-1">
+      <input class="form-check-input" type="checkbox" id="logFollow" checked>
+      <label class="form-check-label small" for="logFollow">Follow</label>
+    </div>
+  </div>
+  <div class="col-auto">
+    <button class="btn btn-outline-secondary btn-sm" onclick="loadLogs()">
+      <i class="bi bi-arrow-clockwise"></i>
+    </button>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header d-flex justify-content-between align-items-center small">
+    <span class="text-secondary text-break">
+      {% if log.exists %}{{ log.path }} · {{ log.size_kb }} KB{% if log.rotated %} · {{ log.rotated }} rotated{% endif %}
+      {% else %}No log file yet at {{ log.path }}{% endif %}
+    </span>
+    <span id="logCount" class="text-secondary"></span>
+  </div>
+  <pre id="logBody" class="mb-0 p-3 small" style="max-height:65vh; overflow:auto; white-space:pre-wrap; word-break:break-word;">Loading…</pre>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let logTimer = null;
+
+function debouncedLoad() {
+  clearTimeout(logTimer);
+  logTimer = setTimeout(loadLogs, 300);
+}
+
+function loadLogs() {
+  const params = new URLSearchParams({
+    level: document.getElementById('logLevel').value,
+    search: document.getElementById('logSearch').value,
+    lines: document.getElementById('logLines').value,
+  });
+  fetch('/api/logs?' + params)
+    .then(r => r.json())
+    .then(d => {
+      const body = document.getElementById('logBody');
+      // A log is read from the bottom, so scrolling is only preserved when
+      // you have deliberately scrolled up to look at something.
+      const atBottom = body.scrollTop + body.clientHeight >= body.scrollHeight - 40;
+      if (!d.exists) {
+        body.textContent =
+          'No log file yet. It appears once the service has restarted on this version.';
+        return;
+      }
+      body.textContent = d.lines.join('\n') || 'Nothing matches that filter.';
+      document.getElementById('logCount').textContent =
+        d.lines.length + ' lines' + (d.truncated ? ' (older lines not shown)' : '');
+      if (atBottom) body.scrollTop = body.scrollHeight;
+    })
+    .catch(err => {
+      document.getElementById('logBody').textContent = 'Could not read the log: ' + err.message;
+    });
+}
+
+function copyBundle() {
+  const btn = document.getElementById('copyBundleBtn');
+  const status = document.getElementById('bundleStatus');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Gathering…';
+
+  fetch('/api/diagnostics/bundle')
+    .then(r => r.text())
+    .then(text => {
+      status.classList.remove('d-none', 'text-danger');
+      // navigator.clipboard needs a secure context, which a plain-http LAN
+      // address is not — so a copy that failed has to leave the text where it
+      // can still be selected by hand rather than silently doing nothing.
+      const done = () => {
+        btn.disabled = false;
+        btn.innerHTML = original;
+      };
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => {
+          status.textContent = `Copied — ${text.length.toLocaleString()} characters. Paste it wherever you are asking for help.`;
+          done();
+        }).catch(() => showBundle(text, status, done));
+      } else {
+        showBundle(text, status, done);
+      }
+    })
+    .catch(err => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      status.classList.remove('d-none');
+      status.classList.add('text-danger');
+      status.textContent = 'Could not gather diagnostics: ' + err.message;
+    });
+}
+
+function showBundle(text, status, done) {
+  status.innerHTML =
+    '<div class="mb-2">This browser will not copy from a plain-http page. '
+    + 'The text is selected below — copy it by hand.</div>'
+    + '<textarea class="form-control font-monospace" rows="10" id="bundleText"></textarea>';
+  const box = document.getElementById('bundleText');
+  box.value = text;
+  box.focus();
+  box.select();
+  done();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadLogs();
+  setInterval(() => {
+    if (document.getElementById('logFollow').checked) loadLogs();
+  }, 5000);
+});
+</script>
+{% endblock %}
