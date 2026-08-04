@@ -132,11 +132,26 @@ class _NotJustPolling(logging.Filter):
         return not any(path in message for path in POLLED_PATHS)
 
 
+#: Libraries that log a request's full URL at DEBUG, query string and all.
+#:
+#: urllib3 writes lines like
+#:
+#:     https://api.themoviedb.org:443 "GET /3/search/movie?api_key=…"
+#:
+#: which put the TMDb key in the log file in plain text, and from there into a
+#: diagnostics bundle written to be pasted in public. The bundle redacts it
+#: now, but a secret that never enters the log cannot be missed by a redactor
+#: — and nobody turning on DEBUG to diagnose a rip is asking to see HTTP.
+_URL_LOGGERS = ("urllib3", "urllib3.connectionpool", "requests.packages.urllib3")
+
+
 def quieten_request_logging() -> None:
-    """Keep the dashboard's own polling out of the service log."""
+    """Keep the dashboard's own polling, and other people's URLs, out of the log."""
     access = logging.getLogger("werkzeug")
     if not any(isinstance(f, _NotJustPolling) for f in access.filters):
         access.addFilter(_NotJustPolling())
+    for name in _URL_LOGGERS:
+        logging.getLogger(name).setLevel(logging.INFO)
 
 
 def read_tail(

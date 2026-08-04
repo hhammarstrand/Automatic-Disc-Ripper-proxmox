@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import logging
 import platform
+import re
 import sys
 from datetime import datetime
 
@@ -55,6 +56,61 @@ SAFE_KEYS = frozenset({
     "cdparanoia_path", "ffmpeg_path", "data_disc_enabled",
     "web_host", "web_port",
 })
+
+#: Shortest configured value worth hunting for in free text. Below this a
+#: setting is not a credential, and blanking every three-character string that
+#: happens to appear somewhere would redact the bundle into uselessness.
+MIN_SECRET_LENGTH = 8
+
+#: Credentials carried in text nobody configured — a URL a library logged, a
+#: header an error quoted. The name is matched, not the value, because the
+#: value is exactly what is unknown here.
+_SECRET_IN_TEXT = (
+    re.compile(
+        r"(?i)\b(api_?key|apikey|access_token|token|auth|password|passwd|pwd"
+        r"|secret|signature)=([^&\s\"'<>]+)",
+    ),
+    re.compile(r"(?i)\b(x-plex-token)[=:]\s*([^&\s\"'<>]+)"),
+    re.compile(r"(?i)^(\s*authorization:\s*\S+\s+)(\S+)", re.MULTILINE),
+)
+
+REDACTED = "<redacted>"
+
+
+def scrub(text: str, config) -> str:
+    """Remove anything that could authenticate, from anywhere in the bundle.
+
+    Two passes, because there are two ways a secret gets in. The first is a
+    configured one appearing in text that is not the settings section — the
+    values are known, so they can be matched exactly. The second is a secret
+    nobody configured here: a request URL logged by a library, a header quoted
+    in a traceback. Those are matched by the *name* beside them, since the
+    value is precisely what is not known.
+
+    Neither pass is clever, and that is deliberate. This runs over a document
+    written to be pasted into a public issue; a redaction that is easy to
+    reason about is worth more than one that catches marginally more.
+    """
+    if not text:
+        return text
+
+    try:
+        settings = config.as_dict()
+    except Exception:                             # noqa: BLE001 - never fatal
+        logger.warning("Could not read settings to scrub the bundle", exc_info=True)
+        settings = {}
+
+    for key, value in settings.items():
+        if key in SAFE_KEYS or not isinstance(value, str):
+            continue
+        if len(value.strip()) < MIN_SECRET_LENGTH:
+            continue
+        text = text.replace(value.strip(), REDACTED)
+
+    for pattern in _SECRET_IN_TEXT:
+        text = pattern.sub(lambda m: f"{m.group(1)}={REDACTED}", text)
+    return text
+
 
 #: How many recent failures to include, with their tool output.
 FAILED_JOBS = 3
@@ -91,7 +147,14 @@ def build(config, pipeline_manager=None) -> str:
     section("Settings", lambda: _settings(config))
     section(f"Last {FAILED_JOBS} failures", lambda: _failures(config))
     section(f"Service log (last {SERVICE_LOG_LINES} lines)", lambda: _service_log(config))
-    return "\n".join(out) + "\n"
+    # Last, over the whole thing, and not per section on purpose. The settings
+    # section has been careful about secrets since it was written; the service
+    # log was not, because nothing put a secret in it — until DEBUG turned on
+    # urllib3, which logs every request URL in full, and a TMDb key rode out
+    # in a bundle written to be pasted in public. Redacting section by section
+    # is a rule someone has to remember at the moment they add a section. This
+    # is the same rule applied where it cannot be forgotten.
+    return scrub("\n".join(out) + "\n", config)
 
 
 # ------------------------------------------------------------------ #

@@ -407,3 +407,139 @@ class TestTheBundleCarriesTheQsvVerdict:
         monkeypatch.setattr("adr.gpu.preset_wants_hardware", lambda f, n: "")
         bundle._hardware(self._config(tmp_path))
         assert asked == []
+
+
+class TestNothingThatAuthenticatesLeaves:
+    """The bundle is written to be pasted in public, and one rode out with a
+    live TMDb key in it.
+
+    The settings section had been careful since the day it was written. The
+    service log had not — because nothing put a secret in a log, until
+    log_level DEBUG turned on urllib3, which writes every request URL in full:
+
+        https://api.themoviedb.org:443 "GET /3/search/movie?api_key=<the key>"
+
+    Redacting section by section is a rule someone has to remember at the
+    moment they add a section. These pin down the rule applied where it cannot
+    be forgotten.
+    """
+
+    def _config(self, **over):
+        import types
+
+        data = {
+            "tmdb_api_key": "138d533b8fde764203da07e28c6aa8c6",
+            "plex_token": "sX7pQm2vNbKd91La",
+            "notify_token": "tk_abcdefghijklmnop",
+            "notify_url": "https://ntfy.sh/my-private-topic-9f2a",
+            "handbrake_preset": "Super HQ 1080p30 Surround (Svenska)",
+            "completed_path": "/mnt/media",
+            "log_level": "DEBUG",
+        }
+        data.update(over)
+        return types.SimpleNamespace(as_dict=lambda: data, **data)
+
+    def test_the_key_urllib3_logged_does_not_survive(self):
+        from adr import bundle
+
+        config = self._config()
+        log = (
+            'https://api.themoviedb.org:443 "GET /3/search/movie'
+            '?api_key=138d533b8fde764203da07e28c6aa8c6&query=Dinosaur" 200 None'
+        )
+        out = bundle.scrub(log, config)
+        assert "138d533b8fde764203da07e28c6aa8c6" not in out
+        assert bundle.REDACTED in out
+
+    def test_a_key_that_was_never_configured_is_still_caught(self):
+        """Matched by the name beside it, because the value is exactly what is
+        unknown — a second instance's key in a copied log, a provider this
+        install does not use."""
+        from adr import bundle
+
+        out = bundle.scrub(
+            "GET /3/movie/550?api_key=deadbeefcafebabe0123456789abcdef", self._config(),
+        )
+        assert "deadbeefcafebabe" not in out
+
+    def test_every_configured_secret_is_hunted_for(self):
+        from adr import bundle
+
+        config = self._config()
+        text = " ".join([
+            "tmdb=138d533b8fde764203da07e28c6aa8c6",
+            "plex=sX7pQm2vNbKd91La",
+            "ntfy=tk_abcdefghijklmnop",
+            "url=https://ntfy.sh/my-private-topic-9f2a",
+        ])
+        out = bundle.scrub(text, config)
+        for secret in ("138d533b8fde764203da07e28c6aa8c6", "sX7pQm2vNbKd91La",
+                       "tk_abcdefghijklmnop", "my-private-topic-9f2a"):
+            assert secret not in out, secret
+
+    def test_a_plex_token_header_is_caught(self):
+        from adr import bundle
+
+        out = bundle.scrub("X-Plex-Token: zzzzzzzzzzzzzzzzzzzz", self._config())
+        assert "zzzzzzzzzzzzzzzzzzzz" not in out
+
+    def test_an_authorization_header_is_caught(self):
+        from adr import bundle
+
+        out = bundle.scrub(
+            "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.payload", self._config(),
+        )
+        assert "eyJhbGciOiJIUzI1NiJ9" not in out
+
+    def test_safe_settings_are_left_alone(self):
+        """A bundle redacted into uselessness answers nothing. The preset name
+        and the destination are the two things every diagnosis needs."""
+        from adr import bundle
+
+        out = bundle.scrub(
+            "preset 'Super HQ 1080p30 Surround (Svenska)' to /mnt/media", self._config(),
+        )
+        assert "Super HQ 1080p30 Surround (Svenska)" in out
+        assert "/mnt/media" in out
+
+    def test_a_short_value_is_not_hunted_across_the_document(self):
+        """Blanking every short string that happens to appear would redact the
+        bundle into noise."""
+        from adr import bundle
+
+        config = self._config(plex_section="1")
+        assert "1080p30" in bundle.scrub("preset 1080p30", config)
+
+    def test_the_whole_bundle_goes_through_it(self):
+        """Not the sections individually — the rule has to hold for a section
+        that does not exist yet."""
+        import inspect
+
+        from adr import bundle
+
+        source = inspect.getsource(bundle.build)
+        assert "return scrub(" in source, "build() stopped scrubbing its output"
+
+    def test_a_config_that_cannot_be_read_still_scrubs_by_pattern(self):
+        import types
+
+        from adr import bundle
+
+        def _boom():
+            raise RuntimeError("no config")
+
+        broken = types.SimpleNamespace(as_dict=_boom)
+        out = bundle.scrub("api_key=deadbeefcafebabe", broken)
+        assert "deadbeefcafebabe" not in out
+
+
+class TestTheLogDoesNotGetTheSecretInTheFirstPlace:
+    def test_urllib3_is_held_at_info_however_verbose_the_app_is(self):
+        import logging
+
+        from adr import applog
+
+        logging.getLogger("urllib3.connectionpool").setLevel(logging.DEBUG)
+        applog.quieten_request_logging()
+        assert logging.getLogger("urllib3.connectionpool").level == logging.INFO
+        assert logging.getLogger("urllib3").level == logging.INFO

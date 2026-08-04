@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.18.0
+
+**A diagnostics bundle went out with a live TMDb key in it.** The settings
+section had redacted secrets since the day it was written. The service log
+had not — because nothing put a secret in a log, until `log_level: DEBUG`
+turned on urllib3, which writes every request URL in full:
+
+    https://api.themoviedb.org:443 "GET /3/search/movie?api_key=<the key>"
+
+Both ends are closed. The bundle is now scrubbed as a whole rather than
+section by section, because redacting per section is a rule someone has to
+remember at the moment they add one. Two passes: configured values matched
+exactly, and credentials nobody configured matched by the name beside them —
+`api_key=`, `token=`, `X-Plex-Token`, `Authorization:` — since there the value
+is precisely what is unknown. And urllib3 is held at INFO however verbose the
+application is set to be, so the key never reaches the log for a redactor to
+miss. **Anyone who has pasted a bundle from an install with DEBUG logging
+should rotate their TMDb key.**
+
+**The disc scan gave up two minutes before it would have answered.** Five
+minutes was a guess; a Disney DVD disproved it. The scan ran past the limit
+twice, so "main feature only" fell back to ripping all sixteen titles on a
+disc it could have read properly. A protected DVD with hundreds of dummy
+titles legitimately takes that long — MakeMKV opens every one of them. The
+limit is now fifteen minutes, because the cost of being wrong is asymmetric:
+too short rips the whole disc and encodes it, too long delays one rip.
+
+**And HandBrake reached the GPU.** With `libmfx1` installed, HandBrake now
+offers `qsv_h264`, `qsv_h265` and `qsv_h265_10bit` on Gen 9.5 hardware. The
+Media SDK path was never dead — the runtime was simply never installed,
+behind a build everyone had assumed lacked Quick Sync entirely.
+
 ## 1.17.4
 
 **Asking the dispatcher instead of asking the user.** Every hardware check in

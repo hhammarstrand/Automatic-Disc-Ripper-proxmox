@@ -34,10 +34,20 @@ STALL_TIMEOUT = 1800
 #: reported idle time is roughly accurate.
 STALL_CHECK_INTERVAL = 30
 
-#: How long a pre-rip `makemkvcon info` may take. Generous for a Blu-ray whose
-#: playlists all have to be opened, and short enough that a drive which will
-#: never answer does not hold the job for an hour.
-SCAN_TIMEOUT = 300
+#: How long a pre-rip `makemkvcon info` may take.
+#:
+#: Five minutes was a guess, and a Disney DVD disproved it: the scan of one
+#: ran past the limit twice, so "main feature only" fell back to ripping all
+#: sixteen titles on a disc it could have read properly given another two
+#: minutes. A protected DVD with hundreds of dummy titles legitimately takes
+#: this long — MakeMKV opens every one of them.
+#:
+#: The cost of being wrong is asymmetric, which decides the number. Too short
+#: and the whole disc is ripped, which is an hour of encoding and a library
+#: full of featurettes. Too long and a drive that will never answer holds the
+#: job for fifteen minutes before the rip starts anyway. The rip itself has no
+#: overall limit at all, for the same reason.
+SCAN_TIMEOUT = 900
 
 #: Pause before the one scan retry. Long enough for a drive that is still
 #: spinning up to be ready, short enough to be invisible next to a rip.
