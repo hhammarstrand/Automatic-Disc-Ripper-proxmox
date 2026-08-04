@@ -118,6 +118,34 @@ class TestItAnswersTheUsualQuestions:
     def test_it_says_so_when_there_is_no_log_yet(self, config, quiet_drives):
         assert "no log file" in bundle.build(config)
 
+    def test_the_whole_hardware_encoding_stack(self, config, quiet_drives, monkeypatch):
+        """Diagnosing this from a distance took several rounds of "run this
+        and paste the output" — the node, the driver, the runtime, and what
+        the stack itself says. None of it can authenticate anything, so it
+        belongs here rather than in a conversation."""
+        from adr import gpu
+
+        monkeypatch.setattr(gpu, "describe", lambda: {
+            "available": True, "nodes": ["/dev/dri/renderD128"],
+            "detail": "the node is there.", "fix": "",
+            "runtime": {
+                "ok": False, "vendor": "0x8086",
+                "drivers": ["iHD_drv_video.so"], "libs": [],
+                "dispatchers": ["libvpl.so.2"], "detail": "", "fix": "",
+            },
+        })
+        monkeypatch.setattr(gpu, "vainfo", lambda: {
+            "ran": True, "ok": False, "driver": "Intel iHD driver",
+            "encoders": [], "output": "",
+        })
+        text = bundle.build(config)
+        assert "Hardware encoding" in text
+        assert "0x8086" in text
+        assert "iHD_drv_video.so" in text
+        assert "libvpl.so.2" in text
+        assert "stack ok     NO" in text
+        assert "NONE — cannot encode" in text
+
 
 class TestRecentFailures:
     def _failed_job(self, config, error, track_error=None):

@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.7.7
+
+**The dispatcher is not the runtime.** 1.7.6 accepted `libvpl.so` as the
+Quick Sync runtime. It is not one — it is the *dispatcher*, the library
+HandBrake links against, whose entire job is to find a runtime at load time
+and hand over. It encodes nothing. A container with `libvpl.so.2` and no
+`libmfx-gen.so` has a loader with nothing to load, and HandBrake reports
+exactly what it reports when neither is installed.
+
+That is the most confusing shape this failure takes, because `ls` shows the
+library sitting right there. So when the dispatcher is present without a
+runtime, the message now says which one is which rather than claiming nothing
+is installed — a message contradicted by the first listing anyone runs loses
+its credibility. `adr-doctor` installs `libmfxgen1` and `libmfx1` first for
+the same reason: the dispatcher is usually already there as somebody else's
+dependency.
+
+**And the stack is now asked whether it works, not just whether it exists.**
+Every check up to here reasons from file names: the node is there, the driver
+is there, therefore it should encode. `vainfo` does not reason — it opens the
+device, loads the driver and lists what the hardware will actually do. A
+driver too old for the chip, a chip with no encode engine, a render node
+belonging to a different card: all of them look correct in a directory
+listing and all of them fail here.
+
+For a preset that asks for a GPU, the encoder test now shows the whole chain
+before it tries the encode — which encoders the build has, whether the node
+opens, what the driver stack is, and what `vainfo` makes of it. The
+diagnostics bundle carries the same, because working this out from a distance
+took several rounds of "run this and paste the output" and none of it can
+authenticate anything.
+
+A missing `vainfo` is reported, not treated as a failure. Absence of evidence
+is not evidence, and the encode itself is still the verdict.
+
 ## 1.7.6
 
 **The driver check from 1.7.5 was itself a false green.** It asked "is any

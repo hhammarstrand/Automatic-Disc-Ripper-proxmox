@@ -32,7 +32,7 @@ set -euo pipefail
 # "nothing wrong found", which is worse than failing: it is a clean bill of
 # health from a script that never looked. Compared against the container's own
 # version below.
-ADR_DOCTOR_VERSION="1.7.6"
+ADR_DOCTOR_VERSION="1.7.7"
 
 CT_MEDIA_PATH="${CT_MEDIA_PATH:-/mnt/media}"
 # The user the service runs as inside the container.
@@ -382,8 +382,14 @@ print(state["detail"])
                 break
             done
 
+            # Runtimes first, because they are what is usually missing: a
+            # container often already has libvpl (the dispatcher, pulled in as
+            # a dependency of something else) and nothing for it to dispatch
+            # to. libmfxgen1 is the oneVPL runtime for Gen11 and later,
+            # libmfx1 the older Media SDK — which one applies depends on the
+            # chip, so both are attempted and either is enough.
             case "$gpu_vendor" in
-                0x8086) VA_PACKAGES="intel-media-va-driver-non-free intel-media-va-driver i965-va-driver libmfx1 libmfxgen1 libvpl2 vainfo" ;;
+                0x8086) VA_PACKAGES="libmfxgen1 libmfx1 intel-media-va-driver-non-free intel-media-va-driver i965-va-driver libvpl2 vainfo" ;;
                 0x1002) VA_PACKAGES="mesa-va-drivers vainfo" ;;
                 *)      VA_PACKAGES="" ;;
             esac

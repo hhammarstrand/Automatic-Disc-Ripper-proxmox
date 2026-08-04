@@ -80,6 +80,7 @@ def build(config, pipeline_manager=None) -> str:
     section("Self-checks", lambda: _checks(config))
     section("Storage", lambda: _storage(config))
     section("Optical drives", lambda: _drives())
+    section("Hardware encoding", lambda: _hardware(config))
     section("Settings", lambda: _settings(config))
     section(f"Last {FAILED_JOBS} failures", lambda: _failures(config))
     section(f"Service log (last {SERVICE_LOG_LINES} lines)", lambda: _service_log(config))
@@ -181,6 +182,46 @@ def _drives() -> str:
         )
     lines.extend(f"problem: {p}" for p in health["problems"])
     return "\n".join(lines) or "No optical drives found."
+
+
+def _hardware(config) -> str:
+    """Everything about hardware encoding, in one place.
+
+    Diagnosing this from a distance took several rounds of "run this and paste
+    the output" — the node, the group, the driver, the runtime, and finally
+    what the stack itself says. All of it is cheap to gather and none of it
+    can authenticate anything, so it belongs in the bundle rather than in a
+    conversation.
+    """
+    from adr import gpu
+    from adr.encodertest import _preset_file, build_hardware_encoders
+
+    state = gpu.describe()
+    lines = [
+        f"vendor       {state['runtime'].get('vendor') or 'unknown'}",
+        f"nodes        {', '.join(state['nodes']) or 'none'}",
+        f"openable     {'yes' if state['available'] else 'NO'}",
+        f"va drivers   {', '.join(state['runtime'].get('drivers', [])) or 'none'}",
+        f"qsv runtime  {', '.join(state['runtime'].get('libs', [])) or 'none'}",
+        f"dispatcher   {', '.join(state['runtime'].get('dispatchers', [])) or 'none'}",
+        f"stack ok     {'yes' if state['runtime']['ok'] else 'NO'}",
+        f"detail       {state['detail']}",
+    ]
+
+    encoders = build_hardware_encoders(config.handbrake_path)
+    lines.append(f"hb encoders  {', '.join(encoders) or 'none (software-only build)'}")
+    wanted = gpu.preset_wants_hardware(_preset_file(config), config.handbrake_preset)
+    lines.append(f"preset wants {wanted or 'software'}")
+
+    probe = gpu.vainfo()
+    if probe["ran"]:
+        lines.append(f"vainfo       {probe['driver'] or 'driver not named'}")
+        lines.append(
+            f"encode profs {', '.join(probe['encoders']) or 'NONE — cannot encode'}",
+        )
+    else:
+        lines.append(f"vainfo       {probe['output']}")
+    return "\n".join(lines)
 
 
 def _settings(config) -> str:

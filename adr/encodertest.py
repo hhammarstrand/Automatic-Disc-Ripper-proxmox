@@ -213,8 +213,72 @@ def test_encoder(config) -> dict:
     if steps[-1]["status"] == "fail":
         return _finish(steps)
 
+    hardware = _hardware_step(exe, preset_file, config)
+    if hardware:
+        steps.append(hardware)
+
     steps.append(_encode_step(exe, preset_file, config))
     return _finish(steps)
+
+
+def _hardware_step(exe: str, preset_file: str, config) -> dict | None:
+    """What the hardware stack actually says, for a preset that needs one.
+
+    Only shown when the preset asks for a GPU. For the majority who encode in
+    software this is a paragraph about hardware they never wanted, and a
+    diagnostic page that reports things nobody asked about trains people to
+    stop reading it.
+
+    It never fails the run on its own: the encode below is the real verdict,
+    and a warning here that turned out not to matter would be worse than
+    saying nothing. What it does is put the evidence on screen — the build's
+    encoders, the node, the driver stack, and what vainfo makes of it — so
+    the answer does not have to be inferred from an exit code.
+    """
+    from adr import gpu
+
+    wanted = gpu.preset_wants_hardware(preset_file, config.handbrake_preset)
+    if not wanted:
+        return None
+
+    lines = [f"The preset '{config.handbrake_preset}' encodes with '{wanted}'."]
+
+    encoders = build_hardware_encoders(exe)
+    lines.append(
+        f"This HandBrake build has: {', '.join(encoders)}." if encoders
+        else "This HandBrake build lists no hardware encoder at all."
+    )
+
+    state = gpu.describe()
+    lines.append(state["detail"])
+
+    probe = gpu.vainfo()
+    if probe["ran"]:
+        if probe["ok"]:
+            lines.append(
+                f"vainfo: the driver loads ({probe['driver'] or 'unnamed'}) and "
+                f"offers {len(probe['encoders'])} encode profile(s)."
+            )
+        else:
+            lines.append(
+                "vainfo ran but the stack does not offer a single encode "
+                "profile, so nothing here can encode in hardware whatever the "
+                "preset says. Its answer: "
+                + (_meaningful(probe["output"], limit=3) or "(no output)")
+            )
+    elif probe["output"]:
+        lines.append(probe["output"])
+
+    # A vainfo that never ran is not evidence of a problem — it is the absence
+    # of evidence, and the encode below still gives the real verdict. Warning
+    # on a working setup because a diagnostic tool is not installed would be
+    # the page crying wolf about itself.
+    probe_ok = probe["ok"] or not probe["ran"]
+    ok = bool(encoders) and state["available"] and state["runtime"]["ok"] and probe_ok
+    return _step(
+        "Hardware", "ok" if ok else "warn", "\n".join(lines),
+        "" if ok else (state["runtime"]["fix"] or state["fix"]),
+    )
 
 
 def _preset_file(config) -> str:

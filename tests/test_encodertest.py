@@ -338,6 +338,105 @@ class TestAdviceWhenThePresetWantsAGPU:
         assert "adr-doctor --fix" in advice
 
 
+class TestShowingTheHardwareEvidence:
+    """The step exists so the answer does not have to be inferred from an
+    exit code that is 3 for every initialisation failure there is."""
+
+    def _preset(self, tmp_path, encoder="qsv_h264"):
+        import json
+
+        path = tmp_path / "preset.json"
+        path.write_text(json.dumps({
+            "PresetList": [{"PresetName": "Hardware", "VideoEncoder": encoder}],
+        }))
+        return str(path)
+
+    def _gpu(self, monkeypatch, **state):
+        from adr import gpu
+
+        base = {"available": True, "nodes": ["/dev/dri/renderD128"],
+                "detail": "the node is there.", "fix": "",
+                "runtime": {"ok": True, "drivers": [], "detail": "", "fix": ""}}
+        base.update(state)
+        monkeypatch.setattr(gpu, "describe", lambda: base)
+        monkeypatch.setattr(gpu, "vainfo", lambda: {
+            "ran": True, "ok": True, "driver": "Intel iHD driver",
+            "encoders": ["VAProfileH264High"], "output": "",
+        })
+
+    def test_a_software_preset_gets_no_hardware_step(self, tmp_path, monkeypatch):
+        """A paragraph about hardware nobody asked for trains people to stop
+        reading the page."""
+        self._gpu(monkeypatch)
+        config = _config(tmp_path, handbrake_path="/bin/true",
+                         handbrake_preset="Hardware",
+                         handbrake_preset_file=self._preset(tmp_path, "x264"))
+        names = [s["name"] for s in encodertest.test_encoder(config)["steps"]]
+        assert "Hardware" not in names
+
+    def test_a_hardware_preset_gets_the_evidence(self, tmp_path, monkeypatch):
+        self._gpu(monkeypatch)
+        exe = _script(tmp_path / "hb", """
+            [ "$1" = "--help" ] && echo '   qsv_h264' && exit 0
+            echo 'Super HQ'
+        """)
+        config = _config(tmp_path, handbrake_path=exe,
+                         handbrake_preset="Hardware",
+                         handbrake_preset_file=self._preset(tmp_path),
+                         ffmpeg_path=str(tmp_path / "no-ffmpeg"))
+        step = next(s for s in encodertest.test_encoder(config)["steps"]
+                    if s["name"] == "Hardware")
+        assert "qsv_h264" in step["detail"], "the build's encoders"
+        assert "the node is there" in step["detail"], "the passthrough"
+        assert "vainfo" in step["detail"], "what the stack itself says"
+        assert step["status"] == "ok"
+
+    def test_a_decode_only_stack_is_flagged(self, tmp_path, monkeypatch):
+        from adr import gpu
+
+        self._gpu(monkeypatch)
+        monkeypatch.setattr(gpu, "vainfo", lambda: {
+            "ran": True, "ok": False, "driver": "Mesa", "encoders": [],
+            "output": "VAProfileH264High : VAEntrypointVLD",
+        })
+        exe = _script(tmp_path / "hb", """
+            [ "$1" = "--help" ] && echo '   qsv_h264' && exit 0
+            echo 'Super HQ'
+        """)
+        config = _config(tmp_path, handbrake_path=exe,
+                         handbrake_preset="Hardware",
+                         handbrake_preset_file=self._preset(tmp_path),
+                         ffmpeg_path=str(tmp_path / "no-ffmpeg"))
+        step = next(s for s in encodertest.test_encoder(config)["steps"]
+                    if s["name"] == "Hardware")
+        assert step["status"] == "warn"
+        assert "not offer a single encode profile" in step["detail"]
+
+    def test_a_missing_vainfo_does_not_cry_wolf(self, tmp_path, monkeypatch):
+        """Absence of evidence is not evidence of a problem, and the encode
+        below is still the real verdict."""
+        from adr import gpu
+
+        self._gpu(monkeypatch)
+        monkeypatch.setattr(gpu, "vainfo", lambda: {
+            "ran": False, "ok": False, "driver": "", "encoders": [],
+            "output": "vainfo is not installed, so the driver stack could not "
+                      "be asked whether it works.",
+        })
+        exe = _script(tmp_path / "hb", """
+            [ "$1" = "--help" ] && echo '   qsv_h264' && exit 0
+            echo 'Super HQ'
+        """)
+        config = _config(tmp_path, handbrake_path=exe,
+                         handbrake_preset="Hardware",
+                         handbrake_preset_file=self._preset(tmp_path),
+                         ffmpeg_path=str(tmp_path / "no-ffmpeg"))
+        step = next(s for s in encodertest.test_encoder(config)["steps"]
+                    if s["name"] == "Hardware")
+        assert step["status"] == "ok"
+        assert "not installed" in step["detail"]
+
+
 class TestAskingTheBuildWhatItHas:
     def test_it_finds_the_hardware_encoders(self, tmp_path):
         exe = _script(tmp_path / "hb", """

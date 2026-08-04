@@ -239,9 +239,7 @@ class TestTheDriverHasToBeForThisGPU:
         monkeypatch.setattr(gpu, "DRM_CLASS_DIR", tmp_path / "absent")
         assert gpu.gpu_vendor() == ""
 
-    @pytest.mark.parametrize("lib", [
-        "libmfxhw64.so.1", "libmfx-gen.so.1.2", "libvpl.so.2", "libmfx.so.1",
-    ])
+    @pytest.mark.parametrize("lib", ["libmfxhw64.so.1", "libmfx-gen.so.1.2"])
     def test_every_shape_of_the_runtime_is_recognised(
         self, monkeypatch, tmp_path, lib,
     ):
@@ -255,6 +253,121 @@ class TestTheDriverHasToBeForThisGPU:
         _with_driver(monkeypatch, tmp_path, "iHD_drv_video.so")
         _with_libs(monkeypatch, tmp_path, "libavcodec.so.60")
         assert gpu.runtime_state()["ok"] is False
+
+
+class TestTheDispatcherIsNotTheRuntime:
+    """The most confusing shape of a broken Quick Sync stack.
+
+    libvpl.so.2 sits there in the library directory, so `ls` says the stack is
+    installed. It is a loader with nothing to load: it finds a runtime and
+    hands over, and encodes nothing itself. HandBrake then fails exactly as it
+    would with neither installed.
+    """
+
+    def _intel_with(self, monkeypatch, tmp_path, *libs):
+        monkeypatch.setattr(gpu, "gpu_vendor", lambda: gpu.VENDOR_INTEL)
+        _with_driver(monkeypatch, tmp_path, "iHD_drv_video.so")
+        _with_libs(monkeypatch, tmp_path, *libs)
+
+    def test_the_dispatcher_alone_is_not_enough(self, monkeypatch, tmp_path):
+        self._intel_with(monkeypatch, tmp_path, "libvpl.so.2", "libvpl.so.2.9")
+        state = gpu.runtime_state()
+        assert state["ok"] is False
+        assert state["libs"] == [], "no runtime is installed"
+        assert state["dispatchers"] == ["libvpl.so.2", "libvpl.so.2.9"]
+
+    def test_it_explains_why_the_library_it_can_see_does_not_count(
+        self, monkeypatch, tmp_path,
+    ):
+        """Otherwise the message contradicts the listing in front of them."""
+        self._intel_with(monkeypatch, tmp_path, "libvpl.so.2")
+        detail = gpu.runtime_state()["detail"]
+        assert "libvpl.so.2" in detail
+        assert "dispatcher" in detail
+
+    def test_the_old_msdk_dispatcher_is_also_only_a_dispatcher(
+        self, monkeypatch, tmp_path,
+    ):
+        self._intel_with(monkeypatch, tmp_path, "libmfx.so.1")
+        assert gpu.runtime_state()["ok"] is False
+
+    def test_a_dispatcher_with_a_runtime_is_fine(self, monkeypatch, tmp_path):
+        self._intel_with(monkeypatch, tmp_path, "libvpl.so.2", "libmfx-gen.so.1.2")
+        assert gpu.runtime_state()["ok"] is True
+
+
+class TestAskingTheStackWhetherItWorks:
+    """Everything else reasons from file names. vainfo opens the device."""
+
+    def _vainfo(self, monkeypatch, returncode=0, stdout="", stderr=""):
+        import shutil
+        import subprocess
+        import types
+
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/vainfo")
+        monkeypatch.setattr(
+            subprocess, "run",
+            lambda *a, **k: types.SimpleNamespace(
+                returncode=returncode, stdout=stdout, stderr=stderr),
+        )
+
+    def test_without_vainfo_it_says_so_rather_than_guessing(self, monkeypatch):
+        import shutil
+
+        monkeypatch.setattr(shutil, "which", lambda name: None)
+        probe = gpu.vainfo()
+        assert probe["ran"] is False
+        assert probe["ok"] is False
+        assert "not installed" in probe["output"]
+
+    def test_a_working_stack_lists_its_encode_profiles(self, monkeypatch):
+        self._vainfo(monkeypatch, stdout=(
+            "vainfo: VA-API version: 1.20 (libva 2.20.0)\n"
+            "vainfo: Driver version: Intel iHD driver for Intel(R) Gen Graphics\n"
+            "      VAProfileH264High               : VAEntrypointVLD\n"
+            "      VAProfileH264High               : VAEntrypointEncSlice\n"
+            "      VAProfileHEVCMain               : VAEntrypointEncSlice\n"
+        ))
+        probe = gpu.vainfo()
+        assert probe["ran"] is True
+        assert probe["ok"] is True
+        assert "iHD" in probe["driver"]
+        assert probe["encoders"] == ["VAProfileH264High", "VAProfileHEVCMain"]
+
+    def test_a_decode_only_stack_is_not_ok(self, monkeypatch):
+        """A real configuration: the driver loads and the chip has no encode
+        engine. Every file is in place and no preset that asks for hardware
+        can ever work."""
+        self._vainfo(monkeypatch, stdout=(
+            "vainfo: Driver version: Mesa Gallium driver\n"
+            "      VAProfileH264High               : VAEntrypointVLD\n"
+        ))
+        probe = gpu.vainfo()
+        assert probe["ran"] is True
+        assert probe["ok"] is False
+        assert probe["encoders"] == []
+
+    def test_a_stack_that_will_not_initialise_is_not_ok(self, monkeypatch):
+        self._vainfo(monkeypatch, returncode=1, stderr=(
+            "vaInitialize failed with error code -1 (unknown libva error)\n"
+        ))
+        probe = gpu.vainfo()
+        assert probe["ok"] is False
+        assert "vaInitialize failed" in probe["output"]
+
+    def test_a_vainfo_that_explodes_is_not_an_exception(self, monkeypatch):
+        import shutil
+        import subprocess
+
+        monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/vainfo")
+
+        def boom(*args, **kwargs):
+            raise OSError("no such thing")
+
+        monkeypatch.setattr(subprocess, "run", boom)
+        probe = gpu.vainfo()
+        assert probe["ran"] is False
+        assert "could not be run" in probe["output"]
 
     def test_unrelated_files_are_not_drivers(self, monkeypatch, tmp_path):
         directory = tmp_path / "dri"

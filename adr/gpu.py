@@ -74,12 +74,25 @@ VENDOR_DRIVERS = {
 #: Where the DRM class lives, for reading a node's PCI vendor.
 DRM_CLASS_DIR = Path("/sys/class/drm")
 
-#: Quick Sync needs a second thing above the VA driver: the Media SDK or
-#: oneVPL runtime that HandBrake's dispatcher loads at encode time. Present as
-#: libmfxhw64 (the old MSDK), libmfx-gen (oneVPL for Gen11 and later) or
-#: libvpl. Any one of them is enough; none of them is why encqsvInit fails
-#: on a container that has the VA driver and nothing else.
-QSV_RUNTIME_LIBS = ("libmfxhw64.so", "libmfx-gen.so", "libvpl.so", "libmfx.so")
+#: Quick Sync needs a second thing above the VA driver, and it comes in two
+#: parts that are easy to mistake for each other.
+#:
+#: The *dispatcher* is the library HandBrake links against. It implements no
+#: encoding at all; its whole job is to find a runtime at load time and hand
+#: over. libvpl.so is the oneVPL dispatcher, libmfx.so the old MSDK one.
+QSV_DISPATCHER_LIBS = ("libvpl.so", "libmfx.so")
+
+#: The *runtime* is what actually encodes: libmfx-gen for oneVPL on Gen11 and
+#: later, libmfxhw64 for the older Media SDK. A container with the dispatcher
+#: and no runtime has a loader with nothing to load, and HandBrake reports
+#: exactly what a container with neither reports — "qsv is not available on
+#: the system". Counting the dispatcher as sufficient is why that state was
+#: once called installed.
+QSV_RUNTIME_LIBS = ("libmfx-gen.so", "libmfxhw64.so")
+
+#: How long to wait for vainfo. It either answers at once or the stack is
+#: wedged, which is itself the answer.
+VAINFO_TIMEOUT = 20
 
 
 def render_nodes() -> list[str]:
@@ -133,8 +146,8 @@ def gpu_vendor() -> str:
     return ""
 
 
-def qsv_runtime_libs() -> list[str]:
-    """The Media SDK / oneVPL runtime libraries installed, by file name."""
+def _libs_matching(prefixes: tuple) -> list[str]:
+    """Installed libraries whose name starts with one of *prefixes*."""
     found: list[str] = []
     for directory in LIB_DIRS:
         try:
@@ -143,9 +156,19 @@ def qsv_runtime_libs() -> list[str]:
             continue
         found += [
             name for name in entries
-            if any(name.startswith(lib) for lib in QSV_RUNTIME_LIBS)
+            if any(name.startswith(prefix) for prefix in prefixes)
         ]
     return sorted(set(found))
+
+
+def qsv_runtime_libs() -> list[str]:
+    """The Media SDK / oneVPL runtimes installed — the part that encodes."""
+    return _libs_matching(QSV_RUNTIME_LIBS)
+
+
+def qsv_dispatcher_libs() -> list[str]:
+    """The dispatchers installed — the part that only finds a runtime."""
+    return _libs_matching(QSV_DISPATCHER_LIBS)
 
 
 def runtime_state() -> dict:
@@ -175,9 +198,10 @@ def runtime_state() -> dict:
     vendor = gpu_vendor()
     drivers = va_drivers()
     libs = qsv_runtime_libs()
+    dispatchers = qsv_dispatcher_libs()
     state = {
         "ok": False, "vendor": vendor, "drivers": drivers, "libs": libs,
-        "missing": [], "detail": "", "fix": "",
+        "dispatchers": dispatchers, "missing": [], "detail": "", "fix": "",
     }
 
     wanted = VENDOR_DRIVERS.get(vendor, ())
@@ -194,10 +218,10 @@ def runtime_state() -> dict:
     if not have_driver:
         state["missing"].append(driver_names)
 
-    # The second library is Quick Sync's alone. VAAPI and NVENC do not load
-    # it, so demanding it on an AMD box would invent a problem.
+    # The runtime is Quick Sync's alone. VAAPI and NVENC do not load it, so
+    # demanding it on an AMD box would invent a problem.
     if vendor == VENDOR_INTEL and not libs:
-        state["missing"].append(" or ".join(QSV_RUNTIME_LIBS[:3]))
+        state["missing"].append(" or ".join(QSV_RUNTIME_LIBS))
 
     if not state["missing"]:
         state["ok"] = True
@@ -217,9 +241,76 @@ def runtime_state() -> dict:
             f" There are VA-API drivers installed ({', '.join(drivers)}), but "
             "none of them drives this GPU."
         )
+    if not libs and dispatchers:
+        # The most confusing shape of this: `ls` shows libvpl.so.2 sitting
+        # there, so the stack looks present. It is a loader with nothing to
+        # load, and it fails exactly like having neither.
+        detail += (
+            f" {', '.join(dispatchers)} is installed, but that is only the "
+            "dispatcher — it finds a runtime and hands over, and encodes "
+            "nothing itself."
+        )
     state["detail"] = detail
     state["fix"] = "Run on the Proxmox host: adr-doctor --fix {ctid}"
     return state
+
+
+def vainfo() -> dict:
+    """Ask the VA-API stack whether it actually works on this GPU.
+
+    Everything above this function reasons from file names: the node is
+    there, the driver is there, therefore it should work. ``vainfo`` does not
+    reason — it opens the device, loads the driver and lists what the hardware
+    will do, which is the difference between "the pieces are installed" and
+    "encoding works". A driver too old for the chip, a chip with no encode
+    engine, a render node that belongs to a different card: all of them look
+    fine from a directory listing and all of them fail here.
+
+    ``{"ran", "ok", "driver", "encoders": [...], "output"}``. Never raises.
+    """
+    import shutil
+    import subprocess
+
+    result = {"ran": False, "ok": False, "driver": "", "encoders": [], "output": ""}
+    if not shutil.which("vainfo"):
+        result["output"] = (
+            "vainfo is not installed, so the driver stack could not be asked "
+            "whether it works — only whether its files are present."
+        )
+        return result
+
+    nodes = render_nodes()
+    cmd = ["vainfo", "--display", "drm"]
+    if nodes:
+        cmd += ["--device", nodes[0]]
+    try:
+        proc = subprocess.run(  # noqa: S603
+            cmd, capture_output=True, text=True, errors="replace",
+            timeout=VAINFO_TIMEOUT,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        result["output"] = f"vainfo could not be run: {exc}"
+        return result
+
+    result["ran"] = True
+    output = (proc.stdout or "") + (proc.stderr or "")
+    result["output"] = output.strip()
+
+    for line in output.splitlines():
+        if "driver version" in line.lower():
+            result["driver"] = line.split(":", 1)[-1].strip()
+            break
+
+    # An encode entrypoint is the thing that matters. A driver that loads and
+    # offers decoding only cannot satisfy a hardware encode preset, and that
+    # is a real configuration — some chips ship without the encode engine.
+    result["encoders"] = sorted({
+        line.split(":")[0].strip()
+        for line in output.splitlines()
+        if "VAEntrypointEncSlice" in line or "VAEntrypointEncPicture" in line
+    })
+    result["ok"] = proc.returncode == 0 and bool(result["encoders"])
+    return result
 
 
 def describe() -> dict:
