@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.16.4
+
+**A film that came off the disc as sixteen parts.** "Main feature only" was
+on. Dinosaur (2000) was ripped, and out came `Dinosaur (2000) - pt1` through
+`pt16` — the film, the commentary version of the film, and fourteen
+featurettes. Plex *stacks* numbered parts, so all sixteen became one movie
+with the trailers on the end of it.
+
+Two failures had to line up, and both are fixed.
+
+The pre-rip scan came back with nothing, so every title was ripped. That is
+the only thing "main feature only" does, and when it fails it failed silently:
+the exception was swallowed inside the scan, the caller saw an empty result,
+and the job log said `Ripping from /dev/sr0 (title None)` and nothing else.
+The scan now says what went wrong in MakeMKV's own words, in the job log where
+the person who put the disc in can read it, and tries once more before giving
+up — a drive that has only just been handed a disc answers the first `info`
+with nothing often enough to be worth five seconds.
+
+Then the naming declined to choose. The rule was that the longest title has to
+stand half again clear of the next one before the rest are called extras,
+which is the right caution for a two-part film — but a commentary version is
+exactly as long as the film, and one title MakeMKV gave no duration for made
+it decline outright. Now the question is only left open where it is genuinely
+open. Past three titles there is no multi-part release to protect, and someone
+who asked for the main feature has already said which title they want; in both
+cases the longest one is the film and the rest go to `Other/`.
+
+And "main feature only" now holds even when the scan could not run: the film
+is encoded and the other titles are not. They stay in the job's raw directory
+as MKV, so nothing is lost and nothing is re-ripped — the job log names them
+and says where they are.
+
+**The tray stopped opening.** `eject failed for /dev/sr0: eject: udev: not
+found mountpoint or device with the given name`. There is no udev in an LXC
+container, and `eject` consults it before doing anything, so it never reached
+the ioctl — on a drive that ejects perfectly well. The kernel is now asked
+first and the command kept as the fallback, because it knows how to unmount,
+which matters on a host where someone has mounted the disc.
+
 ## 1.16.3
 
 Two things a healthy diagnostics bundle made visible — neither of which had

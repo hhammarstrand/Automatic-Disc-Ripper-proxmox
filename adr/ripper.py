@@ -34,6 +34,15 @@ STALL_TIMEOUT = 1800
 #: reported idle time is roughly accurate.
 STALL_CHECK_INTERVAL = 30
 
+#: How long a pre-rip `makemkvcon info` may take. Generous for a Blu-ray whose
+#: playlists all have to be opened, and short enough that a drive which will
+#: never answer does not hold the job for an hour.
+SCAN_TIMEOUT = 300
+
+#: Pause before the one scan retry. Long enough for a drive that is still
+#: spinning up to be ready, short enough to be invisible next to a rip.
+SCAN_RETRY_DELAY = 5
+
 # Robot-mode line prefixes we care about
 # MSG:code,flags,count,"message",... → log messages
 # PRGV:current,total,max            → overall progress
@@ -69,6 +78,9 @@ class MakeMKVRipper:
         # Optional one-argument callable that receives MakeMKV's own messages,
         # so a failure can be diagnosed from the UI instead of journalctl.
         self.log_sink: Callable[[str], None] | None = None
+        #: Why the last :meth:`scan_disc` came back empty, in MakeMKV's own
+        #: words where it gave any. Empty after a scan that found titles.
+        self.last_scan_error: str = ""
 
         if not os.path.isfile(self._exe):
             logger.warning("MakeMKV not found at %s", self._exe)
@@ -103,8 +115,32 @@ class MakeMKVRipper:
     def scan_disc(self, drive_letter: str) -> dict[int, dict]:
         """Scan a disc and return title information without ripping.
 
-        Returns dict mapping title index -> info dict.
+        Returns dict mapping title index -> info dict, and leaves the reason
+        for an empty result in :attr:`last_scan_error`.
+
+        A scan that comes back empty is not a neutral event: it is what makes
+        "main feature only" quietly rip the whole disc. It is also the one
+        MakeMKV failure that used to leave no trace anywhere the user could
+        read — the exception was swallowed here and the caller only saw an
+        empty dict. So the messages MakeMKV printed are kept, passed to the
+        job log through :attr:`log_sink`, and the scan is tried a second time:
+        a drive that has only just been given a disc answers the first `info`
+        with nothing surprisingly often, and a second attempt costs seconds
+        against the forty minutes of ripping the wrong thing.
         """
+        self.last_scan_error = ""
+        for attempt in (1, 2):
+            titles = self._scan_once(drive_letter, attempt)
+            if titles:
+                self.last_scan_error = ""
+                return titles
+            if attempt == 1:
+                logger.info("Retrying the disc scan of %s once", drive_letter)
+                time.sleep(SCAN_RETRY_DELAY)
+        return {}
+
+    def _scan_once(self, drive_letter: str, attempt: int) -> dict[int, dict]:
+        """One `makemkvcon info` run. See :meth:`scan_disc`."""
         titles: dict[int, dict] = {}
         source = self._make_dev_source(drive_letter)
         cmd = [
@@ -113,21 +149,49 @@ class MakeMKVRipper:
             f"--minlength={self._min_length}",
             "--messages=-stdout",
         ]
-        logger.info("Scanning disc: %s", " ".join(cmd))
+        logger.info("Scanning disc (attempt %d): %s", attempt, " ".join(cmd))
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=SCAN_TIMEOUT,
+            )
             logger.debug("Scan exit code: %d, stdout lines: %d",
                          result.returncode, len(result.stdout.splitlines()))
+            last_error = ""
             for line in result.stdout.splitlines():
                 if line.startswith("TINFO:"):
                     self._parse_tinfo(line, titles)
+                elif line.startswith("MSG:"):
+                    parsed = self.parse_message(line)
+                    if not parsed:
+                        continue
+                    text, is_error = parsed
+                    if not is_error:
+                        # A scan says a great deal that is only noise — which
+                        # drive it opened, which profile it read. Only the
+                        # warnings and errors go to the job log; the rest is
+                        # in the service log at DEBUG if anyone needs it.
+                        logger.debug("MakeMKV scan: %s", text)
+                        continue
+                    last_error = text
+                    logger.warning("MakeMKV scan: %s", text)
+                    if self.log_sink:
+                        self.log_sink(text)
             if not titles:
                 logger.warning("Scan produced no TINFO lines (exit=%d)", result.returncode)
                 if result.stderr:
                     logger.debug("Scan stderr: %s", result.stderr[:500])
+                self.last_scan_error = (
+                    last_error
+                    or f"makemkvcon info found no titles and exited with "
+                       f"code {result.returncode}"
+                )
         except subprocess.TimeoutExpired:
-            logger.error("Disc scan timed out after 300s for %s", drive_letter)
+            self.last_scan_error = (
+                f"the disc scan gave up after {SCAN_TIMEOUT // 60} minutes"
+            )
+            logger.error("Disc scan timed out after %ds for %s", SCAN_TIMEOUT, drive_letter)
         except (subprocess.SubprocessError, OSError) as exc:
+            self.last_scan_error = str(exc)
             logger.error("Disc scan failed: %s", exc, exc_info=True)
         return titles
 

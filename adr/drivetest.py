@@ -28,7 +28,7 @@ import threading
 import time
 from pathlib import Path
 
-from adr.ripper import MakeMKVRipper
+from adr.ripper import SCAN_TIMEOUT, MakeMKVRipper
 
 logger = logging.getLogger(__name__)
 
@@ -65,11 +65,12 @@ _DISC_TYPE = {
 # presence is the single most predictive thing we can cheaply check.
 SG_GET_VERSION_NUM = 0x2282
 
-# How long to let a MakeMKV scan run. Matched to adr.ripper.scan_disc, which is
-# what a real rip uses: a diagnostic that gives up sooner than the operation it
-# is diagnosing will fail discs that rip perfectly well, and send someone off to
-# debug a drive that was never broken.
-SCAN_TIMEOUT = 300
+# How long to let a MakeMKV scan run. Taken from adr.ripper, which is what a
+# real rip uses: a diagnostic that gives up sooner than the operation it is
+# diagnosing will fail discs that rip perfectly well, and send someone off to
+# debug a drive that was never broken. Imported from adr.ripper rather than
+# repeated here, because the two drifting apart is exactly the bug this comment
+# warns about.
 
 # Sector 16 is where ISO 9660 and UDF put their volume descriptor, so it is
 # both a real read and one that means something if it succeeds.

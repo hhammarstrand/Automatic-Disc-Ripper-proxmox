@@ -296,11 +296,57 @@ def get_drive_models() -> dict[str, str]:
 # Disc ejection
 # ------------------------------------------------------------------ #
 
+# <linux/cdrom.h>. Opening the tray is a single ioctl on the device, which is
+# the whole of what this application needs — the disc is never mounted, because
+# MakeMKV reads it raw.
+CDROMEJECT = 0x5309
+CDROM_LOCKDOOR = 0x5329
+
+
+def _eject_ioctl(drive: str) -> str:
+    """Ask the kernel directly. Returns "" on success, else why it failed.
+
+    This is what the `eject` command does at the end of its work, minus the
+    part that needs udev. In an LXC container there is no udev, so `eject`
+    stops at "udev: not found mountpoint or device with the given name" and
+    never reaches the ioctl — the tray stays shut and every rip since has
+    needed the disc taken out by hand.
+    """
+    import fcntl
+
+    fd = None
+    try:
+        fd = os.open(drive, os.O_RDONLY | os.O_NONBLOCK)
+        # A previous reader may have locked the door; unlocking is advisory
+        # and a drive that refuses it can still often eject.
+        with contextlib.suppress(OSError):
+            fcntl.ioctl(fd, CDROM_LOCKDOOR, 0)
+        fcntl.ioctl(fd, CDROMEJECT)
+        return ""
+    except OSError as exc:
+        return f"{errno.errorcode.get(exc.errno, exc.errno)}: {exc.strerror}"
+    finally:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+
+
 def eject_drive(drive: str) -> bool:
     """Eject the disc in the given drive (e.g. "/dev/sr0").
 
-    Uses the `eject` command. Returns True on success.
+    The kernel first, the `eject` command second. That order looks backwards
+    for a shell-first codebase, but this one runs in a container: `eject`
+    consults udev before it does anything, and there is no udev in an LXC, so
+    it fails on a drive that opens and ejects perfectly well. The command stays
+    as the fallback because it knows how to unmount, which matters on a host
+    where someone has mounted the disc.
     """
+    reason = _eject_ioctl(drive)
+    if not reason:
+        logger.info("Ejected disc from drive %s", drive)
+        return True
+    logger.debug("Eject ioctl on %s failed (%s) — trying the eject command", drive, reason)
+
     eject_bin = shutil.which("eject") or "/usr/bin/eject"
     try:
         result = subprocess.run(
@@ -310,12 +356,16 @@ def eject_drive(drive: str) -> bool:
             logger.info("Ejected disc from drive %s", drive)
             return True
         logger.error(
-            "eject failed for %s: %s", drive,
+            "eject failed for %s: %s (the kernel refused it too: %s)", drive,
             result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}",
+            reason,
         )
         return False
     except (subprocess.SubprocessError, OSError, FileNotFoundError):
-        logger.exception("Failed to eject drive %s", drive)
+        logger.error(
+            "Could not eject %s: the kernel refused it (%s) and the eject "
+            "command could not be run", drive, reason, exc_info=True,
+        )
         return False
 
 

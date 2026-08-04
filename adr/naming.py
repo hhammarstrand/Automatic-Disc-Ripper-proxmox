@@ -94,6 +94,36 @@ EXTRAS_FOLDER = "Other"
 #: and calling half a film an extra is the worse mistake of the two.
 MAIN_FEATURE_RATIO = 1.5
 
+#: How many files can still plausibly be read as one film. Real multi-part
+#: releases are two parts, occasionally three. Sixteen titles is a disc with
+#: its extras on it, and there is no reading of sixteen numbered parts that
+#: Plex handles well — it *stacks* them, so the trailers become the last
+#: fourteen minutes of the film.
+MAX_STACKED_PARTS = 3
+
+
+def longest_title(durations) -> int | None:
+    """Index of the longest title, ignoring the ones with no duration.
+
+    Unlike :func:`pick_main_feature` this makes no claim about confidence: it
+    answers "which of these is longest" and nothing else. It is for the cases
+    where the question has already been settled elsewhere — the user asked for
+    the main feature only, or there are more titles than any multi-part film
+    has — and the only thing left to decide is which one.
+
+    Returns None only when no title has a usable duration at all.
+    """
+    best: int | None = None
+    best_value = 0.0
+    for index, value in enumerate(durations):
+        try:
+            seconds = float(value or 0)
+        except (TypeError, ValueError):
+            continue
+        if seconds > best_value:
+            best, best_value = index, seconds
+    return best
+
 
 def pick_main_feature(durations) -> int | None:
     """Which of the ripped titles is the feature, or None when it is unclear.
@@ -111,6 +141,57 @@ def pick_main_feature(durations) -> int | None:
     if values[longest] >= values[runner_up] * MAIN_FEATURE_RATIO:
         return longest
     return None
+
+
+def resolve_main_feature(durations, main_feature_only: bool) -> int | None:
+    """Which of the ripped titles is the film, given what the user asked for.
+
+    :func:`pick_main_feature` is deliberately timid — it only answers when the
+    longest title stands well clear of the next one. Two things on an ordinary
+    disc defeat it: a commentary version of the film, which is exactly as long
+    as the film, and a title MakeMKV reported no duration for, which makes it
+    decline outright. Either way every file ends up named "pt1"…"ptN", and Plex
+    *stacks* numbered parts, so a disc with fifteen featurettes becomes one
+    sixteen-part movie with the trailers on the end.
+
+    So where the question has already been answered elsewhere, answer it. The
+    user asking for the main feature only has said which title they want; a
+    count past :data:`MAX_STACKED_PARTS` is past anything a real multi-part
+    release reaches. In both cases "the longest one is the film" is not a
+    guess, and it beats stacking the extras onto the end of it.
+    """
+    values = list(durations)
+    index = pick_main_feature(values)
+    if index is not None or len(values) < 2:
+        return index
+    if main_feature_only or len(values) > MAX_STACKED_PARTS:
+        return longest_title(values)
+    return None
+
+
+def only_the_feature(files, durations, main_index: int | None):
+    """Drop everything but the feature from a ripped title list.
+
+    For the case where "main feature only" was on and the disc still produced
+    several titles — the pre-rip scan is the only thing that could have
+    prevented that, and when it comes back empty the setting has one place left
+    to take effect. Encoding fifteen featurettes nobody asked for costs hours
+    and fills the library with them.
+
+    Nothing is deleted: the other titles stay in the job's raw directory as
+    MKV, so a wrong call here is undone by re-encoding rather than by ripping
+    the disc again.
+
+    Returns ``(files, durations, main_index)`` unchanged when there is nothing
+    to drop, and ``main_index`` as None once only the feature is left — a
+    single file is the film by definition.
+    """
+    kept = list(files)
+    lengths = list(durations)
+    if main_index is None or len(kept) <= 1 or not 0 <= main_index < len(kept):
+        return kept, lengths, main_index
+    length = lengths[main_index] if main_index < len(lengths) else None
+    return [kept[main_index]], [length], None
 
 
 def plan_output(job, file_count: int, fallback_title: str = "",

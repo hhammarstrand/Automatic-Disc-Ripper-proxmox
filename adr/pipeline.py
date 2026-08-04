@@ -41,9 +41,11 @@ from adr.models import Job, JobStatus, Track, TrackStatus, get_session, init_db
 from adr.naming import (
     EXTRAS_FOLDER,
     finished_files,
+    only_the_feature,
     pick_main_feature,
     plan_output,
     relative_folder,
+    resolve_main_feature,
 )
 from adr.notify import Notifier
 from adr.plex import PlexNotifier
@@ -52,6 +54,7 @@ from adr.series import looks_like_series, parse_series_label
 from adr.storage import should_stage
 from adr.utils import (
     BYTES_PER_MB,
+    format_duration,
     make_plex_folder_name,
     normalize_drive,
     parse_duration,
@@ -1017,11 +1020,28 @@ class DrivePipeline:
 
             # 3. Prepare rip
             # Smart main-feature selection: scan disc first, pick longest title
+            #
+            # Every branch below writes to the job's own log, not only to the
+            # service log. "Main feature only was on and the disc came back
+            # with sixteen titles" is a question the job log has to be able to
+            # answer on its own, because it is the log the person who put the
+            # disc in can actually read.
+            job_log = JobLog(self._config, job.id)
             selected_title_index = None
             if self._config.main_feature_only:
                 try:
                     logger.info("Main feature mode: scanning disc to find longest title...")
-                    scan_titles = self._ripper.scan_disc(self.drive)
+                    job_log.append(
+                        "rip", "Main feature only: scanning the disc to find its longest title.",
+                    )
+                    # MakeMKV's own words about the scan, in the job log. When
+                    # the scan finds nothing this is the only place that says
+                    # why, and "why" decides whether the whole disc gets ripped.
+                    self._ripper.log_sink = JobLog(self._config, job.id).sink("rip")
+                    try:
+                        scan_titles = self._ripper.scan_disc(self.drive)
+                    finally:
+                        self._ripper.log_sink = None
                     logger.info("Scan found %d title(s): %s",
                                 len(scan_titles),
                                 {idx: (t.get("duration", "?"), t.get("size", "?"))
@@ -1048,7 +1068,7 @@ class DrivePipeline:
                         logger.info(
                             "Job %s looks like a TV disc: %s", job.id, verdict["reason"],
                         )
-                        job_log_early = JobLog(self._config, job.id)
+                        job_log_early = job_log
                         job_log_early.append("detect", verdict["reason"])
                         job_log_early.append(
                             "detect",
@@ -1077,14 +1097,41 @@ class DrivePipeline:
                             "Main feature selected: title %d (%s, %s) — skipping %d other title(s)",
                             best_idx, best_info.get("duration", "?"), best_info.get("size", "?"), skipped,
                         )
+                        job_log.append(
+                            "rip",
+                            f"Scan found {len(scan_titles)} title(s). Ripping title "
+                            f"{best_idx} ({best_info.get('duration', '?')}, "
+                            f"{best_info.get('size', '?')}) and skipping the other "
+                            f"{skipped}.",
+                        )
                     else:
                         logger.warning("Disc scan returned no titles — falling back to rip all")
+                        job_log.append(
+                            "rip",
+                            "The disc scan came back with no titles"
+                            + (f" ({self._ripper.last_scan_error})"
+                               if getattr(self._ripper, "last_scan_error", "") else "")
+                            + ", so the main feature could not be picked before "
+                            "ripping. Every title will be ripped and the longest "
+                            "one kept.",
+                        )
                 except _SeriesDisc:
                     logger.info("Ripping every episode from the TV disc in drive %s", self.drive)
                 except (subprocess.SubprocessError, OSError):
                     logger.warning("Main feature scan failed — falling back to rip all", exc_info=True)
+                    job_log.append(
+                        "rip",
+                        "The disc scan failed, so the main feature could not be "
+                        "picked before ripping. Every title will be ripped and "
+                        "the longest one kept.",
+                    )
             else:
                 logger.info("main_feature_only is disabled — ripping all titles")
+                job_log.append(
+                    "rip",
+                    "'Main feature only' is off, so every title on the disc will "
+                    "be ripped.",
+                )
 
             job.status = JobStatus.RIPPING
             session.commit()
@@ -1162,8 +1209,12 @@ class DrivePipeline:
                                 job.id, attempt + 1, _rip_commit_fails[0], exc,
                             )
 
-            job_log = JobLog(self._config, job.id)
-            job_log.append("rip", f"Ripping from {self.drive} (title {selected_title_index})")
+            job_log.append(
+                "rip",
+                f"Ripping from {self.drive} "
+                + (f"(title {selected_title_index})" if selected_title_index is not None
+                   else "(every title)"),
+            )
             self._ripper.log_sink = job_log.sink("rip")
             try:
                 rip_result = self._ripper.rip(
@@ -1234,9 +1285,46 @@ class DrivePipeline:
                         break
                 durations.append(seconds)
 
-            main_index = pick_main_feature(durations)
+            rip_files = list(rip_result.mkv_files)
+            main_index = resolve_main_feature(
+                durations, self._config.main_feature_only,
+            )
+            if main_index is not None and pick_main_feature(durations) is None:
+                logger.info(
+                    "Job %s: no title stands clear of the rest, so the longest "
+                    "(%s) is taken as the film", job.id, rip_files[main_index].name,
+                )
+
+            # "Main feature only" was on, and the disc still produced several
+            # titles — the pre-rip scan is the only thing that could have
+            # prevented that and it did not run. Honour the setting at the one
+            # point still left: encode the film and nothing else. The extras
+            # stay on disk as MKV, so nothing is lost, and hours of encoding
+            # nobody asked for are not spent.
+            if self._config.main_feature_only:
+                kept, lengths, reduced = only_the_feature(
+                    rip_files, durations, main_index,
+                )
+                if len(kept) < len(rip_files):
+                    dropped = len(rip_files) - len(kept)
+                    length = lengths[0]
+                    job_log.append(
+                        "encode",
+                        f"'Main feature only' is on, so only {kept[0].name}"
+                        + (f" ({format_duration(length)})" if length else "")
+                        + f" will be encoded. The other {dropped} ripped title(s) "
+                        f"stay as MKV in {self._config.raw_path / str(job.id)}; "
+                        "delete them from the history page when you no longer "
+                        "want them.",
+                    )
+                    logger.info(
+                        "Job %s: keeping %s and leaving %d other ripped title(s) "
+                        "unencoded", job.id, kept[0].name, dropped,
+                    )
+                rip_files, durations, main_index = kept, lengths, reduced
+
             plan = plan_output(
-                job, len(rip_result.mkv_files), fallback_title, fallback_year,
+                job, len(rip_files), fallback_title, fallback_year,
                 main_index=main_index,
             )
             plex_folder_name = plan.folder
@@ -1274,7 +1362,7 @@ class DrivePipeline:
                 output_dir = unique_output_dir(dest_parent / plex_folder_name)
             job.output_path = str(output_dir)
 
-            for idx, mkv_file in enumerate(rip_result.mkv_files):
+            for idx, mkv_file in enumerate(rip_files):
                 duration_sec = durations[idx]
 
                 track = Track(
@@ -1305,7 +1393,7 @@ class DrivePipeline:
 
             job.status = JobStatus.ENCODING
             session.commit()
-            logger.info("Job %s: %d tracks queued for encoding", job.id, len(rip_result.mkv_files))
+            logger.info("Job %s: %d tracks queued for encoding", job.id, len(rip_files))
 
             # The episode numbers are spent now, so the next disc continues
             # from where this one stopped. Doing this at insert time would mean

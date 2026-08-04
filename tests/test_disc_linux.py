@@ -176,6 +176,42 @@ class TestEjectDrive:
         monkeypatch.setattr(disc.subprocess, "run", _raise)
         assert disc.eject_drive("/dev/sr0") is False
 
+    def test_the_kernel_is_asked_first(self, monkeypatch):
+        """In an LXC there is no udev, so `eject` stops at "udev: not found
+        mountpoint or device with the given name" before it ever reaches the
+        ioctl — and the tray stays shut on a drive that ejects perfectly well.
+        """
+        ran = []
+        monkeypatch.setattr(disc, "_eject_ioctl", lambda d: "")
+        monkeypatch.setattr(disc.subprocess, "run", lambda *a, **k: ran.append(a))
+        assert disc.eject_drive("/dev/sr0") is True
+        assert ran == [], "the eject command was run even though the ioctl worked"
+
+    def test_the_command_is_still_the_fallback(self, monkeypatch):
+        """A host where the disc is mounted needs `eject`, which unmounts."""
+        monkeypatch.setattr(disc, "_eject_ioctl", lambda d: "EBUSY: Device or resource busy")
+        monkeypatch.setattr(disc.shutil, "which", lambda n: "/usr/bin/eject")
+        monkeypatch.setattr(
+            disc.subprocess, "run",
+            lambda *a, **k: subprocess.CompletedProcess(a, 0, stdout="", stderr=""),
+        )
+        assert disc.eject_drive("/dev/sr0") is True
+
+    def test_both_failing_reports_both_reasons(self, monkeypatch, caplog):
+        monkeypatch.setattr(disc, "_eject_ioctl", lambda d: "ENOMEDIUM: No medium found")
+        monkeypatch.setattr(disc.shutil, "which", lambda n: "/usr/bin/eject")
+        monkeypatch.setattr(
+            disc.subprocess, "run",
+            lambda *a, **k: subprocess.CompletedProcess(a, 1, stdout="", stderr="udev: not found"),
+        )
+        with caplog.at_level("ERROR"):
+            assert disc.eject_drive("/dev/sr0") is False
+        assert "udev: not found" in caplog.text
+        assert "No medium found" in caplog.text
+
+    def test_a_missing_device_is_a_reason_not_a_crash(self, tmp_path):
+        assert disc._eject_ioctl(str(tmp_path / "nope")) != ""
+
 
 # ------------------------------------------------------------------ #
 # list_optical_drives

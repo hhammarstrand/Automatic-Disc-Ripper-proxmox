@@ -273,11 +273,13 @@ class TestMakeMkvScan:
         will fail discs that rip perfectly well."""
         import inspect
 
-        from adr.ripper import MakeMKVRipper
+        import adr.ripper as ripper_module
 
-        source = inspect.getsource(MakeMKVRipper.scan_disc)
-        assert "timeout=300" in source, "scan_disc's timeout changed"
-        assert drivetest.SCAN_TIMEOUT >= 300
+        # One constant, shared, rather than two that can drift apart.
+        assert drivetest.SCAN_TIMEOUT is ripper_module.SCAN_TIMEOUT
+        assert ripper_module.SCAN_TIMEOUT >= 300
+        source = inspect.getsource(ripper_module.MakeMKVRipper._scan_once)
+        assert "timeout=SCAN_TIMEOUT" in source, "the scan stopped using it"
 
     def test_no_disc_skips_the_scan(self, openable, monkeypatch):
         _ioctl(monkeypatch, drive_status=1)
