@@ -170,11 +170,28 @@ class TestTheMediaStackIsInstalledEverywhere:
         for package in self.RUNTIMES:
             assert package in update, f"{package} never reaches an existing install"
 
-    def test_the_update_asks_the_application_rather_than_guessing(self, update):
-        """A second, looser check written in shell is how this went wrong once
-        already: it accepted any VA driver, called the stack installed, and the
-        web UI then said the encoder was missing."""
-        assert "runtime_state()" in update
+    def test_the_update_asks_per_package_not_whether_a_runtime_exists(self, update):
+        """Gating on gpu.runtime_state() was a bug, and shipped as one.
+
+        runtime_state() answers "is a Quick Sync runtime installed", which is
+        true the moment *either* is — so a container carrying libmfxgen1 from
+        an earlier repair, on a processor that needs libmfx1, reported the
+        stack fine and skipped the very install that would have fixed it. The
+        question is per package, and dpkg-query answers it without opinion.
+        """
+        assert "dpkg-query" in update
+        # Comments stripped: this file explains the bug at length, and the
+        # explanation naming the function is not the function being called.
+        code = "\n".join(
+            line for line in update.splitlines()
+            if not line.lstrip().startswith("#")
+        )
+        assert "runtime_state()" not in code, (
+            "the install is gated on 'a runtime exists' again"
+        )
+
+    def test_an_already_installed_package_is_not_reinstalled(self, update):
+        assert "install ok installed" in update
 
     def test_the_update_does_not_run_apt_without_a_gpu(self, update):
         assert "/dev/dri/renderD" in update

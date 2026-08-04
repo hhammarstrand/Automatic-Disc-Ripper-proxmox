@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.17.3
+
+**The GPU packages were skipped by the check that was meant to install
+them.** 1.17.2 gated the install on `gpu.runtime_state()["ok"]`, which answers
+"is a Quick Sync runtime installed" — true the moment *either* of the two is.
+A container carrying `libmfxgen1` from an earlier repair, on a processor that
+needs `libmfx1`, therefore reported the stack fine and skipped the install
+that would have fixed it. The update ran, said nothing, and changed nothing.
+
+That is the same false green this repository has now produced three times: a
+check one level too loose, reporting a state that is technically true and
+practically wrong. The install is now decided per package with `dpkg-query`,
+which has no opinion about what the packages are for, and an already-installed
+package is simply not reinstalled.
+
 ## 1.17.2
 
 **The GPU fix now arrives through the update button.** 1.17.1 made a fresh
