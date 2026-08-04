@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.6.1
+
+**"HandBrake exited with code 3" ten times in a row is one problem, not ten.**
+Exit 3 is an initialisation failure, and it is the same for every title of
+every disc because it is decided before any video is touched: an encoder the
+build was compiled without, a hardware encoder that is not in the container, a
+preset name that does not resolve. Finding out which cost forty minutes and a
+disc.
+
+**Doctor → Encoding → Test the preset** answers it in seconds with no disc.
+It checks that the preset resolves, then encodes two seconds of generated
+video through the real preset — the step that matters, because everything
+before it passes on a build with no usable encoder. When it fails it shows
+what HandBrake actually said and turns it into something to do: a hardware
+encoder means the container has no GPU, an unknown encoder means the build
+lacks it, and both are one setting away from fixed.
+
+**The elapsed timer was two hours out.** Times are stored naive, in the
+container's zone, and sent to the browser without one. JavaScript reads a
+date-time with no zone as *its own* local time, so a container on UTC and a
+phone on CEST disagreed by exactly the offset — a job that had just started
+read 2:00:39. Timestamps now carry the server's offset.
+
+**The auto-refresh was rewriting the wrong badge.** The phase strip added in
+1.5.0 put pills above the status badge, and the refresh took the first
+`.badge` on the card — so every five seconds it overwrote "Identify" with the
+job status. It targets the status badge by name now.
+
+Also, on a phone: the completed-date column wrapped onto two lines and is now
+hidden on the narrowest screens, and the drive heading no longer fights its
+buttons for one line.
+
+---
+
 ## 1.6.0
 
 **Every diagnosis of this application ended with "paste me the output of

@@ -55,8 +55,8 @@
     <!-- Drive Status (compact rows)                   -->
     <!-- ============================================= -->
     <div class="col-12">
-        <div class="d-flex justify-content-between align-items-center mb-2">
-            <h5 class="mb-0"><i class="bi bi-hdd me-2"></i>Optical Drives</h5>
+        <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-2">
+            <h5 class="mb-0 text-nowrap"><i class="bi bi-hdd me-2"></i>Optical Drives</h5>
             <!-- Right here is where you stand when nothing is happening and you
                  cannot tell whether the drive is the problem. -->
             <span class="d-flex gap-2">
@@ -146,7 +146,7 @@
         <div id="activeJobs">
             {% if active_jobs %}
                 {% for job in active_jobs %}
-                <div class="card mb-3" data-job-id="{{ job.id }}" data-started-at="{{ job.started_at.isoformat() if job.started_at else '' }}" data-job-status="{{ job.status.value if job.status else 'unknown' }}">
+                <div class="card mb-3" data-job-id="{{ job.id }}" data-started-at="{{ job.started_at | isotime }}" data-job-status="{{ job.status.value if job.status else 'unknown' }}">
                     <div class="card-body">
                         <div class="row align-items-center">
                             <!-- Poster / icon -->
@@ -164,7 +164,7 @@
                                 <h6 class="mb-1">{{ job.display_title }}</h6>
                                 <small class="text-secondary">
                                     Drive: {{ job.drive }} &middot; Job #{{ job.id }}
-                                    &middot; <i class="bi bi-clock me-1"></i><span class="elapsed-timer" data-start="{{ job.started_at.isoformat() if job.started_at else '' }}">--:--</span>
+                                    &middot; <i class="bi bi-clock me-1"></i><span class="elapsed-timer" data-start="{{ job.started_at | isotime }}">--:--</span>
                                 </small>
 
                                 {% if job.content_type == 'series' %}
@@ -250,7 +250,7 @@
 
                                 <div class="d-flex justify-content-between align-items-center mt-1 flex-wrap gap-2">
                                     <small class="text-secondary">
-                                        Status: <span class="badge
+                                        <span class="badge job-status-badge
                                             {% if job.status and job.status.value == 'ripping' %}bg-warning text-dark
                                             {% elif job.status and job.status.value == 'encoding' %}bg-info text-dark
                                             {% elif job.status and job.status.value == 'ripped' %}bg-secondary
@@ -367,7 +367,7 @@
                                     <th>#</th>
                                     <th>Title</th>
                                     <th>Status</th>
-                                    <th>Completed</th>
+                                    <th class="d-none d-sm-table-cell">Completed</th>
                                     <th></th>
                                 </tr>
                             </thead>
@@ -393,7 +393,7 @@
                                         </span>
                                         {% endif %}
                                     </td>
-                                    <td class="small">{{ job.completed_at.strftime('%Y-%m-%d %H:%M') if job.completed_at else '–' }}</td>
+                                    <td class="small text-nowrap d-none d-sm-table-cell">{{ job.completed_at.strftime('%d %b %H:%M') if job.completed_at else '–' }}</td>
                                     <td>
                                         <div class="d-flex gap-1">
                                         {% if job.status and job.status.value == 'done' and job.output_path %}

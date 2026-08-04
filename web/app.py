@@ -58,6 +58,25 @@ PREFLIGHT_CACHE_SECONDS = 20
 _preflight_cache: tuple[float, object] | None = None
 
 
+def _isotime(value) -> str:
+    """A timestamp the browser cannot misread.
+
+    Times are stored naive, in the container's local zone. Handed to a browser
+    without an offset, JavaScript reads a date-time with no zone as *its own*
+    local time — so a container on UTC and a phone on CEST disagreed by two
+    hours, and the elapsed timer on a job that had just started read 2:00:39.
+
+    Attaching the server's offset makes the instant unambiguous, whatever zone
+    the person reading it happens to be in.
+    """
+    if not value:
+        return ""
+    try:
+        return value.astimezone().isoformat()
+    except (ValueError, OSError, AttributeError):
+        return ""
+
+
 def _preflight():
     """Would a rip started now finish? Cached for a few seconds.
 
@@ -105,6 +124,7 @@ def create_app(config: Config, pipeline_manager=None) -> Flask:
     )
     # Template filter for time formatting
     app.jinja_env.filters["duration"] = lambda s: format_duration(s) if s else "–"
+    app.jinja_env.filters["isotime"] = _isotime
 
     # Register routes
     _register_ui_routes(app)
@@ -1329,6 +1349,21 @@ def _register_api_routes(app: Flask) -> None:
 
         text = bundle.build(_config, _pipeline_manager)
         return app.response_class(text, mimetype="text/plain; charset=utf-8")
+
+    @app.route("/api/encoder/test", methods=["POST"])
+    def api_encoder_test():
+        """Ask HandBrake whether it can encode with the settings it has.
+
+        A preset it cannot satisfy fails identically on every title of every
+        disc, forty minutes after the disc goes in. The same question can be
+        answered in seconds with no disc at all.
+        """
+        from adr import encodertest
+
+        return jsonify(encodertest.with_ctid(
+            encodertest.test_encoder(_config),
+            os.environ.get("ADR_CTID", "").strip() or None,
+        ))
 
     @app.route("/api/preflight")
     def api_preflight():

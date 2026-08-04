@@ -205,3 +205,59 @@ class TestThePhaseStrip:
 
     def test_there_is_somewhere_for_the_tool_to_speak(self, client):
         assert "job-saying" in self._card(client, JobStatus.RIPPING)
+
+
+class TestTheElapsedTimer:
+    """The browser must not have to guess which zone a timestamp is in.
+
+    Times are stored naive, in the container's zone. Sent without an offset,
+    JavaScript reads a date-time with no zone as *its own* local time — so a
+    container on UTC and a phone on CEST disagreed by two hours, and a job that
+    had just started showed an elapsed time of 2:00:39.
+    """
+
+    def _running_job(self):
+        session = get_session()
+        try:
+            session.add(Job(drive="/dev/sr0", status=JobStatus.RIPPING,
+                            title="The Film", year=1999))
+            session.commit()
+        finally:
+            session.close()
+
+    def test_the_start_time_carries_an_offset(self, client):
+        import re
+
+        self._running_job()
+        html = client.get("/").data.decode()
+        match = re.search(r'data-start="([^"]+)"', html)
+        assert match, "no start time was rendered"
+        stamp = match.group(1)
+        assert re.search(r"[+-]\d\d:\d\d$|Z$", stamp), (
+            f"{stamp!r} has no timezone, so the browser will guess"
+        )
+
+    def test_a_job_without_a_start_time_renders_empty(self, client):
+        session = get_session()
+        try:
+            job = Job(drive="/dev/sr0", status=JobStatus.RIPPING, title="X")
+            session.add(job)
+            session.commit()
+            job.started_at = None
+            session.commit()
+        finally:
+            session.close()
+        assert client.get("/").status_code == 200
+
+    def test_the_status_badge_can_be_found_by_name(self, client):
+        """The phase strip put badges above it, so the refresh was rewriting
+        the first phase pill instead of the status."""
+        self._running_job()
+        html = client.get("/").data.decode()
+        assert "job-status-badge" in html
+        strip_at = html.index("data-job-phases")
+        badge_at = html.index("job-status-badge")
+        assert strip_at < badge_at, (
+            "the phase pills come first, which is why the status badge needs "
+            "its own class"
+        )

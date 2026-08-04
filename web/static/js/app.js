@@ -67,11 +67,15 @@ function updateActiveJobs(jobs) {
             else bar.classList.add('bg-primary');
         }
 
-        // Update status badge
-        const badge = card.querySelector('.badge');
+        // Update status badge.
+        //
+        // By class, not by position: the phase strip added pills above this,
+        // so the first .badge on the card is now "Identify" and the refresh
+        // was rewriting that instead.
+        const badge = card.querySelector('.job-status-badge');
         if (badge && job.status !== 'ripped') {
             badge.textContent = capitalize(job.status);
-            badge.className = 'badge';
+            badge.className = 'badge job-status-badge';
             if (job.status === 'ripping') badge.classList.add('bg-warning', 'text-dark');
             else if (job.status === 'encoding') badge.classList.add('bg-info', 'text-dark');
             else badge.classList.add('bg-primary');

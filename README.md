@@ -26,6 +26,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Web dashboard** (port 8080) with live progress, job history, a Storage page for NAS setup, settings, and in-browser playback.
 - **Doctor page** that self-diagnoses drives, tools, keys and storage — and updates the app from GitHub with one button.
 - **Logs page** with the service's own log, filterable by level and text — no `pct exec`, no journald, no shell.
+- **Test the preset** without a disc: encodes two seconds of video with your real settings and says what HandBrake objected to.
 - **Copy diagnostics**: one button produces everything needed to diagnose the install as a single paste, with keys and tokens removed.
 - **Television discs**: box sets are recognised from title durations and named `Show (Year)/Season 02/Show (Year) - S02E05.mp4`.
 - **Series mode**: set the show once, then feed a whole box set — the episode number carries across discs on its own.

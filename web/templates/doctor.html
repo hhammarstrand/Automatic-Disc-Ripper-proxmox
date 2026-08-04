@@ -69,6 +69,28 @@
 </div>
 
 <!-- ------------------------------------------------------------------ -->
+<!-- Encoding                                                            -->
+<!-- ------------------------------------------------------------------ -->
+<div class="card mb-4">
+  <div class="card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <span><i class="bi bi-camera-reels me-1"></i>Encoding</span>
+    <button class="btn btn-sm btn-outline-primary" id="encoderTestBtn" onclick="testEncoder()">
+      <i class="bi bi-play-circle me-1"></i>Test the preset
+    </button>
+  </div>
+  <div class="card-body">
+    <p class="small text-secondary mb-2">
+      A preset HandBrake cannot satisfy fails the same way on every title of
+      every disc — exit code 3, forty minutes after the disc went in, once per
+      title. The same question can be answered here in seconds with no disc:
+      does the preset resolve, and can HandBrake actually encode two seconds of
+      video with it.
+    </p>
+    <div id="encoderResult"></div>
+  </div>
+</div>
+
+<!-- ------------------------------------------------------------------ -->
 <!-- Asking someone for help                                             -->
 <!-- ------------------------------------------------------------------ -->
 <div class="card mb-4">
@@ -295,6 +317,45 @@ function pollProbe(device, box, render, fail, startedAt) {
       setTimeout(() => pollProbe(device, box, render, fail, startedAt), PROBE_POLL_MS);
     })
     .catch(err => fail('Lost contact with the server: ' + err.message));
+}
+
+function testEncoder() {
+  const btn = document.getElementById('encoderTestBtn');
+  const box = document.getElementById('encoderResult');
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Encoding a sample…';
+  box.innerHTML = '<div class="small text-secondary">Making two seconds of video and '
+    + 'running it through your preset. A few seconds.</div>';
+
+  fetch('/api/encoder/test', {method: 'POST'})
+    .then(r => r.json())
+    .then(d => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      box.innerHTML = `
+        <div class="alert ${d.ok ? 'alert-success' : 'alert-danger'} small py-2">
+          ${d.ok ? '<i class="bi bi-check-circle me-1"></i>' : '<i class="bi bi-x-circle me-1"></i>'}
+          ${escapeHtml(d.summary)}
+        </div>
+        <ul class="list-unstyled mb-0 small">
+          ${d.steps.map(s => `
+            <li class="d-flex gap-2 mb-2">
+              <span>${STEP_ICON[s.status] || ''}</span>
+              <span class="flex-grow-1" style="min-width:0;">
+                <strong>${escapeHtml(s.name)}</strong><br>
+                <span class="text-secondary" style="white-space:pre-wrap;">${escapeHtml(s.detail)}</span>
+                ${s.fix ? `<br><span class="text-info"><i class="bi bi-tools me-1"></i>${escapeHtml(s.fix)}</span>` : ''}
+              </span>
+            </li>`).join('')}
+        </ul>`;
+      loadChecks();
+    })
+    .catch(err => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      box.innerHTML = `<div class="alert alert-danger small mb-0">Could not run the test: ${escapeHtml(err.message)}</div>`;
+    });
 }
 
 function rescanDrives() {
