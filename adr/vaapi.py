@@ -164,10 +164,28 @@ def preferred_track(streams: list[dict], wanted: str) -> int:
     return 0
 
 
-#: The stereo track every player can decode, and its bitrate. 192k is what
-#: HandBrake's own presets use for AAC stereo.
+#: The stereo track every player can decode, and its bitrate.
+#:
+#: 160k because that is what a HandBrake "Surround" preset actually specifies
+#: — read out of one rather than guessed at:
+#:
+#:     "AudioList": [
+#:       {"AudioEncoder": "av_aac",   "AudioMixdown": "stereo",   "AudioBitrate": 160},
+#:       {"AudioEncoder": "copy:ac3", "AudioMixdown": "7point1",  "AudioBitrate": 640}
+#:     ]
 STEREO_CODEC = "aac"
-STEREO_BITRATE = "192k"
+STEREO_BITRATE = "160k"
+
+#: The surround track: passed through when the container and the copy mask
+#: allow it, re-encoded otherwise. Same preset, "AudioCopyMask": ["copy:aac",
+#: "copy:ac3"] — deliberately narrower than everything MP4 can hold, because
+#: those two are what plays everywhere.
+PASSTHROUGH_AUDIO = frozenset({"aac", "ac3"})
+SURROUND_BITRATE = "640k"
+
+#: And its fallback, "AudioEncoderFallback": "av_aac". Not AC-3: the preset
+#: asks for AAC, which keeps the channel count without the 640k ceiling.
+SURROUND_FALLBACK = "aac"
 
 
 def audio_plan(
@@ -201,17 +219,61 @@ def audio_plan(
         # fine, where the other way round costs the entire encode.
         return ["-map", "0:a?", *FALLBACK_AUDIO]
 
-    # Output 0 is a stereo downmix of the track the person wants to hear;
-    # outputs 1..n are the source tracks themselves, in order.
+    if language:
+        return _preset_shaped_plan(streams, language)
+    return _keep_everything_plan(streams)
+
+
+def _preset_shaped_plan(streams: list[dict], language: str) -> list[str]:
+    """One language, two tracks — the shape the HandBrake preset specifies.
+
+    ``AudioLanguageList: ["swe"]`` with ``AudioTrackSelectionBehavior:
+    "first"`` and two entries in ``AudioList``: the chosen track becomes an
+    AAC stereo downmix *and* a surround track, and the other languages on the
+    disc are not carried.
+
+    That last part was a deliberate choice in the preset and this used to
+    override it, keeping every language "to be generous". Generous is not the
+    same as correct: someone who asks for Swedish has said what they want out.
+    """
     chosen = preferred_track(streams, language)
-    args = ["-map", f"0:a:{chosen}", "-map", "0:a?"]
-    args += [
-        "-c:a:0", STEREO_CODEC, "-ac:a:0", "2", "-b:a:0", STEREO_BITRATE,
-    ]
-    # The downmix is a new stream and carries none of the original's tags, so
-    # a player would list it as "Undetermined" and a Plex library would file
-    # it as such. It is the same speech; it should say so.
+    codec = streams[chosen]["codec"]
     tag = streams[chosen].get("language", "")
+
+    # The same source track twice: once downmixed, once as it came.
+    args = ["-map", f"0:a:{chosen}", "-map", f"0:a:{chosen}"]
+    args += ["-c:a:0", STEREO_CODEC, "-ac:a:0", "2", "-b:a:0", STEREO_BITRATE]
+    if codec in PASSTHROUGH_AUDIO:
+        args += ["-c:a:1", "copy"]
+    else:
+        args += ["-c:a:1", SURROUND_FALLBACK, "-b:a:1", SURROUND_BITRATE]
+
+    # Both are the same speech and should say so. The downmix especially: it
+    # is a new stream carrying none of the original's tags, so a player would
+    # list it as "Undetermined" and Plex would file it as such.
+    if tag:
+        args += ["-metadata:s:a:0", f"language={tag}",
+                 "-metadata:s:a:1", f"language={tag}"]
+
+    # The stereo track leads. Flagging the surround one as well would let a
+    # player choose the AC-3 — the track some hardware cannot decode from an
+    # MP4, and the silent film this arrangement exists to prevent.
+    args += ["-disposition:a:0", "default"]
+    return args
+
+
+def _keep_everything_plan(streams: list[dict]) -> list[str]:
+    """No language asked for, so nothing is thrown away.
+
+    Choosing a track for someone who has not said which language they want
+    would be guessing at the one thing they care most about. Every source
+    track comes across, with a stereo downmix of the first in front so
+    something plays on hardware that cannot decode the rest.
+    """
+    args = ["-map", "0:a:0", "-map", "0:a?"]
+    args += ["-c:a:0", STEREO_CODEC, "-ac:a:0", "2", "-b:a:0", STEREO_BITRATE]
+
+    tag = streams[0].get("language", "")
     if tag:
         args += ["-metadata:s:a:0", f"language={tag}"]
 
@@ -220,15 +282,8 @@ def audio_plan(
         if stream["codec"] in MP4_AUDIO:
             args += [f"-c:a:{out}", "copy"]
         else:
-            args += [f"-c:a:{out}", "ac3", f"-b:a:{out}", "640k"]
+            args += [f"-c:a:{out}", SURROUND_FALLBACK, f"-b:a:{out}", SURROUND_BITRATE]
 
-    # Without this the player picks whichever track the file happens to list
-    # first, which on a multi-language disc is a coin toss over the language.
-    #
-    # Only this one. Flagging the matching surround track as well would let a
-    # player choose the AC-3 — which is the track some hardware cannot decode
-    # from an MP4, and the silent film this whole arrangement exists to
-    # prevent. Anything that genuinely prefers 5.1 can be told to, per file.
     args += ["-disposition:a:0", "default"]
     return args
 

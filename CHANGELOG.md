@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.10.1
+
+**The audio layout now mirrors a real HandBrake preset instead of a guess at
+one.** Read out of `Super HQ 1080p30 Surround (Svenska)`:
+
+```json
+"AudioLanguageList": ["swe"],
+"AudioTrackSelectionBehavior": "first",
+"AudioCopyMask": ["copy:aac", "copy:ac3"],
+"AudioEncoderFallback": "av_aac",
+"AudioList": [
+  {"AudioEncoder": "av_aac",   "AudioMixdown": "stereo",  "AudioBitrate": 160},
+  {"AudioEncoder": "copy:ac3", "AudioMixdown": "7point1", "AudioBitrate": 640}
+]
+```
+
+Four things were wrong against it, and one of them shipped an hour earlier:
+
+- **`--all-audio` overrode the preset.** `AudioTrackSelectionBehavior` is
+  `"first"` — one track. Forcing every language on it was overriding a
+  deliberate choice with one nobody made. The override now sets the language
+  list and leaves the count to the preset.
+- **One language means one source track, twice.** Ask for Swedish and you get
+  the Swedish track as an AAC stereo downmix and as the surround track, and
+  the other languages are not carried. Ask for nothing and every track is kept
+  as before, because choosing for someone who has not said would be guessing
+  at the thing they care most about.
+- **160k, not 192k**, for the stereo track — the number the preset actually
+  specifies.
+- **The fallback is AAC, not AC-3.** `AudioEncoderFallback: "av_aac"`, which
+  keeps the channel count without AC-3's 640k ceiling. And passthrough is
+  narrowed to AAC and AC-3, matching `AudioCopyMask` rather than everything
+  MP4 can technically hold.
+
+Tests read the preset file and check the constants against it, so a model that
+drifts from the thing it models fails rather than quietly misleading.
+
 ## 1.10.0
 
 **One set of encoding settings, for both encoders.**
@@ -12,9 +49,9 @@ bad way to arrange an application — settings should describe the *result*, not
 the tool.
 
 Three now do. **Spoken language**, **quality** and a **height cap** are told
-to whichever encoder runs. For HandBrake they become `--audio-lang-list …
---all-audio`, `-q` and `--maxHeight`, applied after the preset, so each
-replaces exactly one preset value and leaves the rest of that preset intact.
+to whichever encoder runs. For HandBrake they become `--audio-lang-list`, `-q`
+and `--maxHeight`, applied after the preset, so each replaces exactly one
+preset value and leaves the rest of that preset intact.
 
 Every one has a "leave it alone" default, and that is what ships. An
 installation that never opens this page produces exactly the command it

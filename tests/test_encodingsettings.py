@@ -45,12 +45,14 @@ class TestLeavingThePresetAlone:
 
 
 class TestWhatHandBrakeIsTold:
-    def test_the_language_leads_and_the_rest_are_kept(self):
-        """--all-audio rather than the first match, so the other languages on
-        the disc still come across; the list decides which one leads."""
+    def test_only_the_language_list_is_set(self):
+        """How many matching tracks to take is the preset's
+        AudioTrackSelectionBehavior. Forcing --all-audio here would override a
+        deliberate choice with one nobody made: a preset that says "first"
+        wants one track, and handing it five is a different setting, not a
+        more generous reading of the same one."""
         args = encodingsettings.handbrake_overrides(_config(audio_language="swe"))
-        assert args[:2] == ["--audio-lang-list", "swe"]
-        assert "--all-audio" in args
+        assert args == ["--audio-lang-list", "swe"]
 
     def test_a_two_letter_code_is_translated(self):
         """A disc tags "swe" and a person types "sv"."""

@@ -130,30 +130,34 @@ class TestWhatHappensToTheAudio:
         plan = self._plan(tmp_path, monkeypatch, ["ac3"])
         assert plan[plan.index("-c:a:1") + 1] == "copy"
 
-    def test_every_source_track_survives(self, tmp_path, monkeypatch):
-        """A Swedish disc carries Swedish and English. Picking for the user
-        would be choosing which language they are allowed."""
+    def test_every_source_track_survives_when_no_language_is_asked_for(
+        self, tmp_path, monkeypatch,
+    ):
+        """Choosing a track for someone who has not said which language they
+        want would be guessing at the one thing they care most about."""
         plan = self._plan(tmp_path, monkeypatch, ["ac3", "ac3", "ac3"])
         assert "-c:a:1" in plan and "-c:a:2" in plan and "-c:a:3" in plan
 
-    def test_truehd_becomes_ac3_rather_than_failing_at_the_end(
+    def test_truehd_is_re_encoded_rather_than_failing_at_the_end(
         self, tmp_path, monkeypatch,
     ):
         """MP4 cannot hold TrueHD, and ffmpeg only finds out when it writes
-        the trailer — which is to say after the entire encode."""
+        the trailer — which is to say after the entire encode. AAC rather
+        than AC-3 because the preset says so: "AudioEncoderFallback":
+        "av_aac", which keeps the channels without the 640k ceiling."""
         plan = self._plan(tmp_path, monkeypatch, ["truehd"])
-        assert plan[plan.index("-c:a:1") + 1] == "ac3"
+        assert plan[plan.index("-c:a:1") + 1] == "aac"
         assert plan[plan.index("-b:a:1") + 1] == "640k"
 
     def test_dts_too(self, tmp_path, monkeypatch):
         plan = self._plan(tmp_path, monkeypatch, ["dts"])
-        assert plan[plan.index("-c:a:1") + 1] == "ac3"
+        assert plan[plan.index("-c:a:1") + 1] == "aac"
 
     def test_each_track_is_judged_on_its_own(self, tmp_path, monkeypatch):
         """One DTS track is no reason to re-encode the AC-3 next to it."""
         plan = self._plan(tmp_path, monkeypatch, ["ac3", "dts"])
         assert plan[plan.index("-c:a:1") + 1] == "copy"
-        assert plan[plan.index("-c:a:2") + 1] == "ac3"
+        assert plan[plan.index("-c:a:2") + 1] == "aac"
 
     def test_the_fallback_keeps_surround(self, tmp_path, monkeypatch):
         """640k is enough for 5.1; downmixing it would throw away the reason
@@ -638,10 +642,25 @@ class TestHearingTheRightLanguage:
         plan = self._plan(monkeypatch, tmp_path, self.SWEDISH_DISC, "sv")
         assert plan[plan.index("-map") + 1] == "0:a:1"
 
-    def test_every_other_language_is_still_there(self, monkeypatch, tmp_path):
-        """Choosing a default is not the same as throwing the rest away."""
+    def test_only_the_wanted_language_is_kept(self, monkeypatch, tmp_path):
+        """The preset this mirrors says AudioTrackSelectionBehavior: "first"
+        — one track, not every language on the disc. Keeping them all "to be
+        generous" overrides a deliberate choice with one nobody made."""
         plan = self._plan(monkeypatch, tmp_path, self.SWEDISH_DISC, "swe")
-        assert "-c:a:1" in plan and "-c:a:2" in plan and "-c:a:3" in plan
+        assert plan[:4] == ["-map", "0:a:1", "-map", "0:a:1"]
+        assert "-c:a:2" not in plan, "the other languages are not carried"
+
+    def test_that_one_track_becomes_two(self, monkeypatch, tmp_path):
+        """AudioList has two entries: an AAC stereo downmix and the surround
+        track. Both from the same source track."""
+        plan = self._plan(monkeypatch, tmp_path, self.SWEDISH_DISC, "swe")
+        assert plan[plan.index("-c:a:0") + 1] == "aac"
+        assert plan[plan.index("-c:a:1") + 1] == "copy"
+
+    def test_both_carry_the_language(self, monkeypatch, tmp_path):
+        plan = self._plan(monkeypatch, tmp_path, self.SWEDISH_DISC, "swe")
+        assert plan[plan.index("-metadata:s:a:0") + 1] == "language=swe"
+        assert plan[plan.index("-metadata:s:a:1") + 1] == "language=swe"
 
     def test_the_downmix_is_labelled_with_its_language(self, monkeypatch, tmp_path):
         """A new stream carries none of the original's tags, so a player would
@@ -705,3 +724,75 @@ class TestReadingTheTrackList:
     def test_no_ffprobe_answers_nothing_rather_than_raising(self, tmp_path, monkeypatch):
         monkeypatch.setattr(vaapi.shutil, "which", lambda name: None)
         assert vaapi.audio_streams("/usr/bin/ffmpeg", tmp_path / "in.mkv") == []
+
+
+class TestTheMirrorMatchesThePreset:
+    """The ffmpeg audio layout is modelled on a real HandBrake preset, and a
+    model that drifts from the thing it models is worse than none: it looks
+    authoritative and is not. These read the preset and check.
+
+    Skipped when no preset ships, because the shape is the point, not this
+    particular file.
+    """
+
+    @pytest.fixture
+    def preset(self):
+        import json
+        import pathlib
+
+        path = pathlib.Path("presets/SuperHQ1080p30Surround_Svenska.json")
+        if not path.is_file():
+            pytest.skip("no reference preset in this checkout")
+
+        def walk(node):
+            if isinstance(node, dict):
+                if "AudioList" in node:
+                    yield node
+                for value in node.values():
+                    yield from walk(value)
+            elif isinstance(node, list):
+                for value in node:
+                    yield from walk(value)
+
+        found = list(walk(json.loads(path.read_text())))
+        if not found:
+            pytest.skip("the reference preset has no audio settings")
+        return found[0]
+
+    def test_the_stereo_bitrate_is_the_presets(self, preset):
+        stereo = next(t for t in preset["AudioList"] if t["AudioMixdown"] == "stereo")
+        assert f"{stereo['AudioBitrate']}k" == vaapi.STEREO_BITRATE
+
+    def test_the_surround_bitrate_is_the_presets(self, preset):
+        surround = next(t for t in preset["AudioList"] if t["AudioMixdown"] != "stereo")
+        assert f"{surround['AudioBitrate']}k" == vaapi.SURROUND_BITRATE
+
+    def test_two_output_tracks_because_the_preset_asks_for_two(self, preset):
+        assert len(preset["AudioList"]) == 2
+
+    def test_the_passthrough_list_is_the_presets_copy_mask(self, preset):
+        """"AudioCopyMask": ["copy:aac", "copy:ac3"] — deliberately narrower
+        than everything MP4 can hold."""
+        mask = {entry.split(":", 1)[-1] for entry in preset.get("AudioCopyMask", [])}
+        if not mask:
+            pytest.skip("the reference preset sets no copy mask")
+        assert frozenset(mask) == vaapi.PASSTHROUGH_AUDIO
+
+    def test_the_fallback_encoder_is_the_presets(self, preset):
+        fallback = preset.get("AudioEncoderFallback", "")
+        if not fallback:
+            pytest.skip("the reference preset sets no fallback")
+        assert fallback.replace("av_", "") == vaapi.SURROUND_FALLBACK
+
+    def test_one_language_means_one_source_track(self, preset):
+        """AudioTrackSelectionBehavior decides how many matching tracks are
+        taken, and this preset says "first"."""
+        if preset.get("AudioTrackSelectionBehavior") != "first":
+            pytest.skip("the reference preset does not select the first track")
+        streams = [
+            {"codec": "ac3", "language": "eng"},
+            {"codec": "ac3", "language": "swe"},
+        ]
+        plan = vaapi._preset_shaped_plan(streams, "swe")
+        assert plan[:4] == ["-map", "0:a:1", "-map", "0:a:1"]
+        assert "-c:a:2" not in plan

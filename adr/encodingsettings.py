@@ -71,9 +71,12 @@ def handbrake_overrides(config) -> list[str]:
 
     language = _language(config)
     if language:
-        # --all-audio rather than the first match, so the other languages on
-        # the disc still come across; the list decides which one leads.
-        args += ["--audio-lang-list", language, "--all-audio"]
+        # The list only. How many matching tracks to take is the preset's
+        # AudioTrackSelectionBehavior, and forcing --all-audio here would
+        # override a deliberate choice with one nobody made: a preset that
+        # says "first" wants one track, and handing it five is not a more
+        # generous reading of the setting, it is a different setting.
+        args += ["--audio-lang-list", language]
 
     height = _int(getattr(config, "max_height", 0))
     if height:
