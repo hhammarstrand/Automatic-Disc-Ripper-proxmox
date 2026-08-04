@@ -87,7 +87,56 @@ def configure(config, level: str | None = None) -> Path | None:
     if level:
         handler.setLevel(getattr(logging, level.upper(), logging.INFO))
     root.addHandler(handler)
+    quieten_request_logging()
     return path
+
+
+#: How often the dashboard asks these, per browser tab, for ever.
+#:
+#: Five seconds each. The log this application keeps exists to answer "what
+#: happened", and a real diagnostic tail read like this:
+#:
+#:     GET /api/system    GET /api/status    GET /api/preflight
+#:     GET /api/system    GET /api/status    GET /api/preflight
+#:
+#: — a hundred and twenty lines of it, six of them about a disc. The answer
+#: was in the file and had been pushed off the end of it by the polling that
+#: was meant to be invisible.
+POLLED_PATHS = (
+    "/api/system", "/api/status", "/api/preflight", "/api/jobs/active",
+    "/api/drives/health", "/static/",
+    # In-browser playback is one person watching one film and twenty-five
+    # range requests. The event is worth nothing to a diagnosis and the lines
+    # push everything else off the end of the file.
+    "/stream/",
+)
+
+#: Statuses that mean "nothing to see". 206 is a range request, which is what
+#: playback consists of.
+QUIET_STATUSES = (" 200 -", " 206 -", " 304 -")
+
+
+class _NotJustPolling(logging.Filter):
+    """Drops werkzeug's line for a request nobody needs a record of.
+
+    Only the polling and the static files. A POST that changed something, a
+    page someone opened, anything that failed — all still logged, because the
+    point is to make the interesting lines findable rather than to make the
+    log short.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        if not any(status in message for status in QUIET_STATUSES):
+            return True                      # anything that did not simply work
+        return not any(path in message for path in POLLED_PATHS)
+
+
+def quieten_request_logging() -> None:
+    """Keep the dashboard's own polling out of the service log."""
+    access = logging.getLogger("werkzeug")
+    if not any(isinstance(f, _NotJustPolling) for f in access.filters):
+        access.addFilter(_NotJustPolling())
 
 
 def read_tail(

@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.16.3
+
+Two things a healthy diagnostics bundle made visible — neither of which had
+broken anything, which is why both had survived.
+
+**The service log was almost entirely the dashboard talking to itself.** A
+real 120-line tail held six lines about a disc; the rest was `GET /api/system`,
+`GET /api/status`, `GET /api/preflight` every five seconds per open tab, plus
+twenty-five range requests for one film someone watched in the browser. The
+log exists to answer "what happened", and the answer was in the file, pushed
+off the end of it by polling that was meant to be invisible.
+
+Those requests no longer get a line. A page someone opened, a change they
+made, and anything that failed all still do — including a polling endpoint
+returning 500, which is the most interesting line in the file. The filter is
+on werkzeug's logger alone, so nothing it does can touch a line about a rip.
+
+**And a renamed setting had quietly become two settings.** 1.10.0 renamed
+`vaapi_quality` to `video_quality` and kept reading the old name as a
+fallback, which was enough to keep existing installs working and not enough to
+stop it being confusing: the file still held `vaapi_quality: 22`, the
+diagnostics still listed it, and it sat beside `video_quality: 0` with nothing
+saying which of the two the encoder was using.
+
+The rename now happens once, on load, and the old name goes. A value set since
+through the settings page is never overwritten by the historical one — someone
+who changed it meant it.
+
 ## 1.16.2
 
 **"Still in English" now says why.** That symptom has four causes which look

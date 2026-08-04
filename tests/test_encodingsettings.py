@@ -113,19 +113,54 @@ class TestBothEncodersActuallyReadThem:
     def test_an_old_config_keeps_the_number_it_was_given(self, tmp_path):
         """A settings migration that silently resets someone's quality is
         worse than one that never happened."""
+        import yaml
+
         from adr.config import Config
 
-        config = Config.__new__(Config)
-        config._data = {"vaapi_quality": 19, "vaapi_max_height": 720}
+        path = tmp_path / "adr.yaml"
+        path.write_text(yaml.safe_dump({
+            "vaapi_quality": 19, "vaapi_max_height": 720,
+            "completed_path": str(tmp_path), "raw_path": str(tmp_path),
+            "staging_path": str(tmp_path),
+        }))
+        config = Config(str(path))
         assert config.video_quality == 19
         assert config.max_height == 720
 
-    def test_the_new_key_wins_when_both_are_present(self):
+    def test_the_old_name_is_gone_from_the_file_afterwards(self, tmp_path):
+        """Leaving it there is what created two sources for one number: the
+        settings page showing 0 while the encoder used 19, and nothing
+        anywhere saying which was in charge."""
+        import yaml
+
         from adr.config import Config
 
-        config = Config.__new__(Config)
-        config._data = {"video_quality": 21, "vaapi_quality": 19}
+        path = tmp_path / "adr.yaml"
+        path.write_text(yaml.safe_dump({
+            "vaapi_quality": 19, "completed_path": str(tmp_path),
+            "raw_path": str(tmp_path), "staging_path": str(tmp_path),
+        }))
+        Config(str(path))
+        saved = yaml.safe_load(path.read_text())
+        assert "vaapi_quality" not in saved
+        assert saved["video_quality"] == 19
+
+    def test_a_value_set_since_is_not_overwritten_by_the_old_one(self, tmp_path):
+        """Someone who has since used the settings page means that value; a
+        migration undoing it with a historical one is worse than none."""
+        import yaml
+
+        from adr.config import Config
+
+        path = tmp_path / "adr.yaml"
+        path.write_text(yaml.safe_dump({
+            "video_quality": 21, "vaapi_quality": 19,
+            "completed_path": str(tmp_path), "raw_path": str(tmp_path),
+            "staging_path": str(tmp_path),
+        }))
+        config = Config(str(path))
         assert config.video_quality == 21
+        assert "vaapi_quality" not in yaml.safe_load(path.read_text())
 
     def test_the_encoder_test_runs_the_same_overrides(self, tmp_path):
         """A test that skipped them would pass on a flag HandBrake rejects,

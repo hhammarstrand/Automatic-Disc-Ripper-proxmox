@@ -184,3 +184,76 @@ class TestDescribe:
         assert info["exists"] is True
         assert info["size_kb"] > 0
         assert info["rotated"] == 1
+
+
+class TestTheLogIsAboutWhatHappened:
+    """A real diagnostic tail from a working install read like this:
+
+        GET /api/system    GET /api/status    GET /api/preflight
+        GET /api/system    GET /api/status    GET /api/preflight
+
+    A hundred and twenty lines, six of them about a disc. The answer was in
+    the file and had been pushed off the end of it by polling that was meant
+    to be invisible.
+    """
+
+    def _kept(self, message: str) -> bool:
+        import logging
+
+        from adr.applog import _NotJustPolling
+
+        record = logging.LogRecord("werkzeug", logging.INFO, "", 0, message, (), None)
+        return _NotJustPolling().filter(record)
+
+    @pytest.mark.parametrize("path", [
+        "/api/system", "/api/status", "/api/preflight",
+        "/api/jobs/active", "/api/drives/health", "/static/js/app.js",
+    ])
+    def test_the_dashboards_own_polling_is_dropped(self, path):
+        assert not self._kept(f'1.2.3.4 - - [x] "GET {path} HTTP/1.1" 200 -')
+
+    def test_playback_is_dropped(self):
+        """One person watching one film is twenty-five range requests, and
+        none of them is worth anything to a diagnosis."""
+        assert not self._kept(
+            '1.2.3.4 - - [x] "GET /api/jobs/40/stream/Gnomes.mp4 HTTP/1.1" 206 -')
+
+    @pytest.mark.parametrize("line", [
+        '1.2.3.4 - - [x] "GET /doctor HTTP/1.1" 200 -',
+        '1.2.3.4 - - [x] "POST /api/settings HTTP/1.1" 200 -',
+        '1.2.3.4 - - [x] "POST /api/jobs/delete HTTP/1.1" 200 -',
+    ])
+    def test_a_page_someone_opened_or_a_change_they_made_is_kept(self, line):
+        """The point is to make the interesting lines findable, not to make
+        the log short."""
+        assert self._kept(line)
+
+    @pytest.mark.parametrize("status", ["404", "500", "409", "503"])
+    def test_anything_that_failed_is_kept_even_on_a_polled_path(self, status):
+        """A polling endpoint returning 500 is the most interesting line in
+        the file."""
+        assert self._kept(f'1.2.3.4 - - [x] "GET /api/system HTTP/1.1" {status} -')
+
+    def test_the_applications_own_lines_are_untouched(self):
+        """The filter is on werkzeug's logger alone; nothing it does can
+        reach a line about a rip."""
+        import logging
+
+        from adr.applog import _NotJustPolling
+
+        record = logging.LogRecord(
+            "adr.pipeline", logging.INFO, "", 0,
+            "Ripping from /dev/sr0", (), None)
+        assert _NotJustPolling().filter(record)
+
+    def test_installing_it_twice_does_not_stack_filters(self):
+        import logging
+
+        from adr.applog import _NotJustPolling, quieten_request_logging
+
+        access = logging.getLogger("werkzeug")
+        for existing in list(access.filters):
+            access.removeFilter(existing)
+        quieten_request_logging()
+        quieten_request_logging()
+        assert sum(isinstance(f, _NotJustPolling) for f in access.filters) == 1

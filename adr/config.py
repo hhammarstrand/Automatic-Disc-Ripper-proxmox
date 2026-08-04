@@ -181,6 +181,47 @@ class Config:
     # Public helpers
     # ------------------------------------------------------------------ #
 
+    #: Settings that were renamed, old name -> new name.
+    #:
+    #: Reading the old key at the point of use was enough to keep an existing
+    #: installation working, and not enough to stop it being confusing: the
+    #: file still held vaapi_quality, the diagnostics still listed it, and it
+    #: sat there next to video_quality: 0 with no way for a reader to tell
+    #: which of the two the encoder was actually using. So the file is brought
+    #: up to date once, on load, and the old name goes.
+    _RENAMED = {
+        "vaapi_quality": "video_quality",
+        "vaapi_max_height": "max_height",
+    }
+
+    def _migrate(self) -> None:
+        """Move renamed settings onto their new names, once.
+
+        Only when the new name has nothing in it. Someone who has since set a
+        value through the settings page means that value, and a migration that
+        overwrote it would undo a deliberate change with a historical one.
+        """
+        moved = []
+        for old, new in self._RENAMED.items():
+            if old not in self._data:
+                continue
+            value = self._data.pop(old)
+            if not self._data.get(new):
+                self._data[new] = value
+                moved.append(f"{old} -> {new}")
+            else:
+                moved.append(f"{old} dropped ({new} is already set)")
+        if moved:
+            logger.info("Migrated settings: %s", "; ".join(moved))
+            try:
+                self.save()
+            except OSError:
+                # A read-only config is not a reason to refuse to start; the
+                # values are correct in memory and the migration will simply
+                # run again next time.
+                logger.warning("Could not rewrite %s after migrating", self._path,
+                               exc_info=True)
+
     def load(self) -> None:
         """(Re)load configuration from disk."""
         if self._path.exists():
@@ -190,6 +231,8 @@ class Config:
         else:
             logger.warning("Config file not found at %s – using defaults", self._path)
             self._data = {}
+
+        self._migrate()
 
         # Merge defaults for any missing keys
         for key, default in _DEFAULTS.items():
