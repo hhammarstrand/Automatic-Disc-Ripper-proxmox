@@ -20,7 +20,16 @@ from typing import Any
 import requests
 from sqlalchemy.exc import OperationalError as SAOperationalError
 
-from adr import disctype, duplicates, isobackup, joblog, musicbrainz, recovery, seriesmode
+from adr import (
+    disctype,
+    duplicates,
+    isobackup,
+    joblog,
+    musicbrainz,
+    preflight,
+    recovery,
+    seriesmode,
+)
 from adr.audiocd import AudioCDRipper
 from adr.config import Config
 from adr.disc import DiscWatcher, eject_drive
@@ -39,7 +48,7 @@ from adr.notify import Notifier
 from adr.plex import PlexNotifier
 from adr.ripper import MakeMKVRipper
 from adr.series import looks_like_series, parse_series_label
-from adr.storage import check_destination, should_stage
+from adr.storage import should_stage
 from adr.utils import (
     BYTES_PER_MB,
     make_plex_folder_name,
@@ -876,30 +885,14 @@ class DrivePipeline:
             # 1b. Fail fast if the finished files have nowhere to go. A rip
             # takes tens of minutes and several GB; discovering at the end that
             # the NAS was never mounted wastes the entire run.
-            dest_ok, dest_err = check_destination(
-                self._config.completed_path,
-                require_mount=self._config.require_completed_mount,
-            )
-            # The Plex library is a real destination too — with auto_move_to_plex
-            # it is the one this job will most likely use — so a broken library
-            # path must fail here, not after the encode.
-            if dest_ok and self._config.plex_path:
-                dest_ok, dest_err = check_destination(
-                    self._config.plex_path,
-                    require_mount=self._config.require_completed_mount,
-                )
-                if not dest_ok:
-                    dest_err = f"Plex library unusable: {dest_err}"
-            # When encoding is staged locally, the scratch area needs room too —
-            # otherwise the rip only fails later, at the staging step.
-            if dest_ok and should_stage(
-                self._config.plex_path or self._config.completed_path,
-                self._config.stage_locally,
-            ):
-                dest_ok, dest_err = check_destination(self._config.staging_path)
-                if not dest_ok:
-                    dest_err = f"Local staging area unusable: {dest_err}"
-            if not dest_ok:
+            #
+            # The check lives in adr.preflight so the dashboard can run the
+            # same one and warn *before* a disc goes in. A warning that
+            # disagreed with this gate would be worse than none — it would
+            # either promise a rip that then fails, or complain about one that
+            # would have worked.
+            dest_err = preflight.destination_blocker(self._config)
+            if dest_err:
                 job.status = JobStatus.ERROR
                 job.error_message = dest_err
                 job.completed_at = utcnow()
@@ -1613,6 +1606,13 @@ class PipelineManager:
                 f"No readable disc in {drive}. If one is loaded, the container "
                 "may not be able to open the drive — see the Doctor page."
             )
+
+        # The same gate the rip itself would hit thirty seconds from now.
+        # Letting it start anyway produces a red job saying what could have
+        # been said here — and pressing Rip again produces another one.
+        blocked = preflight.destination_blocker(self.config)
+        if blocked:
+            return False, f"Ripping would fail: {blocked}"
 
         label = _blkid_label(drive)
         logger.info("Manual rip requested for %s (label=%s)", drive, label)

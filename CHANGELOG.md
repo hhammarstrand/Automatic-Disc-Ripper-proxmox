@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.4.0
+
+**The app knew why every rip would fail and never said so until each one had.**
+
+The pipeline has always refused to start a rip it knew was doomed — a
+destination that is missing, read-only, or an unmounted NAS costs forty minutes
+and several GB to find out the hard way. But it said so per disc, after the
+disc went in, in a job that then sat red in the history. Eleven discs produced
+eleven identical failures and not one statement of the single thing wrong.
+Worse, the Doctor page had the answer the whole time, on a different page,
+with no reason to look at it.
+
+The dashboard now runs the same check with no disc in the drive and states it
+at the top of the page: what is broken, and what to do about it. Pressing Rip
+against a broken destination refuses on the spot with the same reason rather
+than producing another red job.
+
+It is the *same function* the pipeline gates on, not a second opinion. A
+warning that disagreed would be worse than none — it would either promise a rip
+that then fails or complain about one that would have worked — so a test
+asserts the two produce identical text.
+
+The advice now matches the fault. "Not a mounted filesystem" and "not writable"
+have nothing in common but the word destination and need opposite actions: one
+is a container restart, the other is re-running the NAS setup. Both carry the
+command with the container id already filled in.
+
+---
+
 ## 1.3.3
 
 **A job that failed before ripping left an empty log.** The terminal icon in

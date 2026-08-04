@@ -92,10 +92,8 @@ class TestFailuresAreDiagnosable:
             lambda d: DiscInfo(kind=disctype.KIND_VIDEO, detail="Video."),
         )
         monkeypatch.setattr(
-            pipeline_mod, "check_destination",
-            lambda path, require_mount=False: (
-                False, "Destination /mnt/media/Filmer is not writable by uid 8420.",
-            ),
+            pipeline_mod.preflight, "destination_blocker",
+            lambda config: "Destination /mnt/media/Filmer is not writable by uid 8420.",
         )
         drive._run_pipeline("HAPPY_FEET_TWO")
 

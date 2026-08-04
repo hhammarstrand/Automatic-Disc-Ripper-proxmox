@@ -32,6 +32,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Per-job logs** in the UI: what MakeMKV and HandBrake actually said, without SSH.
 - **Duplicate detection** against the library itself, the TMDb id and the disc label — optionally skipping the rip entirely.
 - **Retry** a failed job from whatever is still on disk — a broken NAS should not cost you a 40-minute rip.
+- **Says what is broken before you insert a disc**, with the fix, instead of letting every disc fail separately with the same reason.
 - **Survives a restart mid-job**: an interrupted encode picks itself up on the next start, and nothing is left saying "ripping" for ever.
 - **Notices a drive that has stopped answering** instead of waiting on it for the rest of the service's life.
 - **Multi-drive** support and a **watch folder** for batch encoding of existing video files.
@@ -402,6 +403,27 @@ having failed.
 The token: in Plex, open any item → *Get Info* → *View XML*, and copy
 `X-Plex-Token` out of the URL. **Fetch libraries** then lists them so you pick
 one instead of guessing a section key.
+
+### Before something fails
+
+The pipeline has always refused to start a rip it knew would fail — a
+destination that is missing, read-only, or an unmounted NAS costs forty minutes
+and several GB to discover the hard way. But it only ever said so *after* a
+disc went in, once per disc. Insert eleven discs and you get eleven identical
+red jobs and never a statement of the one thing that is wrong.
+
+The dashboard now runs the same check with no disc in the drive, and says it
+once, at the top of the page, before you start: what is broken, and what to do
+about it. The advice matches the fault — "not mounted" and "not writable" need
+opposite actions, and one piece of generic advice for both helps with neither.
+
+Pressing **Rip** against a broken destination refuses immediately with the same
+reason, instead of making another job that fails with it.
+
+It is deliberately the *same* function the pipeline gates on. A warning that
+disagreed with the gate would be worse than none: it would either promise a rip
+that then fails, or complain about one that would have worked. A test asserts
+the two produce identical text.
 
 ### When something fails
 

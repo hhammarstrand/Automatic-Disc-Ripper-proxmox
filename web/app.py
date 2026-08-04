@@ -6,6 +6,7 @@ the ripping pipeline.
 
 import logging
 import os
+import time
 from pathlib import Path
 
 import psutil
@@ -48,6 +49,34 @@ _preset_cache_time: float = 0.0
 #: page, small enough that a machine which has worked through a whole shelf
 #: still renders instantly.
 HISTORY_PAGE_SIZE = 100
+
+#: How long a preflight answer is reused. The dashboard polls every five
+#: seconds and the check stats filesystems — one of which may be the very
+#: network share it is complaining about, where a stat can block.
+PREFLIGHT_CACHE_SECONDS = 20
+
+_preflight_cache: tuple[float, object] | None = None
+
+
+def _preflight():
+    """Would a rip started now finish? Cached for a few seconds.
+
+    The same question the pipeline asks before it starts a rip, asked without
+    a disc — so the dashboard can say it once, up front, instead of letting
+    every disc fail separately with the same reason.
+    """
+    global _preflight_cache
+    from adr import preflight as preflight_mod
+
+    now = time.time()
+    if _preflight_cache and now - _preflight_cache[0] < PREFLIGHT_CACHE_SECONDS:
+        return _preflight_cache[1]
+    result = preflight_mod.with_ctid(
+        preflight_mod.check(_config, _pipeline_manager),
+        os.environ.get("ADR_CTID", "").strip() or None,
+    )
+    _preflight_cache = (now, result)
+    return result
 
 
 def create_app(config: Config, pipeline_manager=None) -> Flask:
@@ -161,6 +190,7 @@ def _register_ui_routes(app: Flask) -> None:
                 active_jobs=active_jobs,
                 recent_jobs=recent_jobs,
                 drives=drives,
+                preflight=_preflight(),
                 plex_path=_config.plex_path if _config else "",
                 encode_queue_size=_pipeline_manager.encode_queue.qsize() if _pipeline_manager else 0,
                 watch_folder={
@@ -1257,6 +1287,16 @@ def _register_api_routes(app: Flask) -> None:
         if state is None:
             return jsonify({"error": f"No probe has been run for '{device}'."}), 404
         return jsonify(state)
+
+    @app.route("/api/preflight")
+    def api_preflight():
+        """Whether a rip started right now would finish.
+
+        Cached briefly: the dashboard polls every five seconds and this stats
+        filesystems, one of which may be a network share that is exactly the
+        thing being complained about.
+        """
+        return jsonify(_preflight().as_dict())
 
     @app.route("/api/drives/rescan", methods=["POST"])
     def api_drive_rescan():

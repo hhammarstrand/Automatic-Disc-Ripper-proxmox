@@ -5,6 +5,53 @@
 <div class="row g-4">
 
     <!-- ============================================= -->
+    <!-- Will the next disc actually work?             -->
+    <!--                                               -->
+    <!-- The pipeline has always refused a rip it knew -->
+    <!-- would fail. It only ever said so per disc,    -->
+    <!-- after the disc went in — so eleven discs gave -->
+    <!-- eleven identical red jobs and never once said -->
+    <!-- the one thing that was wrong. Same check,     -->
+    <!-- said here, before the first disc.             -->
+    <!-- ============================================= -->
+    {% if preflight and not preflight.ok %}
+    <div class="col-12" id="preflightBanner">
+        <div class="alert alert-danger mb-0">
+            <div class="d-flex align-items-start gap-2">
+                <i class="bi bi-exclamation-octagon-fill fs-4 mt-1"></i>
+                <div class="flex-grow-1">
+                    <h6 class="alert-heading mb-2">
+                        Ripping will fail — fix this before putting a disc in
+                    </h6>
+                    {% for blocker in preflight.blockers %}
+                    <div class="{% if not loop.first %}mt-3 pt-3 border-top border-danger-subtle{% endif %}">
+                        <div class="fw-semibold">{{ blocker.title }}</div>
+                        <div class="small">{{ blocker.detail }}</div>
+                        {% if blocker.fix %}
+                        <div class="small mt-2">
+                            <i class="bi bi-tools me-1"></i><strong>Fix:</strong> {{ blocker.fix }}
+                        </div>
+                        {% endif %}
+                    </div>
+                    {% endfor %}
+                    <div class="mt-3">
+                        <a class="btn btn-sm btn-outline-light" href="/doctor">
+                            <i class="bi bi-activity me-1"></i>Doctor
+                        </a>
+                        <a class="btn btn-sm btn-outline-light ms-1" href="/storage">
+                            <i class="bi bi-hdd-network me-1"></i>Storage
+                        </a>
+                        <a class="btn btn-sm btn-outline-light ms-1" href="/settings">
+                            <i class="bi bi-gear me-1"></i>Settings
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- ============================================= -->
     <!-- Drive Status (compact rows)                   -->
     <!-- ============================================= -->
     <div class="col-12">

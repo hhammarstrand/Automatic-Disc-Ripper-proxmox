@@ -29,6 +29,7 @@ function refreshDashboard() {
 
             updateActiveJobs(activeJobs);
             updateQueueSize();
+            checkPreflight();
         })
         .catch(err => console.warn('Refresh failed:', err));
 }
@@ -97,6 +98,25 @@ function updateActiveJobs(jobs) {
     if (finishedAny) {
         setTimeout(() => location.reload(), 500);
     }
+}
+
+/**
+ * Reload when the "ripping will fail" banner becomes wrong.
+ *
+ * The banner is rendered by the server, which keeps one description of the
+ * problem instead of two. So rather than re-render it here, this only watches
+ * for the answer changing — you fix the NAS, and the warning goes away without
+ * you having to wonder whether the page is stale. The endpoint is cached
+ * server-side, so polling it costs nothing.
+ */
+function checkPreflight() {
+    const shownAsBlocked = document.getElementById('preflightBanner') !== null;
+    fetch('/api/preflight')
+        .then(r => r.json())
+        .then(d => {
+            if (d.ok === shownAsBlocked) location.reload();
+        })
+        .catch(() => {});
 }
 
 function updateQueueSize() {

@@ -218,9 +218,14 @@ def check_destination_path(config) -> dict:
             "destination", f"Destination ({label})", "ok",
             f"{destination} — {where}, {info['free_gb']} GB free.",
         )
+    # Advice specific to how it is broken. "Not a mounted filesystem" and "not
+    # writable" have nothing in common but the word destination, and one piece
+    # of generic advice for both helps with neither.
+    from adr.preflight import _destination_fix
+
     return _check(
         "destination", f"Destination ({label})", "fail", error,
-        "Storage page, or Settings → destination folder",
+        _destination_fix(error),
     )
 
 

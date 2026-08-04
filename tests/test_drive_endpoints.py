@@ -9,7 +9,6 @@ into "DEV/SR0" — or refuses to match at all. Both happened: Rip answered
 returned 404 without ever reaching their handlers.
 """
 
-import types
 from unittest.mock import MagicMock
 
 import pytest
@@ -36,9 +35,23 @@ class FakeDrivePipeline:
 
 
 @pytest.fixture
-def manager():
+def app_config(tmp_path):
+    path = tmp_path / "adr.yaml"
+    path.write_text(
+        f"raw_path: {tmp_path / 'raw'}\n"
+        f"completed_path: {tmp_path / 'completed'}\n"
+        f"staging_path: {tmp_path / 'staging'}\n",
+    )
+    return Config(str(path))
+
+
+@pytest.fixture
+def manager(app_config):
     mgr = MagicMock(spec=pipeline_mod.PipelineManager)
-    mgr.config = types.SimpleNamespace(disabled_drives=[])
+    # The same Config the app has: rip_now consults the destination gate, so
+    # a stand-in without paths would refuse for a reason these tests are not
+    # about.
+    mgr.config = app_config
     mgr.drive_pipelines = {DEVICE: FakeDrivePipeline()}
     mgr.all_drives = [DEVICE]
     mgr.rip_now = pipeline_mod.PipelineManager.rip_now.__get__(mgr)
@@ -46,18 +59,12 @@ def manager():
 
 
 @pytest.fixture
-def client(tmp_path, manager, monkeypatch):
+def client(app_config, manager, monkeypatch):
     monkeypatch.setattr("adr.disc._has_media", lambda d: True)
     monkeypatch.setattr("adr.disc._blkid_label", lambda d: "THE_MATRIX")
     monkeypatch.setattr("web.app.eject_drive", lambda d: True)
-    path = tmp_path / "adr.yaml"
-    path.write_text(
-        f"raw_path: {tmp_path / 'raw'}\n"
-        f"completed_path: {tmp_path / 'completed'}\n"
-        f"staging_path: {tmp_path / 'staging'}\n",
-    )
     init_db()
-    app = create_app(Config(str(path)), pipeline_manager=manager)
+    app = create_app(app_config, pipeline_manager=manager)
     app.config["TESTING"] = True
     return app.test_client()
 

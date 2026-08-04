@@ -6,12 +6,12 @@ you wait. These pin down that the manual trigger exists, and — more
 importantly — that it refuses in every case where starting would be wrong.
 """
 
-import types
 from unittest.mock import MagicMock
 
 import pytest
 
 from adr import pipeline as pipeline_mod
+from adr.config import Config
 
 
 class FakeDrivePipeline:
@@ -28,9 +28,17 @@ class FakeDrivePipeline:
 
 
 @pytest.fixture
-def manager():
+def manager(tmp_path):
+    # A real Config: rip_now consults the same destination gate the rip itself
+    # would hit, so a stand-in without paths would fail for the wrong reason.
+    path = tmp_path / "adr.yaml"
+    path.write_text(
+        f"raw_path: {tmp_path / 'raw'}\n"
+        f"completed_path: {tmp_path / 'completed'}\n"
+        f"staging_path: {tmp_path / 'staging'}\n",
+    )
     mgr = MagicMock(spec=pipeline_mod.PipelineManager)
-    mgr.config = types.SimpleNamespace(disabled_drives=[])
+    mgr.config = Config(str(path))
     mgr.drive_pipelines = {"/dev/sr0": FakeDrivePipeline()}
     # Bind the real method to the stand-in.
     mgr.rip_now = pipeline_mod.PipelineManager.rip_now.__get__(mgr)
@@ -81,7 +89,7 @@ class TestItRefuses:
         assert manager.drive_pipelines["/dev/sr0"].calls == []
 
     def test_a_disabled_drive(self, manager, loaded):
-        manager.config.disabled_drives = ["/dev/sr0"]
+        manager.config.update({"disabled_drives": ["/dev/sr0"]})
         ok, message = manager.rip_now("/dev/sr0")
         assert ok is False
         assert "disabled" in message
