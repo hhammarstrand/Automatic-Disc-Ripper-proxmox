@@ -25,6 +25,8 @@
 set -euo pipefail
 
 CT_MEDIA_PATH="${CT_MEDIA_PATH:-/mnt/media}"
+# The user the service runs as inside the container.
+RUN_USER="${RUN_USER:-adr}"
 
 FIX=0
 ASSUME_YES=0
@@ -191,6 +193,50 @@ if [[ -d /dev/dri ]] && compgen -G "/dev/dri/renderD*" >/dev/null; then
         else
             would_fix "append them"
         fi
+    fi
+
+    # ------------------------------------------------------------------- #
+    # The half that passthrough alone does not solve.
+    #
+    # /dev/dri/renderD128 is crw-rw---- root:render. Passing the node in makes
+    # it visible; opening it still needs the service user to be in the owning
+    # group. In a privileged container gids map straight through, and the
+    # host's 'render' gid is almost never the container's — Proxmox is Debian,
+    # the container is Ubuntu, and they number their system groups
+    # differently. So the group is matched by *number*, not by name, which is
+    # the only thing the kernel actually checks.
+    # ------------------------------------------------------------------- #
+    if [[ "$FIX" -eq 1 ]] && pct status "$CTID" 2>/dev/null | grep -q running; then
+        for node in /dev/dri/renderD128 /dev/dri/card0; do
+            [[ -e "$node" ]] || continue
+            node_gid="$(stat -c %g "$node" 2>/dev/null)" || continue
+            [[ -n "$node_gid" ]] || continue
+            # shellcheck disable=SC2016  # $1/$2 belong to the inner shell
+            if pct exec "$CTID" -- sh -c '
+                set -e
+                gid="$1"; user="$2"
+                group="$(getent group "$gid" | cut -d: -f1)"
+                if [ -z "$group" ]; then
+                    group="adr-dri-$gid"
+                    groupadd -g "$gid" "$group" >/dev/null 2>&1 || true
+                    group="$(getent group "$gid" | cut -d: -f1)"
+                fi
+                [ -n "$group" ] || exit 1
+                if id -nG "$user" | tr " " "\n" | grep -qx "$group"; then exit 3; fi
+                usermod -aG "$group" "$user"
+            ' _ "$node_gid" "$RUN_USER" >/dev/null 2>&1; then
+                note_fixed "added ${RUN_USER} to the group owning ${node} (gid ${node_gid})"
+                NEEDS_RESTART=1
+            else
+                rc=$?   # the condition's status: 3 means "already a member"
+                if [[ $rc -eq 3 ]]; then
+                    msg_ok "${RUN_USER} can already use ${node} (gid ${node_gid})"
+                else
+                    msg_warn "Could not give ${RUN_USER} access to ${node} (gid ${node_gid})."
+                    msg_warn "        Hardware encoding will fail with 'permission denied'."
+                fi
+            fi
+        done
     fi
 else
     msg_ok "No GPU on the host — software encoding is the only option, which is fine"

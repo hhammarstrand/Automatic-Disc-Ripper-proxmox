@@ -118,11 +118,12 @@ class TestDescribingTheContainer:
         assert str(node) in state["detail"]
         assert state["fix"] == "", "nothing to fix when it works"
 
-    def test_permission_denied_points_at_the_group_not_the_host(
+    def test_permission_denied_is_named_as_a_group_problem(
         self, monkeypatch, tmp_path,
     ):
         """A node that is there but unreadable is the service user's groups,
-        not the passthrough — a different fix entirely."""
+        not the passthrough — a different cause, though the same command
+        fixes it, because only the host knows the gid that owns the node."""
         node = tmp_path / "renderD128"
         node.write_text("")
         monkeypatch.setattr(gpu, "DRI_DIR", tmp_path)
@@ -130,7 +131,17 @@ class TestDescribingTheContainer:
         state = gpu.describe()
         assert state["available"] is False
         assert "permission denied" in state["detail"]
-        assert "usermod" in state["fix"]
+        assert "adr-doctor --fix" in state["fix"]
+
+    def test_the_advice_does_not_name_a_group_by_name(self, monkeypatch, tmp_path):
+        """The container's 'render' group rarely carries the host's gid, and
+        the kernel checks the number. Advice to join it by name would look
+        right and change nothing."""
+        node = tmp_path / "renderD128"
+        node.write_text("")
+        monkeypatch.setattr(gpu, "DRI_DIR", tmp_path)
+        monkeypatch.setattr(gpu, "_openable", lambda p: (False, errno.EACCES))
+        assert "usermod -aG render" not in gpu.describe()["fix"]
 
     def test_a_cgroup_denial_points_at_the_host(self, monkeypatch, tmp_path):
         node = tmp_path / "renderD128"

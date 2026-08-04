@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.7.2
+
+**Passing the GPU through is only half of it.** `/dev/dri/renderD128` is
+`crw-rw---- root:render`. The passthrough added in 1.7.0 makes the node
+visible; opening it still needs the service user to be in the group that owns
+it, so the next thing to happen would have been `permission denied` and
+another round trip.
+
+`adr-doctor --fix` now does both. It reads the gid that owns the node **on the
+host** and joins the service user to the group carrying that number inside the
+container, creating one if the container has no group with it.
+
+By number, not by name, and that is the whole point: in a privileged container
+gids map straight through, and the host's `render` gid is almost never the
+container's — Proxmox is Debian, the container is Ubuntu, and they number
+system groups differently. The kernel checks the number. Advice to run
+`usermod -aG render adr`, which is what the app suggested before, would have
+looked right and changed nothing; that advice is gone.
+
+Also fixed: `adr-doctor` referred to a `RUN_USER` it never defined, so the
+group step would have run against an empty user name.
+
+---
+
 ## 1.7.1
 
 **Passing a GPU through needs the Proxmox host. Changing the preset does not.**

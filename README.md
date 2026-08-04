@@ -435,6 +435,15 @@ character major and a bind of `/dev/dri` — alongside the optical drive it
 already handles. It only offers this when the host actually has a render node,
 because binding a device that is not there would be noise.
 
+It also does the half that passthrough alone does not solve. `renderD128` is
+`crw-rw---- root:render`: passing the node in makes it visible, opening it
+still needs the service user to be in the owning group. In a privileged
+container gids map straight through, and the host's `render` gid is almost
+never the container's — Proxmox is Debian, the container is Ubuntu, and they
+number system groups differently. So the group is matched **by number**, which
+is the only thing the kernel checks; advice to `usermod -aG render adr` would
+look right and change nothing.
+
 **No access to the host right now?** The encode test offers a second button:
 *Encode in software instead*. It lists the software presets HandBrake actually
 has, ordered by resemblance to the one configured — someone who chose "Super

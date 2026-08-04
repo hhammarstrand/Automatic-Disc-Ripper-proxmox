@@ -103,10 +103,11 @@ def describe() -> dict:
                 "(permission denied). The node is passed through; the user is "
                 "not in the group that owns it."
             )
-            info["fix"] = (
-                "pct exec {ctid} -- usermod -aG render,video adr "
-                "&& pct exec {ctid} -- systemctl restart adr"
-            )
+            # Deliberately not "usermod -aG render adr": the container's
+            # 'render' group is unlikely to carry the same gid as the host's,
+            # and the kernel checks the number, not the name. adr-doctor reads
+            # the host's gid and joins the group that actually owns the node.
+            info["fix"] = "Run on the Proxmox host: adr-doctor --fix {ctid}"
         else:
             info["detail"] = (
                 f"{node} is present but cannot be opened "
