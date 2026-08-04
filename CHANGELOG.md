@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.5.0
+
+**The rip showed a percentage and nothing else.** That tells you where you are
+but not whether to wait or come back after dinner, and it cannot tell a slow
+disc from a stuck one — which is the question that actually gets asked. The
+encode has always had an ETA because HandBrake reports one; MakeMKV reports a
+position and never a rate, so nobody derived it.
+
+A rip now shows **time remaining, read speed and elapsed time**:
+
+    Title 1/2 · 40% · 39m left · 6.9 MB/s · 15m elapsed
+
+The speed is measured from bytes actually landing on disk, not from MakeMKV's
+percentage. They are different questions, and only the first distinguishes a
+healthy read from a drive re-reading one bad sector for twenty minutes — which
+now looks like `2 KB/s · 30m elapsed`, with no estimate offered, because there
+is nothing honest to estimate from.
+
+Two decisions in `adr/progress.py` matter more than the arithmetic. The rate is
+measured over a recent window rather than the whole run, so the scan and
+spin-up a rip opens with do not drag the estimate up for the next forty
+minutes. And nothing is reported until the samples support it: "4 hours
+remaining" on a disc that finishes in twenty is worse than no estimate at all,
+because someone walks away on the strength of it.
+
+**A phase strip** — Identify · Rip · Encode · Library — sits above the bar.
+One bar says how far along the current step is but not which step that is, so
+sixty percent could mean nearly finished or barely started.
+
+**What the tool is saying** gets its own line, so "Saving title 2 to file"
+is visible without opening the log.
+
+Also: the rip's timings now use a monotonic clock. They are only ever used as
+differences, and an NTP step during a forty-minute rip would otherwise have
+produced a negative elapsed time and a nonsense estimate.
+
+---
+
 ## 1.4.2
 
 The Storage page had the last copy of the same mistake. A folder inside a

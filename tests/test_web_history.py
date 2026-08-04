@@ -163,3 +163,45 @@ class TestFailureIsReadable:
     def test_a_job_with_no_message_has_no_reason_line(self, client):
         self._failed(None)
         assert "job-reason" not in client.get("/history").data.decode()
+
+
+class TestThePhaseStrip:
+    """A single bar says how far along the current step is, not which step.
+
+    Sixty percent could be sixty percent of a rip with an encode still to come,
+    or sixty percent of the last thing left to do. The strip shows the run.
+    """
+
+    def _card(self, client, status):
+        session = get_session()
+        try:
+            session.add(Job(drive="/dev/sr0", status=status, title="The Film", year=1999))
+            session.commit()
+        finally:
+            session.close()
+        return client.get("/").data.decode()
+
+    @pytest.mark.parametrize("status", [
+        JobStatus.IDENTIFYING, JobStatus.RIPPING, JobStatus.RIPPED, JobStatus.ENCODING,
+    ])
+    def test_every_active_phase_renders(self, client, status):
+        """Jinja indexes a phase list here; an unexpected status must not 500."""
+        html = self._card(client, status)
+        assert "job-phases" in html
+        assert "Identify" in html and "Rip" in html and "Encode" in html
+
+    def test_a_pending_job_does_not_break_it(self, client):
+        # data-job-phases, not "job-phases": the latter also appears in the
+        # class attribute, so it is two per card and counts nothing useful.
+        assert self._card(client, JobStatus.PENDING).count("data-job-phases") == 1
+
+    def test_earlier_steps_are_marked_done(self, client):
+        """While encoding, the rip is behind you — and should look it."""
+        html = self._card(client, JobStatus.ENCODING)
+        # The strip holds only spans, so the first </div> after it closes it.
+        strip = html.split("data-job-phases")[1].split("</div>")[0]
+        assert "bg-success" in strip, "completed steps should read as completed"
+        assert "Identify" in strip and "Rip" in strip
+
+    def test_there_is_somewhere_for_the_tool_to_speak(self, client):
+        assert "job-saying" in self._card(client, JobStatus.RIPPING)

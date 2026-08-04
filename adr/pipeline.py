@@ -27,6 +27,7 @@ from adr import (
     joblog,
     musicbrainz,
     preflight,
+    progress,
     recovery,
     seriesmode,
 )
@@ -1055,6 +1056,13 @@ class DrivePipeline:
             _last_rip_commit = [0.0]
             _rip_cb_count = [0]
             _rip_commit_fails = [0]
+            _rip_rate = progress.Rate()
+            _rip_bytes = progress.Rate()
+            # monotonic, not the wall clock: these values are only ever used as
+            # differences, and an NTP step during a forty-minute rip would
+            # otherwise show a negative elapsed time and a nonsense estimate.
+            _rip_started_at = time.monotonic()
+            _raw_dir = self._config.raw_path / str(job.id)
 
             def on_rip_progress(info: dict) -> None:
                 _rip_cb_count[0] += 1
@@ -1066,11 +1074,21 @@ class DrivePipeline:
                 if p < _last_rip_pct[0]:
                     return  # ignore backwards jumps
 
-                now = time.time()
+                now = time.monotonic()
                 if now - _last_rip_commit[0] < 2.0:
                     return
 
                 _last_rip_pct[0] = p
+
+                # How long is left, and how fast the disc is actually being
+                # read. MakeMKV reports a position, never a rate, so both are
+                # derived here — see adr/progress.py for why the estimate is
+                # measured over a recent window and stays silent until it can
+                # say something true.
+                _rip_rate.update(p, now=now)
+                _rip_bytes.update(progress.directory_size(_raw_dir), now=now)
+                eta = _rip_rate.eta_to()
+                speed = _rip_bytes.per_second()
 
                 pi = {
                     "phase": "ripping",
@@ -1078,6 +1096,9 @@ class DrivePipeline:
                     "title_total": info.get("title_total", 0),
                     "title_progress": round(info.get("title_progress", 0.0) or 0.0, 4),
                     "description": info.get("description", ""),
+                    "eta_seconds": eta,
+                    "bytes_per_second": round(speed) if speed else None,
+                    "elapsed_seconds": max(0, int(now - _rip_started_at)),
                 }
 
                 # Retry commit up to 2 times on lock errors

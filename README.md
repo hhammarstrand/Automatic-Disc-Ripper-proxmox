@@ -30,6 +30,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Notifications** to ntfy, Gotify, Discord or a webhook when a disc finishes or fails — the pipeline is unattended, so it tells you.
 - **Plex library refresh** the moment a film lands, instead of waiting for the next scheduled scan.
 - **Per-job logs** in the UI: what MakeMKV and HandBrake actually said, without SSH.
+- **Progress that answers the question**: time remaining, read speed and elapsed time for the rip, not just a percentage.
 - **Duplicate detection** against the library itself, the TMDb id and the disc label — optionally skipping the rip entirely.
 - **Retry** a failed job from whatever is still on disk — a broken NAS should not cost you a 40-minute rip.
 - **Says what is broken before you insert a disc**, with the fix, instead of letting every disc fail separately with the same reason.

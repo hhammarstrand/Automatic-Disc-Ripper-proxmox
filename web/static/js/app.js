@@ -88,6 +88,14 @@ function updateActiveJobs(jobs) {
         if (detailEl) {
             detailEl.textContent = formatProgressDetail(job);
         }
+
+        // And what the tool itself is saying, when that is not already the
+        // whole of the line above.
+        const sayingEl = card.querySelector(`[data-job-saying="${job.id}"]`);
+        if (sayingEl) {
+            const said = (job.progress_info && job.progress_info.description) || '';
+            sayingEl.textContent = said === detailEl?.textContent ? '' : said;
+        }
     });
 
     // If a job finished (no longer in active list), reload the page
@@ -444,65 +452,86 @@ function formatProgressDetail(job) {
     const pi = job.progress_info;
     if (!pi) return '';
 
+    // One line, assembled from whichever of these the phase actually knows.
+    // Ordered by how often it answers the question someone is asking: how
+    // much longer, then how fast, then where in the disc, then how long it
+    // has been going.
+    const parts = [];
+
     if (pi.phase === 'ripping') {
-        const parts = [];
-        if (pi.title_total > 0) {
+        if (pi.title_total > 1) {
             parts.push(`Title ${pi.title_current}/${pi.title_total}`);
         }
-        if (pi.title_progress != null) {
-            parts.push((pi.title_progress * 100).toFixed(1) + '%');
+        if (pi.title_progress != null && pi.title_total > 1) {
+            parts.push((pi.title_progress * 100).toFixed(0) + '%');
         }
-        if (parts.length === 0 && pi.description) {
-            return pi.description;
-        }
-        return parts.join(' \u00b7 ');
+        pushPace(parts, pi);
+        return parts.join(' \u00b7 ') || pi.description || '';
     }
 
     if (pi.phase === 'encoding') {
-        if (pi.state === 'scanning') {
-            return 'Scanning video\u2026';
-        }
-        if (pi.state === 'muxing') {
-            return 'Muxing MP4\u2026';
-        }
-        const parts = [];
+        if (pi.state === 'scanning') return 'Scanning video\u2026';
+        if (pi.state === 'muxing') return 'Muxing MP4\u2026';
         if (pi.track_total > 1) {
             parts.push(`Title ${pi.track_current}/${pi.track_total}`);
-        }
-        if (pi.track_progress != null) {
-            parts.push((pi.track_progress * 100).toFixed(1) + '%');
         }
         if (pi.pass_total > 1) {
             parts.push(`Pass ${pi.pass_num + 1}/${pi.pass_total}`);
         }
-        if (pi.eta_seconds > 0) {
-            parts.push('~' + formatEta(pi.eta_seconds));
-        }
-        if (pi.fps > 0) {
-            parts.push(pi.fps.toFixed(1) + ' fps');
-        }
+        if (pi.eta_seconds > 0) parts.push(formatEta(pi.eta_seconds) + ' left');
+        if (pi.fps > 0) parts.push(pi.fps.toFixed(0) + ' fps');
         return parts.join(' \u00b7 ');
     }
 
-    // Imaging a data disc: the copy has no titles or tracks, only bytes, so
-    // the module writes the whole line and there is nothing to assemble here.
     if (pi.phase === 'imaging') {
-        return pi.description || '';
+        pushPace(parts, pi);
+        return parts.length ? parts.join(' \u00b7 ') : (pi.description || '');
     }
 
-    // An unknown phase still has something to say for itself. A blank line
-    // where progress should be reads as a stalled job.
+    // Audio CDs and anything new: the module writes its own sentence.
     return pi.description || '';
 }
 
+/**
+ * The three numbers that answer "how much longer, and is it healthy":
+ * time remaining, read speed, time spent.
+ *
+ * Each is omitted when it is not known rather than shown as zero — during the
+ * first seconds of a rip there is not enough history to estimate anything, and
+ * a confident wrong number is worse than a blank.
+ */
+function pushPace(parts, pi) {
+    if (pi.eta_seconds != null && pi.eta_seconds > 0) {
+        parts.push(formatEta(pi.eta_seconds) + ' left');
+    }
+    if (pi.bytes_per_second > 0) {
+        parts.push(formatSpeed(pi.bytes_per_second));
+    }
+    if (pi.elapsed_seconds > 0) {
+        parts.push(formatEta(pi.elapsed_seconds) + ' elapsed');
+    }
+}
+
+function formatSpeed(bytesPerSecond) {
+    if (!bytesPerSecond || bytesPerSecond <= 0) return '';
+    if (bytesPerSecond < 1024) return bytesPerSecond.toFixed(0) + ' B/s';
+    const kb = bytesPerSecond / 1024;
+    if (kb < 1024) return kb.toFixed(0) + ' KB/s';
+    const mb = kb / 1024;
+    return (mb >= 10 ? mb.toFixed(0) : mb.toFixed(1)) + ' MB/s';
+}
+
 function formatEta(seconds) {
-    if (seconds <= 0) return '';
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    if (h > 0) return `${h}h ${m}m`;
-    if (m > 0) return `${m}m ${s}s`;
-    return `${s}s`;
+    // Two units at most, like adr/progress.format_eta: "2h 13m 44s" implies a
+    // precision an estimate does not have.
+    if (seconds == null || seconds < 0) return '';
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    const m = Math.floor(seconds / 60);
+    const s = Math.round(seconds % 60);
+    if (m < 60) return s ? `${m}m ${s}s` : `${m}m`;
+    const h = Math.floor(m / 60);
+    const rm = m % 60;
+    return rm ? `${h}h ${rm}m` : `${h}h`;
 }
 
 function escapeHtml(str) {
@@ -998,6 +1027,10 @@ function refreshDoctorBadge() {
 document.addEventListener('DOMContentLoaded', () => {
     // Start auto-refresh if on dashboard
     if (window.location.pathname === '/') {
+        // Once immediately: the detail line is rendered empty by the server,
+        // so waiting for the first tick leaves the card blank for five
+        // seconds every time the page loads.
+        refreshDashboard();
         setInterval(refreshDashboard, REFRESH_INTERVAL);
         // Start elapsed timers — tick every second
         updateElapsedTimers();

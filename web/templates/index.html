@@ -222,7 +222,33 @@
                                     </div>
                                 </div>
                                 {% endif %}
-                                <div class="d-flex justify-content-between align-items-center mt-1">
+                                <!-- Where this job is in the run.
+                                     A single bar says how far along the current
+                                     step is but not which step that is, nor how
+                                     many are left — so 60% could mean nearly
+                                     done or barely started. -->
+                                {% set phase = job.status.value if job.status else '' %}
+                                <div class="d-flex align-items-center gap-1 mt-2 small job-phases"
+                                     data-job-phases="{{ job.id }}">
+                                    {% for key, label, icon in [
+                                        ('identifying', 'Identify', 'bi-search'),
+                                        ('ripping', 'Rip', 'bi-disc'),
+                                        ('encoding', 'Encode', 'bi-camera-reels'),
+                                        ('done', 'Library', 'bi-collection-play')] %}
+                                    {% set order = ['identifying', 'ripping', 'ripped', 'encoding', 'done'] %}
+                                    {% set here = order.index(phase) if phase in order else 0 %}
+                                    {% set mine = order.index('encoding' if key == 'encoding' else key) %}
+                                    <span class="badge rounded-pill
+                                        {% if mine < here %}bg-success
+                                        {% elif key == phase or (key == 'encoding' and phase == 'ripped') %}bg-primary
+                                        {% else %}bg-secondary bg-opacity-25 text-secondary{% endif %}">
+                                        <i class="bi {{ icon }} me-1"></i>{{ label }}
+                                    </span>
+                                    {% if not loop.last %}<span class="text-secondary">·</span>{% endif %}
+                                    {% endfor %}
+                                </div>
+
+                                <div class="d-flex justify-content-between align-items-center mt-1 flex-wrap gap-2">
                                     <small class="text-secondary">
                                         Status: <span class="badge
                                             {% if job.status and job.status.value == 'ripping' %}bg-warning text-dark
@@ -235,6 +261,12 @@
                                     </small>
                                     <small class="text-secondary progress-detail" data-job-detail="{{ job.id }}"></small>
                                 </div>
+                                <!-- What the tool itself is saying, when it says
+                                     something worth repeating: "Saving title 2
+                                     to file". Kept on its own line because it is
+                                     the sentence, not a statistic. -->
+                                <small class="text-secondary d-block text-truncate job-saying"
+                                       data-job-saying="{{ job.id }}"></small>
                             </div>
                             <!-- Actions -->
                             <div class="col-auto d-flex flex-column gap-1 align-items-end">
