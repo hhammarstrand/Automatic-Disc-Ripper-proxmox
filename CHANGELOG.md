@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.7.8
+
+**`--help` is not a list of what HandBrake was built with.** 1.7.7 read it as
+one and concluded, on a machine whose GPU was working perfectly well, that the
+build had no hardware encoder compiled in and the hardware should be given up.
+HandBrake filters that list by what it can *start right now*, so a build whose
+Quick Sync runtime fails to initialise lists nothing — indistinguishable from a
+build that never had it. And a build that reaches `encqsvInit` at all plainly
+has the code.
+
+Inference was the mistake, three times over. So the Hardware step now *tries*:
+it encodes two seconds of video with the encoder the preset asks for, and with
+VAAPI, and reports which ones actually ran. That is the difference between
+guessing at a cause and knowing one, and it opens the answer that had been
+invisible — when Quick Sync will not start but VAAPI does, the GPU is fine and
+the fix is one word in a preset file, not a retreat to software.
+
+When nothing hardware-related will start and `vainfo` says the GPU encodes,
+the page now says exactly that: an honest dead end pointing at HandBrake's own
+runtime, rather than a confident wrong cause. The sample is made once and
+shared between the two steps, so this costs no extra wait.
+
+**`H.265 VCN 1080p` was being offered as a software preset.** VCN is AMD's
+current name for the engine it used to call VCE, and HandBrake ships those
+presets on every platform whether or not the hardware exists. The escape route
+from a failing hardware preset was offering presets that fail the same way.
+
 ## 1.7.7
 
 **The dispatcher is not the runtime.** 1.7.6 accepted `libvpl.so` as the

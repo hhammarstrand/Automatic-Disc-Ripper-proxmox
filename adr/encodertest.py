@@ -70,12 +70,12 @@ def _step(name: str, status: str, detail: str, fix: str = "") -> dict:
     return {"name": name, "status": status, "detail": detail, "fix": fix}
 
 
-def _explain(output: str, exe: str = "") -> str:
+def _explain(output: str, exe: str = "", hardware: dict | None = None) -> str:
     """Turn HandBrake's complaint into something to do about it."""
     from adr import gpu
 
     if gpu.mentions_hardware(output):
-        return _hardware_advice(exe)
+        return _hardware_advice(exe, hardware)
     lowered = output.lower()
     for pattern, advice in _EXPLANATIONS:
         if re.search(pattern, lowered):
@@ -84,13 +84,14 @@ def _explain(output: str, exe: str = "") -> str:
 
 
 def build_hardware_encoders(exe: str) -> list[str]:
-    """The hardware encoders this build of HandBrake was compiled with.
+    """The hardware encoders HandBrake reports as available right now.
 
-    ``--help`` lists every encoder ``--encoder`` will accept, and a build
-    without Quick Sync simply does not name it. That answers, on its own and
-    without a disc, the question that otherwise has to be inferred: whether
-    "qsv is not available on the system" means the build has no QSV or the
-    system has no runtime for it. Those have opposite fixes.
+    Worth being precise about, because reading this list as "what the build
+    was compiled with" cost a round of wrong advice. HandBrake filters
+    ``--help`` by what it can actually start on this machine, so a build whose
+    Quick Sync runtime fails to initialise lists no hardware encoder at all —
+    indistinguishable, here, from a build that never had one. The evidence
+    that tells those apart is an encode, not a list; see ``_try_encoder``.
     """
     code, output = _run([exe, "--help"], PRESET_TIMEOUT)
     if code == -1:
@@ -105,37 +106,54 @@ def build_hardware_encoders(exe: str) -> list[str]:
     })
 
 
-def _hardware_advice(exe: str = "") -> str:
+def _hardware_advice(exe: str = "", hardware: dict | None = None) -> str:
     """What to do when the preset wants a GPU.
 
-    Three different situations produce the same HandBrake error and have
-    completely different fixes:
+    Several situations produce the same HandBrake error and have completely
+    different fixes: no render node, a node with no driver stack, a driver
+    stack whose Quick Sync runtime will not start, or a GPU that genuinely
+    cannot encode. Telling someone to "use a software preset" when the
+    hardware is one line away throws away the reason they chose that preset;
+    telling them to pass a GPU through that is already there wastes an
+    evening.
 
-    * the build has no hardware encoder at all — nothing to do but encode in
-      software, and no amount of host-side work will change that;
-    * the build has one but the container has no render node — pass the GPU
-      through, which is one config line;
-    * both are there and the driver stack on top is not — install two
-      packages.
-
-    Telling someone to "use a software preset" when the hardware is one line
-    away throws away the reason they chose that preset. Telling them to pass a
-    GPU through when their HandBrake could never have used it wastes their
-    evening. So the build is asked first, because it is the only one of the
-    three that cannot be fixed.
+    The answer comes from what was *tried*, not from what was listed. An
+    earlier version read ``--help``, found no hardware encoder, and concluded
+    the build had none compiled in — but that list holds the encoders
+    HandBrake can start *right now*, so a build whose Quick Sync runtime fails
+    to initialise lists none either. That produced a confident "give up the
+    hardware" on a machine whose GPU was working perfectly well.
     """
     from adr import gpu
 
     state = gpu.describe()
+    working = (hardware or {}).get("working") or []
 
-    if exe:
-        encoders = build_hardware_encoders(exe)
-        if not encoders:
+    if working:
+        # Something does work — which makes this a preset problem, and a
+        # cheap one. Naming the encoder matters: it is the difference between
+        # keeping the hardware and giving it up over one word in a file.
+        return (
+            "Quick Sync will not start on this machine, but the GPU is not the "
+            f"problem: {', '.join(working)} encoded the test sample. Change "
+            "VideoEncoder in your preset file to one of those, or use "
+            "'Encode in software instead' below if you would rather not edit "
+            "the preset."
+        )
+
+    if hardware is not None and state["available"] and state["runtime"]["ok"]:
+        probe = gpu.vainfo()
+        if probe["ran"] and probe["ok"]:
+            # Everything checks out and nothing encodes. Worth saying plainly
+            # rather than blaming a component that has just been shown to
+            # work — an honest dead end beats a confident wrong cause.
             return (
-                "This build of HandBrake has no hardware encoder compiled in — "
-                "it lists none under --help — so no amount of GPU passthrough "
-                "will make this preset work. Encode in software (x264 or x265) "
-                "instead; the button below switches the preset for you."
+                "The GPU works — vainfo loads the driver and lists encode "
+                "profiles — but no hardware encoder in this HandBrake would "
+                "start, including the one the preset asks for. That points at "
+                "the build's Quick Sync runtime rather than at your hardware "
+                "or your container. Encode in software with the button below; "
+                "it is slower and it works today."
             )
 
     if state["available"] and not state["runtime"]["ok"]:
@@ -155,9 +173,9 @@ def _hardware_advice(exe: str = "") -> str:
     if state["available"]:
         return (
             "The preset asks for a hardware encoder, this container has "
-            f"{state['nodes'][0]}, and the driver for it is installed — so the "
-            "encoder is missing from this HandBrake build rather than from the "
-            "system. A software preset (x264 or x265) will work."
+            f"{state['nodes'][0]}, and the driver for it is installed — so what "
+            "is left is HandBrake's own hardware support failing to start. A "
+            "software preset (x264 or x265) will work."
         )
     return (
         "The preset asks for a hardware encoder, and this container has no GPU. "
@@ -213,27 +231,81 @@ def test_encoder(config) -> dict:
     if steps[-1]["status"] == "fail":
         return _finish(steps)
 
-    hardware = _hardware_step(exe, preset_file, config)
-    if hardware:
-        steps.append(hardware)
+    # One sample, shared. Both remaining steps encode something, and making
+    # it twice would double the wait for no extra information.
+    workdir = Path(tempfile.mkdtemp(prefix="adr-encodertest-"))
+    try:
+        sample, sample_problem = _make_sample(config, workdir)
 
-    steps.append(_encode_step(exe, preset_file, config))
+        hardware = _hardware_step(exe, preset_file, config, sample, workdir)
+        if hardware:
+            steps.append(hardware)
+
+        steps.append(
+            _encode_step(exe, preset_file, config, sample, sample_problem, hardware),
+        )
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
     return _finish(steps)
 
 
-def _hardware_step(exe: str, preset_file: str, config) -> dict | None:
-    """What the hardware stack actually says, for a preset that needs one.
+def _make_sample(config, workdir: Path) -> tuple[Path | None, str]:
+    """Two seconds of generated video to encode. ``(path, why not)``.
+
+    ffmpeg is already a dependency for audio CDs. HandBrake has no test
+    pattern generator that can be relied on across versions, and guessing at
+    a flag that may not exist would turn a working setup into a red cross.
+    """
+    ffmpeg = getattr(config, "ffmpeg_path", "") or "ffmpeg"
+    if not (shutil.which(ffmpeg) or os.path.isfile(ffmpeg)):
+        return None, (
+            "ffmpeg is not installed, so a sample could not be made and the "
+            "encode itself could not be tried without a disc."
+        )
+
+    sample = workdir / "sample.mkv"
+    code, text = _run([
+        ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "lavfi", "-i", "testsrc=duration=2:size=640x360:rate=25",
+        "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
+        "-c:v", "libx264", "-c:a", "aac", "-shortest", str(sample),
+    ], ENCODE_TIMEOUT)
+    if code != 0 or not sample.exists():
+        why = _meaningful(text) or (f"it exited {code}" if code else "it wrote no file")
+        return None, (
+            f"ffmpeg could not make a sample to encode, so HandBrake was not "
+            f"tried: {why}. This says nothing about your preset."
+        )
+    return sample, ""
+
+
+def _try_encoder(exe: str, sample: Path, encoder: str, workdir: Path) -> bool:
+    """Can HandBrake actually encode with *encoder*, right now, on this box?"""
+    output = workdir / f"probe-{encoder}.mp4"
+    code, _ = _run([
+        exe, "-i", str(sample), "-o", str(output), "-e", encoder,
+    ], ENCODE_TIMEOUT)
+    return code == 0 and output.exists() and output.stat().st_size > 0
+
+
+def _hardware_step(
+    exe: str, preset_file: str, config, sample: Path | None, workdir: Path,
+) -> dict | None:
+    """What the hardware stack actually does, for a preset that needs one.
 
     Only shown when the preset asks for a GPU. For the majority who encode in
-    software this is a paragraph about hardware they never wanted, and a
-    diagnostic page that reports things nobody asked about trains people to
-    stop reading it.
+    software this is a paragraph about hardware they never wanted, and a page
+    that reports things nobody asked about trains people to stop reading it.
 
-    It never fails the run on its own: the encode below is the real verdict,
-    and a warning here that turned out not to matter would be worse than
-    saying nothing. What it does is put the evidence on screen — the build's
-    encoders, the node, the driver stack, and what vainfo makes of it — so
-    the answer does not have to be inferred from an exit code.
+    The last part is a live probe rather than a reading of ``--help``, and
+    that distinction cost a round of wrong advice. HandBrake's ``--help``
+    lists the encoders available *right now*, not the ones the build was
+    compiled with, so a build whose Quick Sync cannot initialise lists none —
+    and reading that as "not compiled in" produced a confident, wrong "give up
+    the hardware". Trying each candidate on two seconds of video answers the
+    question that actually matters: what will encode on this machine today.
+
+    It never fails the run on its own. The encode below is the verdict.
     """
     from adr import gpu
 
@@ -243,42 +315,75 @@ def _hardware_step(exe: str, preset_file: str, config) -> dict | None:
 
     lines = [f"The preset '{config.handbrake_preset}' encodes with '{wanted}'."]
 
-    encoders = build_hardware_encoders(exe)
+    available = build_hardware_encoders(exe)
     lines.append(
-        f"This HandBrake build has: {', '.join(encoders)}." if encoders
-        else "This HandBrake build lists no hardware encoder at all."
+        f"HandBrake reports these hardware encoders as available: "
+        f"{', '.join(available)}." if available else
+        "HandBrake reports no hardware encoder as available. That is a "
+        "runtime answer, not a compile-time one — the list only holds "
+        "encoders it can start on this machine."
     )
 
     state = gpu.describe()
     lines.append(state["detail"])
 
     probe = gpu.vainfo()
-    if probe["ran"]:
-        if probe["ok"]:
-            lines.append(
-                f"vainfo: the driver loads ({probe['driver'] or 'unnamed'}) and "
-                f"offers {len(probe['encoders'])} encode profile(s)."
-            )
-        else:
-            lines.append(
-                "vainfo ran but the stack does not offer a single encode "
-                "profile, so nothing here can encode in hardware whatever the "
-                "preset says. Its answer: "
-                + (_meaningful(probe["output"], limit=3) or "(no output)")
-            )
+    if probe["ran"] and probe["ok"]:
+        lines.append(
+            f"vainfo: the driver loads ({probe['driver'] or 'unnamed'}) and "
+            f"offers {len(probe['encoders'])} encode profile(s), so the GPU "
+            "itself can encode."
+        )
+    elif probe["ran"]:
+        lines.append(
+            "vainfo ran but the stack offers no encode profile at all, so "
+            "nothing here can encode in hardware whatever the preset says. "
+            "Its answer: " + (_meaningful(probe["output"], limit=3) or "(none)")
+        )
     elif probe["output"]:
         lines.append(probe["output"])
 
-    # A vainfo that never ran is not evidence of a problem — it is the absence
-    # of evidence, and the encode below still gives the real verdict. Warning
-    # on a working setup because a diagnostic tool is not installed would be
-    # the page crying wolf about itself.
-    probe_ok = probe["ok"] or not probe["ran"]
-    ok = bool(encoders) and state["available"] and state["runtime"]["ok"] and probe_ok
-    return _step(
+    working = _working_hardware_encoders(exe, sample, workdir, wanted)
+    if sample is None:
+        lines.append("No sample could be made, so no encoder was actually tried.")
+    elif working:
+        lines.append(
+            "Tried on two seconds of video, these hardware encoders work here: "
+            + ", ".join(working) + "."
+        )
+    else:
+        lines.append(
+            "Tried on two seconds of video, no hardware encoder on this "
+            "machine would start."
+        )
+
+    ok = bool(working)
+    step = _step(
         "Hardware", "ok" if ok else "warn", "\n".join(lines),
         "" if ok else (state["runtime"]["fix"] or state["fix"]),
     )
+    step["working"] = working
+    return step
+
+
+def _working_hardware_encoders(
+    exe: str, sample: Path | None, workdir: Path, wanted: str,
+) -> list[str]:
+    """Which hardware encoders actually encode, of the ones worth trying.
+
+    Kept short deliberately: each candidate is a real encode, and a diagnostic
+    button that takes a minute is one nobody presses. The preset's own encoder
+    comes first because it is the question being asked; VAAPI follows because
+    on Linux it is the path that works when Quick Sync's runtime will not
+    start, and it uses the very driver vainfo just exercised.
+    """
+    if sample is None:
+        return []
+    candidates = [wanted] if wanted else []
+    for alternative in ("vaapi_h265", "vaapi_h264"):
+        if alternative not in candidates:
+            candidates.append(alternative)
+    return [enc for enc in candidates if _try_encoder(exe, sample, enc, workdir)]
 
 
 def _preset_file(config) -> str:
@@ -315,72 +420,47 @@ def _preset_step(exe: str, preset_file: str, preset_name: str) -> dict:
     return _step("Preset", "ok", f"HandBrake knows '{preset_name}'{where}.")
 
 
-def _encode_step(exe: str, preset_file: str, config) -> dict:
+def _encode_step(
+    exe: str, preset_file: str, config,
+    sample: Path | None, sample_problem: str, hardware: dict | None = None,
+) -> dict:
     """Encode two seconds of generated video with the real preset.
 
     This is the probe that matters. Everything before it can pass on a build
     with no usable video encoder, because nothing before it touches one.
-
-    The sample is made with ffmpeg, which is already a dependency for audio
-    CDs. HandBrake has no test-pattern generator of its own that can be relied
-    on across versions, and guessing at a flag that may not exist would turn a
-    working setup into a red cross.
     """
-    ffmpeg = getattr(config, "ffmpeg_path", "") or "ffmpeg"
-    if not (shutil.which(ffmpeg) or os.path.isfile(ffmpeg)):
+    if sample is None:
+        # ffmpeg's problem, not HandBrake's — say so plainly rather than
+        # printing a bare exit code, which reads as an encoder failure.
         return _step(
-            "Test encode", "warn",
-            "ffmpeg is not installed, so a sample could not be made and the "
-            "encode itself could not be tried without a disc.",
-            "pct exec {ctid} -- apt-get install -y ffmpeg",
+            "Test encode", "warn", sample_problem,
+            "pct exec {ctid} -- apt-get install -y ffmpeg"
+            if "not installed" in sample_problem else "",
         )
 
-    workdir = Path(tempfile.mkdtemp(prefix="adr-encodertest-"))
-    try:
-        sample = workdir / "sample.mkv"
-        code, text = _run([
-            ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
-            "-f", "lavfi", "-i", "testsrc=duration=2:size=640x360:rate=25",
-            "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-            "-c:v", "libx264", "-c:a", "aac", "-shortest", str(sample),
-        ], ENCODE_TIMEOUT)
-        if code != 0 or not sample.exists():
-            # ffmpeg's problem, not HandBrake's — say so plainly rather than
-            # printing a bare exit code, which reads as an encoder failure.
-            why = _meaningful(text) or (
-                f"it exited {code}" if code else "it wrote no file"
-            )
-            return _step(
-                "Test encode", "warn",
-                f"ffmpeg could not make a sample to encode, so HandBrake was "
-                f"not tried: {why}. This says nothing about your preset.",
-            )
+    output = sample.parent / "probe.mp4"
+    cmd = [exe, "-i", str(sample), "-o", str(output)]
+    if preset_file and os.path.isfile(preset_file):
+        cmd += ["--preset-import-file", preset_file]
+    cmd.append(f"--preset={config.handbrake_preset}")
+    extra = getattr(config, "handbrake_extra_args", "") or ""
+    if extra:
+        cmd += extra.split()
 
-        output = workdir / "probe.mp4"
-        cmd = [exe, "-i", str(sample), "-o", str(output)]
-        if preset_file and os.path.isfile(preset_file):
-            cmd += ["--preset-import-file", preset_file]
-        cmd.append(f"--preset={config.handbrake_preset}")
-        extra = getattr(config, "handbrake_extra_args", "") or ""
-        if extra:
-            cmd += extra.split()
-
-        code, text = _run(cmd, ENCODE_TIMEOUT)
-        if code == 0 and output.exists() and output.stat().st_size > 0:
-            return _step(
-                "Test encode", "ok",
-                "HandBrake encoded a two-second sample with this preset. "
-                "The encoder and the preset are both fine.",
-            )
-        said = _meaningful(text)
+    code, text = _run(cmd, ENCODE_TIMEOUT)
+    if code == 0 and output.exists() and output.stat().st_size > 0:
         return _step(
-            "Test encode", "fail",
-            f"HandBrake could not encode with this preset (exit {code}).\n{said}",
-            _explain(text, exe)
-            or "Try a built-in preset such as 'Fast 1080p30' under Settings.",
+            "Test encode", "ok",
+            "HandBrake encoded a two-second sample with this preset. "
+            "The encoder and the preset are both fine.",
         )
-    finally:
-        shutil.rmtree(workdir, ignore_errors=True)
+    said = _meaningful(text)
+    return _step(
+        "Test encode", "fail",
+        f"HandBrake could not encode with this preset (exit {code}).\n{said}",
+        _explain(text, exe, hardware)
+        or "Try a built-in preset such as 'Fast 1080p30' under Settings.",
+    )
 
 
 def _finish(steps: list[dict]) -> dict:
@@ -411,8 +491,14 @@ def with_ctid(result: dict, ctid: str | None) -> dict:
 # and offering it as a button rather than a sentence about where to go.
 # ------------------------------------------------------------------ #
 
-#: Built-in presets whose names give away a hardware encoder.
-_HARDWARE_IN_NAME = ("qsv", "nvenc", "vce", "vaapi", "videotoolbox", "mf ")
+#: Built-in presets whose names give away a hardware encoder. VCN is AMD's
+#: current name for the engine it used to call VCE, and HandBrake ships
+#: "H.265 VCN 1080p" presets on every platform whether or not the hardware is
+#: there — so without it the software list offers a preset that fails exactly
+#: like the one being escaped from.
+_HARDWARE_IN_NAME = (
+    "qsv", "nvenc", "vce", "vcn", "vaapi", "videotoolbox", "mf ",
+)
 
 
 def _builtin_presets(exe: str) -> list[str]:
