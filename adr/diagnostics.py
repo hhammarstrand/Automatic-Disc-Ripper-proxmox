@@ -19,6 +19,7 @@ import shutil
 from pathlib import Path
 
 from adr.disc import diagnose_passthrough
+from adr.encoder import HandBrakeEncoder
 from adr.storage import SERVICE_UID, check_destination, describe_path
 
 logger = logging.getLogger(__name__)
@@ -106,6 +107,17 @@ def check_makemkv_key() -> dict:
     )
 
 
+class _PresetProbe:
+    """The two attributes HandBrakeEncoder._auto_discover_preset_file reads.
+
+    Calling the encoder's own discovery is the point: any reimplementation
+    here would be a second opinion that drifts from what actually runs.
+    """
+
+    def __init__(self, preset_name: str):
+        self._preset = preset_name
+
+
 def describe_preset(config) -> dict:
     """Inspect the configured HandBrake preset file.
 
@@ -120,6 +132,7 @@ def describe_preset(config) -> dict:
     info = {
         "preset_name": preset_name,
         "preset_file": preset_file,
+        "auto_discovered": False,
         "file_exists": False,
         "valid_json": False,
         "preset_names_in_file": [],
@@ -128,8 +141,20 @@ def describe_preset(config) -> dict:
     }
 
     if not preset_file:
+        # The encoder does not stop at an empty setting: it looks in presets/
+        # and uses what it finds. Reporting "built-in preset" here while the
+        # encoder imports a file is two answers to one question, and the one
+        # on the page is the wrong one exactly when a preset is the problem.
+        preset_file = HandBrakeEncoder._auto_discover_preset_file(
+            _PresetProbe(preset_name),
+        )
+        if preset_file:
+            info["preset_file"] = preset_file
+            info["auto_discovered"] = True
+
+    if not preset_file:
         # Not an error: HandBrake's built-in presets are the common case.
-        info["error"] = "No preset file configured (handbrake_preset_file is empty)"
+        info["error"] = "No preset file configured, and none found in presets/"
         return info
 
     if not os.path.isfile(preset_file):
@@ -142,7 +167,6 @@ def describe_preset(config) -> dict:
             data = json.load(fh)
         info["valid_json"] = True
 
-        from adr.encoder import HandBrakeEncoder
         names: list[str] = []
         seen: set[str] = set()
         preset_list = data.get("PresetList", [])
@@ -189,14 +213,27 @@ def check_preset(config) -> dict:
             "Re-export the preset from the HandBrake GUI.",
         )
     if not info["name_match"]:
+        # A file the user *named* must contain the preset: they said where it
+        # comes from and it is not there. A file merely found in presets/ is
+        # different — the encoder imports it either way, and HandBrake still
+        # resolves a built-in name like "Fast 1080p30" from its own list. That
+        # is a working setup, so calling it a failure would be crying wolf.
+        if info["auto_discovered"]:
+            return _check(
+                "preset", "HandBrake preset", "ok",
+                f"Using HandBrake's built-in preset '{info['preset_name']}'. "
+                f"({info['preset_file']} is imported as well, but does not "
+                "contain that name.)",
+            )
         return _check(
             "preset", "HandBrake preset", "fail", info["error"] or
             f"'{info['preset_name']}' is not in {info['preset_file']}.",
             "Settings → HandBrake preset",
         )
+    found_in = "found in" if not info["auto_discovered"] else "found in the auto-discovered"
     return _check(
         "preset", "HandBrake preset", "ok",
-        f"'{info['preset_name']}' found in {info['preset_file']}.",
+        f"'{info['preset_name']}' {found_in} {info['preset_file']}.",
     )
 
 

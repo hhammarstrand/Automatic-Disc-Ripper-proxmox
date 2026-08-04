@@ -216,6 +216,10 @@ class Track(Base):
     duration_seconds = Column(Integer, nullable=True)
     status = Column(Enum(TrackStatus), nullable=False, default=TrackStatus.PENDING)
     output_path = Column(String(1024), nullable=True)
+    # Why this track failed. The job used to carry only "one or more tracks
+    # failed to encode", which names the symptom and nothing else — on a disc
+    # with several titles it does not even say which one.
+    error_message = Column(Text, nullable=True)
     # Which episode this track holds, for a series job. Stored rather than
     # recomputed so the mapping survives a restart mid-encode.
     episode_number = Column(Integer, nullable=True)
@@ -296,7 +300,8 @@ def _migrate_db(engine) -> None:
                     _log.info("Migration: added '%s' column to jobs table", col_name)
 
             track_cols = {row[1] for row in cur.execute("PRAGMA table_info(tracks)").fetchall()}
-            for col_name, col_type in [("episode_number", "INTEGER")]:
+            for col_name, col_type in [("episode_number", "INTEGER"),
+                                       ("error_message", "TEXT")]:
                 if col_name not in track_cols:
                     cur.execute(f"ALTER TABLE tracks ADD COLUMN {col_name} {col_type}")
                     _log.info("Migration: added '%s' column to tracks table", col_name)

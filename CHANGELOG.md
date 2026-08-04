@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.5.1
+
+**"One or more tracks failed to encode" is true of every encode failure there
+has ever been.** It names the symptom, does not say which track on a
+multi-title disc, and sends you to the log to find the one line that mattered
+— which is exactly what the message in the history is for.
+
+HandBrake says why it is unhappy on stderr and then exits with a number. Its
+last meaningful line is now kept and put in the error itself, so the history
+reads `Encoding failed: HandBrake exited with code 1. HandBrake said: Invalid
+preset` instead of a sentence that fits every failure equally.
+
+The reason is also stored per track, so a disc where one title of six failed
+says which one. Several distinct failures are listed; identical ones are not
+repeated. A failure HandBrake gave no reason for says exactly that, rather
+than implying there is nothing to see.
+
+**The Doctor page disagreed with the encoder about the preset.** With no
+preset file configured it reported "using HandBrake's built-in preset", while
+the encoder goes looking in `presets/` and imports whatever it finds. Two
+answers to one question, and the wrong one was on the page precisely when a
+preset is the suspect. The check now calls the encoder's own discovery, and
+distinguishes a file you named — where a missing preset name is a real failure
+— from one merely found, where HandBrake still resolves a built-in name and
+the setup works.
+
+---
+
 ## 1.5.0
 
 **The rip showed a percentage and nothing else.** That tells you where you are

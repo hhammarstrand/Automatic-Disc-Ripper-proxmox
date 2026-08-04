@@ -644,6 +644,7 @@ class EncoderWorker(threading.Thread):
                 logger.info("Track %s encoded: %s", track.track_number, result.output_path)
             else:
                 track.status = TrackStatus.ERROR
+                track.error_message = result.error
                 logger.error("Track %s encode failed: %s", track.track_number, result.error)
 
             # Check if all tracks for this job are done
@@ -700,7 +701,24 @@ class EncoderWorker(threading.Thread):
                 PlexNotifier(self._config).refresh_for(job.output_path or "")
             elif any_error and all(t.status in (TrackStatus.DONE, TrackStatus.ERROR) for t in job.tracks):
                 job.status = JobStatus.ERROR
-                job.error_message = "One or more tracks failed to encode"
+                # Name the reason, not the symptom. "One or more tracks failed
+                # to encode" is true of every encode failure there has ever
+                # been and sends the reader to the log to find out which and
+                # why — which is exactly what this line is for.
+                failed = [t for t in job.tracks if t.status == TrackStatus.ERROR]
+                reasons = {t.error_message for t in failed if t.error_message}
+                if len(failed) == 1 and reasons:
+                    job.error_message = f"Encoding failed: {reasons.pop()}"
+                elif reasons:
+                    job.error_message = (
+                        f"{len(failed)} of {len(job.tracks)} tracks failed to encode. "
+                        + " | ".join(sorted(reasons))
+                    )
+                else:
+                    job.error_message = (
+                        f"{len(failed)} of {len(job.tracks)} tracks failed to encode, "
+                        "and HandBrake gave no reason. See the tool output."
+                    )
                 job.completed_at = utcnow()
                 session.commit()
                 Notifier(self._config).job_failed(job)

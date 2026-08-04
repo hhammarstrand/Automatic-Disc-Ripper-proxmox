@@ -31,6 +31,26 @@ class EncodeResult:
         self.error: str | None = None
 
 
+#: Lines HandBrake prints on the way out that say nothing about the failure.
+_NOISE = ("Encode done!", "HandBrake has exited", "libhb:", "hb_display")
+
+
+def _last_meaningful(lines: list[str]) -> str:
+    """The most useful of HandBrake's parting words, or empty.
+
+    Its last line is usually a status banner. The line that explains the
+    failure is a little further back, so error-looking lines are preferred and
+    the banners are skipped.
+    """
+    candidates = [line for line in lines if not any(n in line for n in _NOISE)]
+    if not candidates:
+        return ""
+    for line in reversed(candidates):
+        if any(word in line.lower() for word in ("error", "failed", "cannot", "no such", "invalid")):
+            return line
+    return candidates[-1]
+
+
 class HandBrakeEncoder:
     """Wrapper around HandBrakeCLI for video transcoding."""
 
@@ -181,6 +201,12 @@ class HandBrakeEncoder:
             _enc_start_time = time.monotonic()
             _warned_no_progress = False
 
+            # HandBrake says why it is unhappy on stderr and then exits with a
+            # number. "exited with code 1" on its own sends someone to the log
+            # to find the one line that mattered; keeping the tail here puts it
+            # in the error itself, where the history shows it.
+            stderr_tail: list[str] = []
+
             def _drain_stderr() -> None:
                 stderr_line_count = 0
                 remainder = b""
@@ -205,6 +231,9 @@ class HandBrakeEncoder:
                             # lines and blow through the log's size cap.
                             if self.log_sink and not stripped.startswith("[h2"):
                                 self.log_sink(stripped[:500])
+                            if not stripped.startswith("[h2"):
+                                stderr_tail.append(stripped[:200])
+                                del stderr_tail[:-8]
                 except OSError:
                     pass
 
@@ -298,6 +327,9 @@ class HandBrakeEncoder:
                 result.error = f"HandBrake exited with code {proc.returncode}"
                 if not output_path.exists():
                     result.error += " (no output file created)"
+                said = _last_meaningful(stderr_tail)
+                if said:
+                    result.error += f". HandBrake said: {said}"
                 logger.error(result.error)
 
         except FileNotFoundError:
