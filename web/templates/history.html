@@ -33,10 +33,27 @@
     </div>
 </div>
 
+<div id="bulkBar" class="d-none align-items-center gap-2 mb-3 p-3 rounded border">
+    <span id="bulkCount" class="fw-semibold"></span>
+    <button class="btn btn-outline-danger btn-sm" onclick="deleteSelected(false)">
+        <i class="bi bi-trash3 me-1"></i>Remove from history
+    </button>
+    <button class="btn btn-danger btn-sm" onclick="deleteSelected(true)">
+        <i class="bi bi-fire me-1"></i>Remove and delete the files
+    </button>
+    <button class="btn btn-outline-secondary btn-sm ms-auto" onclick="clearSelection()">
+        Cancel
+    </button>
+</div>
+
 <div class="table-responsive">
     <table class="table table-hover table-striped" id="historyTable">
         <thead>
             <tr>
+                <th style="width:1%">
+                    <input class="form-check-input" type="checkbox" id="selectAll"
+                           onclick="toggleAll(this)" title="Select every finished job on this page">
+                </th>
                 <th>#</th>
                 <th>Title</th>
                 <th>Drive</th>
@@ -55,6 +72,12 @@
         <tbody>
             {% for job in jobs %}
             <tr data-status="{{ job.status.value if job.status else 'unknown' }}">
+                <td>
+                    {% if job.status and job.status.value in ('done', 'error', 'cancelled') %}
+                    <input class="form-check-input job-select" type="checkbox"
+                           value="{{ job.id }}" onchange="selectionChanged()">
+                    {% endif %}
+                </td>
                 <td>{{ job.id }}</td>
                 <td>
                     {% if job.poster_url %}
@@ -168,6 +191,12 @@
                             <i class="bi bi-collection-play"></i>
                         </button>
                         {% endif %}
+                        {% if job.status and job.status.value in ('done', 'error', 'cancelled') %}
+                        <button class="btn btn-outline-primary btn-sm" onclick="reencodeJob({{ job.id }})"
+                                title="Encode again with the current settings">
+                            <i class="bi bi-arrow-repeat"></i>
+                        </button>
+                        {% endif %}
                         <button class="btn btn-outline-info btn-sm" onclick="openRematchModal({{ job.id }}, '{{ job.display_title | e }}')" title="Re-match against TMDb">
                             <i class="bi bi-search"></i>
                         </button>
@@ -203,6 +232,130 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+// ---- Selecting several jobs ----------------------------------------------
+//
+// Only finished jobs get a checkbox: a running rip cannot be deleted, and an
+// unusable control is worse than an absent one because it looks like a choice.
+
+function selectedIds() {
+    return Array.from(document.querySelectorAll('.job-select:checked'))
+                .map(box => parseInt(box.value, 10));
+}
+
+function toggleAll(header) {
+    document.querySelectorAll('.job-select').forEach(box => { box.checked = header.checked; });
+    selectionChanged();
+}
+
+function selectionChanged() {
+    const ids = selectedIds();
+    const bar = document.getElementById('bulkBar');
+    bar.classList.toggle('d-none', ids.length === 0);
+    bar.classList.toggle('d-flex', ids.length > 0);
+    document.getElementById('bulkCount').textContent =
+        ids.length === 1 ? '1 job selected' : `${ids.length} jobs selected`;
+
+    const all = document.querySelectorAll('.job-select');
+    const header = document.getElementById('selectAll');
+    header.checked = all.length > 0 && ids.length === all.length;
+    header.indeterminate = ids.length > 0 && ids.length < all.length;
+}
+
+function clearSelection() {
+    document.querySelectorAll('.job-select').forEach(box => { box.checked = false; });
+    document.getElementById('selectAll').checked = false;
+    selectionChanged();
+}
+
+// ---- Deleting -------------------------------------------------------------
+//
+// Removing rows from the history and removing films from the library are
+// different acts. The second one has no undo, so it is never the thing that
+// happens by accident: it asks the server what it would delete, shows that,
+// and only then asks for a yes.
+
+function deleteSelected(deleteFiles) {
+    const ids = selectedIds();
+    if (!ids.length) return;
+
+    if (!deleteFiles) {
+        if (!confirm(`Remove ${ids.length} job(s) from the history? The files stay where they are.`)) return;
+        return doDelete(ids, false);
+    }
+
+    fetch('/api/jobs/delete-preview', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ids}),
+    })
+        .then(r => r.json())
+        .then(preview => {
+            const files = (preview.files || []).concat(preview.raw || []);
+            if (!files.length) {
+                if (!confirm(`No files were found for these ${ids.length} job(s). Remove them from the history anyway?`)) return;
+                return doDelete(ids, false);
+            }
+            // Naming them, not counting them. "12 files" is not something
+            // anyone can check; a list of paths is.
+            const shown = files.slice(0, 12).join('\n');
+            const more = files.length > 12 ? `\n…and ${files.length - 12} more` : '';
+            if (!confirm(
+                `Permanently delete ${files.length} file(s), ${preview.size}?\n\n` +
+                `${shown}${more}\n\nThis cannot be undone.`
+            )) return;
+            doDelete(ids, true);
+        })
+        .catch(err => alert('Could not check what would be deleted: ' + err.message));
+}
+
+function doDelete(ids, deleteFiles) {
+    fetch('/api/jobs/delete', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ids, delete_files: deleteFiles}),
+    })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.ok) { alert('Could not delete: ' + (data.error || 'unknown error')); return; }
+            let message = `${data.deleted} job(s) removed`;
+            if (deleteFiles) message += `, ${data.files_deleted} file(s) deleted`;
+            if (data.failed && data.failed.length) {
+                message += `\n\nCould not delete:\n` + data.failed.join('\n');
+            }
+            if (data.skipped && data.skipped.length) {
+                message += `\n\nSkipped:\n` + data.skipped.join('\n');
+            }
+            alert(message);
+            location.reload();
+        })
+        .catch(err => alert('Error: ' + err.message));
+}
+
+// ---- Encoding again -------------------------------------------------------
+//
+// Asks first, because where it encodes *from* changes what you get: the raw
+// rip is the same source a first encode used, the finished file is
+// second-generation. That is the person's decision, so they are told before
+// it starts rather than after.
+
+function reencodeJob(jobId) {
+    fetch(`/api/jobs/${jobId}/reencode`)
+        .then(r => r.json())
+        .then(plan => {
+            if (!plan.can_reencode) { alert(plan.reason); return; }
+            if (!confirm(`${plan.reason}\n\nEncode again now?`)) return;
+            return fetch(`/api/jobs/${jobId}/reencode`, {method: 'POST'})
+                .then(r => r.json().then(d => ({ok: r.ok, d})))
+                .then(({ok, d}) => {
+                    if (!ok || !d.ok) { alert(d.message || 'Could not start.'); return; }
+                    alert(`Queued ${d.queued} file(s) for encoding.`);
+                    location.reload();
+                });
+        })
+        .catch(err => alert('Error: ' + err.message));
+}
+</script>
 <script>
 function filterHistory() {
     // Server-side: the page it would filter is only the first hundred rows.

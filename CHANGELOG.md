@@ -1,5 +1,50 @@
 # Changelog
 
+## 1.12.0
+
+**The active tab was unreadable, and that one is mine.** Bootstrap's active tab
+is dark text on a *white* background — it assumes a light page. Against this
+theme's near-white link colour that came out white on white: **1.18:1**, which
+is not poor contrast, it is none. The tab you were looking at was the one you
+could not read.
+
+The tab strip is now restated for the dark theme — background, borders and text
+together, because leaving any of the three to Bootstrap reintroduces the
+light-page assumption — and the selected tab carries an accent bar, since a
+one-pixel border shift does not survive being read quickly.
+
+The rest of the palette measured fine: every text-on-surface pair is between
+5.2:1 and 16:1. Tests compute those ratios from the stylesheet's own variables,
+so a palette change is checked rather than merely allowed.
+
+**Select several jobs in the history and delete them.** Checkboxes on every
+finished row, select-all in the header, and a bar that appears only when
+something is selected.
+
+**And optionally delete what they produced.** That is a separate button, never
+the default, and it has no undo — so it asks the server what it would remove
+and shows you the list of paths before asking for a yes. Naming the files
+rather than counting them: "12 files" is not something anyone can check.
+
+The deletion is deliberately narrow. Only what the job recorded producing —
+its tracks' output paths, its own folders, its raw rip — is a candidate.
+Nothing walks a tree looking for likely video, nothing removes a directory
+that still holds something else, and the configured library roots are never
+removed for being empty. A film's own folder goes once its film has; a library
+folder shared with other films comes out with those films intact.
+
+**Encode a job again with the current settings.** The reason to want it is that
+the settings changed — a different encoder, a different language, a different
+quality — and the film on disk was made under the old ones.
+
+Where it encodes *from* changes what you get, so it says which before it
+starts. The raw rip when that survives: the same source a first encode used,
+and the disc is not needed. The finished file otherwise, which works and is
+second-generation — encoding an encode loses a little more each time. "Re-
+encode" sounds free and that version of it is not, so it is said plainly. A rip
+that never finished is refused outright: its files are truncated mid-frame and
+an encoder can do nothing with them but waste an hour.
+
 ## 1.11.0
 
 **The Settings page was seventeen cards in one column.** Forty-eight fields,

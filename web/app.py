@@ -77,6 +77,21 @@ def _isotime(value) -> str:
         return ""
 
 
+def _job_ids(data: dict) -> list[int]:
+    """The job ids in a request body, ignoring anything that is not one.
+
+    Silently dropping a malformed id beats a 500 on a bulk action: the caller
+    is a checkbox list, and one bad value should not lose the other nineteen.
+    """
+    ids = []
+    for value in data.get("ids") or []:
+        try:
+            ids.append(int(value))
+        except (TypeError, ValueError):
+            continue
+    return ids
+
+
 def _without_encoder_flag(extra: str) -> str:
     """Drop any existing ``-e``/``--encoder`` from the extra arguments.
 
@@ -592,6 +607,140 @@ def _register_api_routes(app: Flask) -> None:
         except SQLAlchemyError as exc:
             session.rollback()
             logger.error("Failed to clear history: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            session.close()
+
+    @app.route("/api/jobs/delete-preview", methods=["POST"])
+    def api_delete_preview():
+        """What deleting these jobs would remove. Deletes nothing.
+
+        Removing a row from the history and removing a film from the library
+        are different acts, and the second one has no undo. So it gets shown
+        first: the files, the count, the size. A delete nobody can preview is
+        a delete nobody can consent to.
+        """
+        from adr import cleanup
+
+        ids = _job_ids(request.get_json(silent=True) or {})
+        session = get_session()
+        try:
+            files, raw, total = [], [], 0
+            for job_id in ids:
+                job = session.get(Job, job_id)
+                if not job or job.status not in TERMINAL_STATUSES:
+                    continue
+                described = cleanup.describe(job, _config)
+                files += described["files"]
+                raw += described["raw"]
+                total += described["bytes"]
+            return jsonify({
+                "jobs": len(ids), "files": files, "raw": raw,
+                "bytes": total, "size": cleanup.human_size(total),
+            })
+        finally:
+            session.close()
+
+    @app.route("/api/jobs/delete", methods=["POST"])
+    def api_delete_jobs():
+        """Delete several jobs at once, and optionally what they produced.
+
+        ``delete_files`` defaults to false and has to be asked for. Deleting
+        history is cheap and reversible by re-ripping; deleting the library is
+        neither, so it is never the thing that happens by accident.
+        """
+        from adr import cleanup
+
+        data = request.get_json(silent=True) or {}
+        ids = _job_ids(data)
+        delete_files = bool(data.get("delete_files"))
+        if not ids:
+            return jsonify({"error": "No jobs given"}), 400
+
+        session = get_session()
+        deleted_jobs, deleted_files, failed, skipped = 0, [], [], []
+        try:
+            for job_id in ids:
+                job = session.get(Job, job_id)
+                if not job:
+                    skipped.append(f"{job_id}: no such job")
+                    continue
+                if job.status not in TERMINAL_STATUSES:
+                    skipped.append(f"{job_id}: still running")
+                    continue
+                if delete_files:
+                    # Before the row goes: the row is what knows where the
+                    # files are.
+                    result = cleanup.delete_job_files(job, _config)
+                    deleted_files += result["deleted"]
+                    failed += result["failed"]
+                session.delete(job)
+                deleted_jobs += 1
+            session.commit()
+        except SQLAlchemyError as exc:
+            session.rollback()
+            logger.error("Bulk delete failed: %s", exc)
+            return jsonify({"error": str(exc)}), 500
+        finally:
+            remaining = {row[0] for row in session.query(Job.id).all()}
+            session.close()
+        joblog.prune(_config, keep_job_ids=remaining)
+
+        logger.info("Deleted %d job(s) and %d file(s)", deleted_jobs, len(deleted_files))
+        return jsonify({
+            "ok": True,
+            "deleted": deleted_jobs,
+            "files_deleted": len(deleted_files),
+            "failed": failed,
+            "skipped": skipped,
+        })
+
+    @app.route("/api/jobs/<int:job_id>/reencode", methods=["GET", "POST"])
+    def api_job_reencode(job_id: int):
+        """Encode this job again with the settings as they are now.
+
+        The reason to want this is that the settings changed — a different
+        encoder, a different language, a different quality — and the film on
+        disk was made under the old ones.
+
+        Where it encodes *from* matters and is not always the same, so GET
+        reports which source would be used before anything runs. The raw rip
+        is preferred whenever it survives; the finished file is the fallback
+        and is second-generation, which is said plainly rather than glossed.
+        """
+        from adr import reencode
+
+        session = get_session()
+        try:
+            job = session.get(Job, job_id)
+            if not job:
+                return jsonify({"error": "Job not found"}), 404
+
+            plan = reencode.plan(job, _config)
+            if request.method == "GET":
+                return jsonify(plan)
+            if not plan["can_reencode"]:
+                return jsonify({"ok": False, "message": plan["reason"]}), 409
+            if _pipeline_manager is None or _pipeline_manager.encode_queue is None:
+                return jsonify({
+                    "ok": False,
+                    "message": "The encoder is not running, so nothing could be queued.",
+                }), 503
+
+            queued = reencode.start(
+                job, session, _config, _pipeline_manager.encode_queue)
+            session.commit()
+            if not queued:
+                return jsonify({
+                    "ok": False, "message": "Nothing could be queued.",
+                }), 409
+            return jsonify({
+                "ok": True, "queued": queued, "source": plan["source"],
+                "message": plan["reason"],
+            })
+        except SQLAlchemyError as exc:
+            session.rollback()
+            logger.error("Re-encode of job %s failed: %s", job_id, exc)
             return jsonify({"error": str(exc)}), 500
         finally:
             session.close()

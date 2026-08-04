@@ -42,6 +42,41 @@ main {
     color: var(--adr-text) !important;
 }
 
+/* ---- Tabs ----
+ *
+ * Bootstrap's active tab is dark text on a WHITE background: it assumes a
+ * light page. Against this theme's near-white .nav-link colour that comes out
+ * as white on white — 1.18:1, which is not poor contrast, it is none. The tab
+ * you are looking at becomes the one you cannot read.
+ *
+ * So the whole tab strip is restated here rather than patched: background,
+ * borders and text together, because Bootstrap sets all three and leaving any
+ * of them to the default reintroduces the light-page assumption. */
+.nav-tabs {
+    border-bottom-color: var(--adr-border) !important;
+}
+.nav-tabs .nav-link {
+    color: var(--adr-text-muted) !important;
+    background-color: transparent !important;
+    border-color: transparent !important;
+}
+.nav-tabs .nav-link:hover {
+    color: var(--adr-text) !important;
+    border-color: var(--adr-border) var(--adr-border) transparent !important;
+}
+.nav-tabs .nav-link.active {
+    color: var(--adr-text) !important;
+    background-color: var(--adr-card) !important;
+    /* The bottom border matches the card so the tab joins the panel below it
+     * rather than sitting in a box of its own. */
+    border-color: var(--adr-border) var(--adr-border) var(--adr-card) !important;
+}
+/* Which tab is selected has to survive being read quickly, and a one-pixel
+ * border shift does not. */
+.nav-tabs .nav-link.active {
+    box-shadow: inset 0 3px 0 0 var(--adr-accent);
+}
+
 /* ---- Cards ---- */
 .card {
     background-color: var(--adr-card) !important;
