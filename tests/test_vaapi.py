@@ -33,8 +33,8 @@ def _config(tmp_path, **overrides):
         "completed_path": tmp_path / "out",
         "vaapi_device": "/dev/dri/renderD128",
         "vaapi_codec": "h264",
-        "vaapi_quality": 22,
-        "vaapi_max_height": 0,
+        "video_quality": 22,
+        "max_height": 0,
     }
     data.update(overrides)
     return types.SimpleNamespace(**data)
@@ -69,9 +69,9 @@ class TestTheCommandItBuilds:
         assert "h264_vaapi" in self._cmd(tmp_path, vaapi_codec="wishful")
 
     def test_quality_is_clamped_to_something_sane(self, tmp_path):
-        cmd = self._cmd(tmp_path, vaapi_quality=99)
+        cmd = self._cmd(tmp_path, video_quality=99)
         assert cmd[cmd.index("-qp") + 1] == str(vaapi.QUALITY_RANGE[1])
-        cmd = self._cmd(tmp_path, vaapi_quality=1)
+        cmd = self._cmd(tmp_path, video_quality=1)
         assert cmd[cmd.index("-qp") + 1] == str(vaapi.QUALITY_RANGE[0])
 
     def test_no_height_cap_means_no_scaling(self, tmp_path):
@@ -80,7 +80,7 @@ class TestTheCommandItBuilds:
     def test_a_height_cap_never_upscales(self, tmp_path):
         """min(1080, ih) leaves a 720p source alone. Upscaling would cost time
         and space for a picture that is not there."""
-        chain = self._cmd(tmp_path, vaapi_max_height=1080)
+        chain = self._cmd(tmp_path, max_height=1080)
         chain = chain[chain.index("-vf") + 1]
         assert "min(1080,ih)" in chain.replace(" ", "")
 

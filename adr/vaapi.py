@@ -250,9 +250,16 @@ def build_command(
     codec = CODECS.get(
         (getattr(config, "vaapi_codec", "") or "h264").lower(), "h264_vaapi",
     )
-    quality = int(getattr(config, "vaapi_quality", DEFAULT_QUALITY) or DEFAULT_QUALITY)
-    quality = max(QUALITY_RANGE[0], min(QUALITY_RANGE[1], quality))
-    height = int(getattr(config, "vaapi_max_height", 0) or 0)
+    # The shared settings, so that switching encoders does not silently
+    # change the result. 0 means "nothing was asked for", and here that means
+    # this encoder's own default rather than a preset's.
+    from adr.encodingsettings import clamp_quality
+
+    quality = clamp_quality(getattr(config, "video_quality", 0)) or DEFAULT_QUALITY
+    try:
+        height = max(0, int(getattr(config, "max_height", 0) or 0))
+    except (TypeError, ValueError):
+        height = 0
 
     chain = []
     if height:

@@ -27,8 +27,15 @@ def build_encoder(config):
 
 
 def describe_backend(config) -> str:
-    """One line naming what will do the encoding, for the UI."""
+    """One line naming what will do the encoding, and how, for the UI.
+
+    Both halves matter: which program runs, and what the shared settings will
+    make it do. Naming only the program is how someone ends up believing a
+    HandBrake preset governs an ffmpeg encode.
+    """
+    from adr.encodingsettings import describe
+
     if config.encoder_backend == "vaapi":
-        codec = config.vaapi_codec.upper()
-        return f"ffmpeg on the GPU (VA-API, {codec}, quality {config.vaapi_quality})"
-    return f"HandBrake, preset '{config.handbrake_preset}'"
+        codec = (getattr(config, "vaapi_codec", "") or "h264").upper()
+        return f"ffmpeg on the GPU (VA-API, {codec}) — {describe(config)}"
+    return f"HandBrake, preset '{config.handbrake_preset}' — {describe(config)}"

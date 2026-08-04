@@ -42,11 +42,25 @@ _DEFAULTS: dict[str, Any] = {
     # through VA-API, and on current drivers that no longer initialises. The
     # Encoding page probes both and offers the switch when it applies.
     "encoder_backend": "handbrake",
+    # ---------------------------------------------------------------- #
+    # Settings that mean the same thing whichever encoder runs.
+    #
+    # Both HandBrake and the ffmpeg/GPU path are told about these, so
+    # switching encoders does not silently change what you get. Each has a
+    # "leave it alone" value, and that is the default — nothing here
+    # overrides a HandBrake preset unless it is asked to. See
+    # adr/encodingsettings.py.
+    # ---------------------------------------------------------------- #
     # The language you want to hear, as a disc spells it: "swe", "eng", "sv".
-    # Only the ffmpeg/GPU encoder consults this — HandBrake takes its audio
-    # rules from the preset. Empty keeps the disc's own track order, which is
-    # right when there is only one language and a coin toss when there are two.
+    # Empty keeps the disc's own track order, which is right when there is one
+    # language and a coin toss when there are two.
     "audio_language": "",
+    # A quantiser: lower is better quality and a bigger file. 0 leaves it to
+    # the HandBrake preset, or to the GPU encoder's own default.
+    "video_quality": 0,
+    # 0 means "whatever the source is". 1080 halves the size of a 4K rip.
+    # Never upscales.
+    "max_height": 0,
     # Which VA-API driver HandBrake's Quick Sync should load, via
     # LIBVA_DRIVER_NAME. Empty leaves libva to choose, which is right on a
     # machine with one driver installed and can be wrong on a container that
@@ -57,10 +71,6 @@ _DEFAULTS: dict[str, Any] = {
     # Empty means the first render node found.
     "vaapi_device": "",
     "vaapi_codec": "h264",
-    # A quantiser: lower is better quality and a bigger file.
-    "vaapi_quality": 22,
-    # 0 means "whatever the source is". 1080 halves the size of a 4K rip.
-    "vaapi_max_height": 0,
     "max_encode_jobs": 1,
     # Transcoding can be turned off entirely: the MKV MakeMKV produced is kept
     # as it is. Lossless and minutes instead of hours, at several times the
@@ -281,6 +291,33 @@ class Config:
         return self._data.get("audio_language", "") or ""
 
     @property
+    def video_quality(self) -> int:
+        """The shared quality number, or 0 to leave it to the preset.
+
+        Falls back to the old vaapi_quality so an installation configured
+        before these became shared keeps the number it was given. A settings
+        migration that silently resets someone's quality is worse than one
+        that never happened.
+        """
+        value = self._data.get("video_quality", 0)
+        if not value:
+            value = self._data.get("vaapi_quality", 0)
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @property
+    def max_height(self) -> int:
+        value = self._data.get("max_height", 0)
+        if not value:
+            value = self._data.get("vaapi_max_height", 0)
+        try:
+            return max(0, int(value or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    @property
     def libva_driver(self) -> str:
         return self._data.get("libva_driver", "") or ""
 
@@ -291,20 +328,6 @@ class Config:
     @property
     def vaapi_codec(self) -> str:
         return self._data.get("vaapi_codec", "h264") or "h264"
-
-    @property
-    def vaapi_quality(self) -> int:
-        try:
-            return int(self._data.get("vaapi_quality", 22))
-        except (TypeError, ValueError):
-            return 22
-
-    @property
-    def vaapi_max_height(self) -> int:
-        try:
-            return int(self._data.get("vaapi_max_height", 0) or 0)
-        except (TypeError, ValueError):
-            return 0
 
     @property
     def max_encode_jobs(self) -> int:

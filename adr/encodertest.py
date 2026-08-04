@@ -358,7 +358,12 @@ def _make_sample(config, workdir: Path) -> tuple[Path | None, str]:
         ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
         "-f", "lavfi", "-i", "testsrc=duration=2:size=640x360:rate=25",
         "-f", "lavfi", "-i", "sine=frequency=440:duration=2",
-        "-c:v", "libx264", "-c:a", "aac", "-shortest", str(sample),
+        "-c:v", "libx264", "-c:a", "aac", "-shortest",
+        # Tagged with the language that is configured, so a language filter
+        # is actually exercised instead of quietly matching nothing.
+        "-metadata:s:a:0",
+        f"language={_wanted_language(config) or 'und'}",
+        str(sample),
     ], ENCODE_TIMEOUT)
     if code != 0 or not sample.exists():
         why = _meaningful(text) or (f"it exited {code}" if code else "it wrote no file")
@@ -367,6 +372,12 @@ def _make_sample(config, workdir: Path) -> tuple[Path | None, str]:
             f"tried: {why}. This says nothing about your preset."
         )
     return sample, ""
+
+
+def _wanted_language(config) -> str:
+    from adr.vaapi import normalise_language
+
+    return normalise_language(getattr(config, "audio_language", "") or "")
 
 
 def _try_encoder(
@@ -589,6 +600,12 @@ def _encode_step(
     if preset_file and os.path.isfile(preset_file):
         cmd += ["--preset-import-file", preset_file]
     cmd.append(f"--preset={config.handbrake_preset}")
+    # The same overrides a real encode would carry. A test that skipped them
+    # would pass on a flag HandBrake rejects, and the rejection would then
+    # surface forty minutes into a rip instead of here.
+    from adr.encodingsettings import handbrake_overrides
+
+    cmd += handbrake_overrides(config)
     extra = getattr(config, "handbrake_extra_args", "") or ""
     if extra:
         cmd += extra.split()

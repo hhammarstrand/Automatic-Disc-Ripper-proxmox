@@ -231,6 +231,45 @@
                     only reason it exists.
                 </div>
             </div>
+            <div class="mb-3 p-3 rounded border">
+                <div class="fw-semibold mb-2">
+                    <i class="bi bi-sliders me-1"></i>What you want out — either encoder
+                </div>
+                <div class="form-text mb-3">
+                    These three describe the <em>result</em>, so switching encoder
+                    does not silently change what you get. Left at their defaults
+                    they change nothing: HandBrake keeps every value in its preset,
+                    and the GPU encoder uses its own defaults.
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Spoken language</label>
+                    <input type="text" class="form-control" name="audio_language"
+                           value="{{ config.audio_language }}" placeholder="swe">
+                    <div class="form-text">
+                        As a disc spells it — <code>swe</code>, <code>eng</code>,
+                        <code>nor</code>; <code>sv</code> works too. That track
+                        becomes the default one and every other track is still
+                        kept. Empty leaves the disc's own order, which is a coin
+                        toss on a multi-language disc.
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Quality (0 = leave it to the preset)</label>
+                    <input type="number" class="form-control" name="video_quality"
+                           value="{{ config.video_quality }}" min="0" max="35">
+                    <div class="form-text">
+                        A quantiser: lower is better and bigger. Around 20–22 is
+                        close to the source. Fixed-function GPU encoders need a
+                        lower number than x264 for the same perceived quality.
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Cap height (0 = leave the source alone)</label>
+                    <input type="number" class="form-control" name="max_height"
+                           value="{{ config.max_height }}" min="0" max="2160">
+                    <div class="form-text">1080 halves the size of a 4K rip. Never upscales.</div>
+                </div>
+            </div>
             <div class="mb-3">
                 <label class="form-label">Encoder</label>
                 <select class="form-select" id="encoderBackend" name="encoder_backend">
@@ -251,20 +290,6 @@
             </div>
             <div id="vaapiSettings" class="{% if config.encoder_backend != 'vaapi' %}d-none{% endif %}">
                 <div class="mb-3">
-                    <label class="form-label">Spoken language / audio language</label>
-                    <input type="text" class="form-control" name="audio_language"
-                           value="{{ config.audio_language }}" placeholder="swe">
-                    <div class="form-text">
-                        The language you want to hear, as a disc spells it —
-                        <code>swe</code>, <code>eng</code>, <code>nor</code>. The
-                        track in this language becomes the default one; every
-                        other track is still kept. Empty leaves the disc's own
-                        order, which is a coin toss on a multi-language disc.
-                        HandBrake takes its audio rules from the preset instead,
-                        so this applies to the GPU encoder only.
-                    </div>
-                </div>
-                <div class="mb-3">
                     <label class="form-label">GPU codec</label>
                     <select class="form-select" name="vaapi_codec">
                         <option value="h264" {% if config.vaapi_codec == 'h264' %}selected{% endif %}>
@@ -274,24 +299,6 @@
                             HEVC / H.265 — same quality, noticeably smaller files
                         </option>
                     </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">GPU quality</label>
-                    <input type="number" class="form-control" name="vaapi_quality"
-                           value="{{ config.vaapi_quality }}" min="15" max="35">
-                    <div class="form-text">
-                        A quantiser: lower is better and bigger. 22 is close to
-                        HandBrake's RF 20. Fixed-function encoders need a lower
-                        number than x264 for the same perceived quality.
-                    </div>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Cap height (0 = leave the source alone)</label>
-                    <input type="number" class="form-control" name="vaapi_max_height"
-                           value="{{ config.vaapi_max_height }}" min="0" max="2160">
-                    <div class="form-text">
-                        1080 halves the size of a 4K rip. Never upscales.
-                    </div>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Render node (optional)</label>
@@ -711,7 +718,7 @@ function saveSettings(e) {
         // Try to convert numbers
         if (['min_title_length', 'max_encode_jobs', 'web_port', 'watch_interval',
              'series_min_minutes', 'series_max_minutes', 'series_min_episodes',
-             'vaapi_quality', 'vaapi_max_height'].includes(key)) {
+             'video_quality', 'max_height'].includes(key)) {
             data[key] = parseInt(value, 10);
         } else {
             data[key] = value;

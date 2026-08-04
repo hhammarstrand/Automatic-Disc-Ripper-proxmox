@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.10.0
+
+**One set of encoding settings, for both encoders.**
+
+Two encoders do the transcoding now, and they were configured in two unrelated
+ways: a HandBrake preset on one side, a handful of `vaapi_*` values on the
+other. So "I want Swedish audio" was a preset property in one and a setting in
+the other, and switching encoders silently changed what came out. That is a
+bad way to arrange an application — settings should describe the *result*, not
+the tool.
+
+Three now do. **Spoken language**, **quality** and a **height cap** are told
+to whichever encoder runs. For HandBrake they become `--audio-lang-list …
+--all-audio`, `-q` and `--maxHeight`, applied after the preset, so each
+replaces exactly one preset value and leaves the rest of that preset intact.
+
+Every one has a "leave it alone" default, and that is what ships. An
+installation that never opens this page produces exactly the command it
+produced before — a preset someone spent an evening tuning is not overridden
+by a setting they never set. An older config keeps the numbers it was given:
+`vaapi_quality` and `vaapi_max_height` are still read when the shared keys are
+unset, because a migration that silently resets someone's quality is worse
+than one that never happened.
+
+The encoder test runs the same overrides a real encode would, and tags its
+generated sample with the configured language so a language filter is actually
+exercised. A flag HandBrake rejects now shows up in two seconds rather than
+forty minutes into a rip.
+
+What stays backend-specific is genuinely specific: the render node and GPU
+codec on one side, the preset file on the other.
+
 ## 1.9.2
 
 **Choose the language you want to hear.** The GPU encoder took whatever track

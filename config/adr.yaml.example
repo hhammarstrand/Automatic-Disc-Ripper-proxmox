@@ -33,10 +33,13 @@ data_disc_path: ''
 #
 # HandBrake presets do not apply to the GPU path; these four settings are what
 # VA-API actually exposes.
-# The language you want to hear, as a disc spells it: swe, eng, sv, ''.
-# Only the ffmpeg/GPU encoder uses this — HandBrake takes its audio rules
-# from the preset. Empty keeps the disc's own track order.
-audio_language: ''
+# --- What you want out, whichever encoder runs -----------------------------
+# Both HandBrake and the ffmpeg/GPU path are told about these three, so
+# switching encoder does not silently change the result. Left at their defaults
+# they change nothing: HandBrake keeps every value in its preset.
+audio_language: ''             # swe | eng | sv | '' — '' keeps the disc's order
+video_quality: 0               # quantiser, lower is better; 0 = leave it alone
+max_height: 0                  # 0 = the source; 1080 shrinks a 4K rip
 encoder_backend: handbrake     # handbrake | vaapi
 # Which VA-API driver HandBrake's Quick Sync should load, via
 # LIBVA_DRIVER_NAME. Empty leaves libva to choose, which is right on a machine
@@ -46,8 +49,6 @@ encoder_backend: handbrake     # handbrake | vaapi
 libva_driver: ''               # '' | iHD | i965
 vaapi_codec: h264              # h264 | hevc
 vaapi_device: ''               # empty means the first render node found
-vaapi_max_height: 0            # 0 leaves the source alone; 1080 shrinks a 4K rip
-vaapi_quality: 22              # a quantiser: lower is better and bigger
 
 auto_move_to_plex: true
 completed_path: /opt/adr/completed

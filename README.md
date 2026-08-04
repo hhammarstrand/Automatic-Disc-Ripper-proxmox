@@ -488,9 +488,28 @@ audio CDs. The encode test probes both and offers the switch when it applies —
 having first encoded a test clip, because a page that promises hardware
 encoding and delivers a failed job would be the same mistake in a new place.
 
-What it gives up is presets: HandBrake's are a large body of tuning and none
-of it transfers, so this offers what VA-API actually exposes — a codec, a
-quality number and a resolution cap.
+### Settings that mean the same thing either way
+
+Two encoders now do the transcoding, and they used to be configured in two
+unrelated ways — a HandBrake preset on one side, a set of `vaapi_*` values on
+the other. So "I want Swedish audio" was a preset property in one and a
+setting in the other, and switching encoders silently changed the result.
+
+Three settings describe the *result*, and both encoders are told about them:
+**spoken language**, **quality**, and a **height cap**. For HandBrake they
+become `--audio-lang-list … --all-audio`, `-q` and `--maxHeight`, applied
+after the preset so each replaces one value and leaves the rest of it intact.
+
+Every one has a "leave it alone" default, and that is what ships: an
+installation that never touches this page produces exactly the command it
+produced before. A preset someone spent an evening tuning is not overridden
+by a setting they never set.
+
+The encoder test runs the same overrides a real encode would, so a flag
+HandBrake rejects shows up in two seconds instead of forty minutes into a rip.
+
+What is left backend-specific is genuinely specific: the render node and the
+GPU codec on one side, the preset file on the other.
 
 Audio follows the shape of HandBrake's "Surround" presets, because that is
 what someone coming from one expects and because the shape is right: **an AAC

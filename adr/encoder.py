@@ -16,6 +16,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from adr.config import Config
+from adr.encodingsettings import handbrake_overrides
 from adr.utils import BYTES_PER_MB, get_bundle_root
 
 logger = logging.getLogger(__name__)
@@ -194,7 +195,13 @@ class HandBrakeEncoder:
         if input_path.suffix.lower() == ".iso":
             cmd.append("--main-feature")
 
-        # Append extra args if configured
+        # The settings that mean the same thing whichever encoder runs.
+        # HandBrake applies its own flags after the preset, so each of these
+        # replaces one preset value and leaves the rest of it intact.
+        cmd.extend(handbrake_overrides(self._config))
+
+        # Append extra args if configured — last, so a hand-written argument
+        # still wins over anything the settings page produced.
         if self._extra_args:
             cmd.extend(self._extra_args.split())
 
