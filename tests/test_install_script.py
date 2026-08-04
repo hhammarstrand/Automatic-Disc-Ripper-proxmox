@@ -124,3 +124,61 @@ class TestTheDocumentationMatchesTheScript:
         """The encoder test covers whichever encoder is configured, and the
         GPU path has no preset."""
         assert "Test the preset" not in readme
+
+
+# ------------------------------------------------------------------ #
+# The GPU's userspace half reaches every path that can install it
+# ------------------------------------------------------------------ #
+
+CONTAINER = Path("scripts/install-container.sh")
+UPDATE = Path("scripts/update.sh")
+
+
+@pytest.fixture(scope="module")
+def container() -> str:
+    return CONTAINER.read_text()
+
+
+@pytest.fixture(scope="module")
+def update() -> str:
+    return UPDATE.read_text()
+
+
+class TestTheMediaStackIsInstalledEverywhere:
+    """Ubuntu's handbrake-cli *is* built with Quick Sync — the source package
+    build-depends on libvpl-dev. What it ships is the dispatcher, and a
+    dispatcher with no runtime fails exactly like a machine with no GPU. The
+    installer put in HandBrake and nothing for the GPU at all, so that state
+    was the default on every fresh container.
+    """
+
+    #: Both, because they cover different silicon: libmfx1 is Gen 9 to Gen 11
+    #: (Skylake through Comet Lake), libmfxgen1 is Alder Lake and later.
+    #: Either alone is refused by half the hardware in the world.
+    RUNTIMES = ("libmfx1", "libmfxgen1")
+
+    def test_a_fresh_container_gets_both_quick_sync_runtimes(self, container):
+        for package in self.RUNTIMES:
+            assert package in container, f"{package} is not installed at first install"
+
+    def test_a_fresh_container_gets_the_intel_driver(self, container):
+        assert "intel-media-va-driver" in container
+
+    def test_an_existing_container_gets_them_on_update(self, update):
+        """An install made before this existed has no host to run adr-doctor
+        from when the person updating is holding a phone."""
+        for package in self.RUNTIMES:
+            assert package in update, f"{package} never reaches an existing install"
+
+    def test_the_update_asks_the_application_rather_than_guessing(self, update):
+        """A second, looser check written in shell is how this went wrong once
+        already: it accepted any VA driver, called the stack installed, and the
+        web UI then said the encoder was missing."""
+        assert "runtime_state()" in update
+
+    def test_the_update_does_not_run_apt_without_a_gpu(self, update):
+        assert "/dev/dri/renderD" in update
+
+    def test_amd_is_not_given_intels_media_stack(self, update):
+        assert "mesa-va-drivers" in update
+        assert "0x1002" in update

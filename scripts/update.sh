@@ -202,6 +202,67 @@ if [[ ${#missing_tools[@]} -gt 0 ]]; then
     fi
 fi
 
+# The GPU's userspace half, for a container installed before it was installed.
+#
+# This runs as root and an update is the only moment the application can reach
+# apt at all — the service itself is unprivileged with NoNewPrivileges, which
+# is deliberate. Without this the fix for "HandBrake cannot see the GPU" is a
+# command on the Proxmox host, and someone updating from their phone has no
+# host. The update button is the whole point.
+#
+# Only when a render node is actually present, and only when the runtime is
+# actually missing: an install that already works must not run apt on every
+# update, and a container with no GPU has no use for Intel's media stack.
+if compgen -G "/dev/dri/renderD*" >/dev/null 2>&1; then
+    # The application's own check, not a second looser one written here. That
+    # mistake has already been made once: a shell probe accepted any VA driver
+    # at all, called the stack installed, and the web UI then told the user
+    # the encoder was missing from their HandBrake build.
+    if ! sudo -u "$RUN_USER" "$INSTALL_DIR/.venv/bin/python" -c '
+import sys
+sys.path.insert(0, "'"$INSTALL_DIR"'")
+from adr import gpu
+sys.exit(0 if gpu.runtime_state()["ok"] else 1)
+' >/dev/null 2>&1; then
+        gpu_vendor=""
+        for node in /dev/dri/renderD*; do
+            [[ -e "$node" ]] || continue
+            gpu_vendor="$(cat "/sys/class/drm/$(basename "$node")/device/vendor" 2>/dev/null || true)"
+            break
+        done
+        # Both Quick Sync runtimes on Intel. They cover different silicon —
+        # libmfx1 is Gen 9 to Gen 11, libmfxgen1 is Alder Lake and later — and
+        # which one a given processor needs is not something anyone should
+        # have to look up. Install both, let the dispatcher choose.
+        case "$gpu_vendor" in
+            0x8086) gpu_packages=(intel-media-va-driver-non-free intel-media-va-driver
+                                  i965-va-driver libmfx1 libmfxgen1 libvpl2 vainfo) ;;
+            0x1002) gpu_packages=(mesa-va-drivers vainfo) ;;
+            *)      gpu_packages=() ;;
+        esac
+
+        if [[ ${#gpu_packages[@]} -gt 0 ]]; then
+            msg_info "Installing the GPU media stack so hardware encoding can work…"
+            gpu_installed=()
+            for pkg in "${gpu_packages[@]}"; do
+                # One at a time and best-effort: the names differ across
+                # releases and some live in components a container may not
+                # have enabled. One unavailable name must not take the rest.
+                if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$pkg" \
+                        >/dev/null 2>&1; then
+                    gpu_installed+=("$pkg")
+                fi
+            done
+            if [[ ${#gpu_installed[@]} -gt 0 ]]; then
+                msg_ok "GPU media stack installed: ${gpu_installed[*]}"
+                msg_info "  Settings → Encoding → Test encoder proves it by encoding two seconds."
+            else
+                msg_warn "Could not install any GPU media packages — encoding stays on the CPU."
+            fi
+        fi
+    fi
+fi
+
 # Unit files may have changed between versions — and adr-update.* may not exist
 # at all on an install made before in-app updates.
 units_changed=0

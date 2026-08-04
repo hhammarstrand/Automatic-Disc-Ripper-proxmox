@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.17.2
+
+**The GPU fix now arrives through the update button.** 1.17.1 made a fresh
+container install the media stack, which does nothing for a container that
+already exists — and the fix for "HandBrake cannot see the GPU" was a command
+on the Proxmox host. Someone updating from their phone has no host.
+
+`update.sh` runs as root, and an update is the only moment this application
+can reach apt at all: the service itself is unprivileged with
+`NoNewPrivileges`, deliberately, because the web UI is unauthenticated on the
+LAN. So the update now installs the media stack too — but only when a render
+node is actually present, and only when the runtime is actually missing. An
+install that already works does not run apt on every update, and a container
+with no GPU has no use for Intel's libraries.
+
+It asks the application's own `gpu.runtime_state()` rather than probing in
+shell. A second, looser check is how this went wrong once already: it accepted
+any VA-API driver at all, reported the stack installed, and the web UI then
+told the user the encoder was missing from their HandBrake build.
+
 ## 1.17.1
 
 **The container never installed the GPU's userspace half.** Ubuntu's
