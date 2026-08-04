@@ -14,7 +14,6 @@ Two separate failures produced that, and both are covered here:
   everything was numbered.
 """
 
-import subprocess
 import types
 
 from adr.naming import (
@@ -141,22 +140,44 @@ def _ripper(tmp_path):
         min_title_length=120,
         raw_path=tmp_path,
     )
-    (tmp_path / "makemkvcon").write_text("#!/bin/sh\nexit 0\n")
+    # Only if a test has not already put a real stub there: this used to
+    # overwrite _stub_scan's script, so every canned scan came back empty and
+    # the tests agreed with each other about nothing.
+    exe = tmp_path / "makemkvcon"
+    if not exe.exists():
+        exe.write_text("#!/bin/sh\nexit 0\n")
+        exe.chmod(0o755)
     return MakeMKVRipper(config)
 
 
-def _stub_run(monkeypatch, outputs):
-    """Feed scan_disc a canned stdout per attempt, and count the attempts."""
-    calls = []
+def _stub_scan(tmp_path, outputs):
+    """Make makemkvcon a real script that prints a canned scan, per attempt.
 
-    def fake_run(cmd, **kwargs):
-        calls.append(cmd)
-        text = outputs[min(len(calls) - 1, len(outputs) - 1)]
-        return subprocess.CompletedProcess(cmd, 0, stdout=text, stderr="")
+    A real child process rather than a patched subprocess.run: the scan is
+    spawned so it can be registered and killed, and a test that patches the
+    spawn away cannot notice when that stops being true.
 
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    monkeypatch.setattr("adr.ripper.time.sleep", lambda _s: None)
-    return calls
+    Each attempt's output lives in its own file and is cat'd, because the
+    canned text has newlines and quotes in it and embedding that in a shell
+    script is a game nobody wins.
+    """
+    counter = tmp_path / "attempts"
+    counter.write_text("")
+    lines = ["#!/bin/sh", f'printf x >> "{counter}"', f'n=$(wc -c < "{counter}")']
+    for index, text in enumerate(outputs, start=1):
+        canned = tmp_path / f"out{index}.txt"
+        canned.write_text(text)
+        guard = "-eq" if index < len(outputs) else "-ge"
+        lines.append(f'if [ "$n" {guard} {index} ]; then cat "{canned}"; exit 0; fi')
+    lines.append("exit 0")
+    exe = tmp_path / "makemkvcon"
+    exe.write_text("\n".join(lines) + "\n")
+    exe.chmod(0o755)
+    return counter
+
+
+def _attempts(counter) -> int:
+    return len(counter.read_text())
 
 
 _ONE_TITLE = (
@@ -168,30 +189,34 @@ _ONE_TITLE = (
 
 class TestScanDisc:
     def test_a_good_scan_is_not_repeated(self, tmp_path, monkeypatch):
-        calls = _stub_run(monkeypatch, [_ONE_TITLE])
+        counter = _stub_scan(tmp_path, [_ONE_TITLE])
+        monkeypatch.setattr("adr.ripper.time.sleep", lambda _s: None)
         titles = _ripper(tmp_path).scan_disc("/dev/sr0")
         assert list(titles) == [0]
-        assert len(calls) == 1
+        assert _attempts(counter) == 1
 
     def test_an_empty_scan_is_tried_once_more(self, tmp_path, monkeypatch):
         """A drive that has only just been given a disc answers the first
         `info` with nothing often enough to be worth five seconds."""
-        calls = _stub_run(monkeypatch, ["", _ONE_TITLE])
+        counter = _stub_scan(tmp_path, ["", _ONE_TITLE])
+        monkeypatch.setattr("adr.ripper.time.sleep", lambda _s: None)
         ripper = _ripper(tmp_path)
         assert list(ripper.scan_disc("/dev/sr0")) == [0]
-        assert len(calls) == 2
+        assert _attempts(counter) == 2
         assert ripper.last_scan_error == ""
 
     def test_two_empty_scans_give_up_and_say_why(self, tmp_path, monkeypatch):
-        calls = _stub_run(monkeypatch, ['MSG:5010,0,1,"Failed to open disc","x"\n'])
+        counter = _stub_scan(tmp_path, ['MSG:5010,0,1,"Failed to open disc","x"'])
+        monkeypatch.setattr("adr.ripper.time.sleep", lambda _s: None)
         ripper = _ripper(tmp_path)
         assert ripper.scan_disc("/dev/sr0") == {}
-        assert len(calls) == 2
+        assert _attempts(counter) == 2
         assert "Failed to open disc" in ripper.last_scan_error
 
     def test_makemkvs_own_words_reach_the_job_log(self, tmp_path, monkeypatch):
         """The one thing that explains why the whole disc got ripped."""
-        _stub_run(monkeypatch, ['MSG:5010,0,1,"Failed to open disc","x"\n'])
+        _stub_scan(tmp_path, ['MSG:5010,0,1,"Failed to open disc","x"'])
+        monkeypatch.setattr("adr.ripper.time.sleep", lambda _s: None)
         seen = []
         ripper = _ripper(tmp_path)
         ripper.log_sink = seen.append
@@ -200,7 +225,8 @@ class TestScanDisc:
 
     def test_chatter_stays_out_of_the_job_log(self, tmp_path, monkeypatch):
         """Codes below 2000 are progress, not problems."""
-        _stub_run(monkeypatch, ['MSG:1005,0,1,"Opening files on harddrive","x"\n'])
+        _stub_scan(tmp_path, ['MSG:1005,0,1,"Opening files on harddrive","x"'])
+        monkeypatch.setattr("adr.ripper.time.sleep", lambda _s: None)
         seen = []
         ripper = _ripper(tmp_path)
         ripper.log_sink = seen.append
@@ -208,20 +234,90 @@ class TestScanDisc:
         assert seen == []
 
     def test_a_timeout_is_reported_rather_than_swallowed(self, tmp_path, monkeypatch):
-        def fake_run(cmd, **kwargs):
-            raise subprocess.TimeoutExpired(cmd, 300)
-
-        monkeypatch.setattr(subprocess, "run", fake_run)
+        _stub_scan(tmp_path, [_ONE_TITLE])
         monkeypatch.setattr("adr.ripper.time.sleep", lambda _s: None)
+        monkeypatch.setattr("adr.ripper.SCAN_TIMEOUT", 0.001)
         ripper = _ripper(tmp_path)
         assert ripper.scan_disc("/dev/sr0") == {}
         assert "gave up" in ripper.last_scan_error
 
     def test_a_later_good_scan_clears_the_previous_reason(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("adr.ripper.time.sleep", lambda _s: None)
+        _stub_scan(tmp_path, [""])
         ripper = _ripper(tmp_path)
-        _stub_run(monkeypatch, [""])
         ripper.scan_disc("/dev/sr0")
         assert ripper.last_scan_error
-        _stub_run(monkeypatch, [_ONE_TITLE])
+        _stub_scan(tmp_path, [_ONE_TITLE])
         ripper.scan_disc("/dev/sr0")
         assert ripper.last_scan_error == ""
+
+
+class TestACancelledScanIsNotAnEmptyDisc:
+    """"No titles" and "stopped before it could say" are the same value and
+    opposite meanings. The answer to no titles is to rip all of them, so a
+    Cancel pressed during the scan started a full rip of the disc the user had
+    just cancelled — and the drive stayed locked for the whole timeout, so the
+    next attempt was told it was already ripping.
+    """
+
+    def _slow(self, tmp_path):
+        exe = tmp_path / "makemkvcon"
+        exe.write_text("#!/bin/sh\nsleep 60\n")
+        exe.chmod(0o755)
+        return exe
+
+    def test_a_killed_scan_is_reported_as_cancelled(self, tmp_path, monkeypatch):
+        import threading
+
+        from adr.pipeline import ProcessRegistry
+
+        self._slow(tmp_path)
+        monkeypatch.setattr("adr.ripper.time.sleep", lambda _s: None)
+        registry = ProcessRegistry()
+        config = types.SimpleNamespace(
+            makemkv_path=str(tmp_path / "makemkvcon"),
+            min_title_length=120, raw_path=tmp_path,
+        )
+        ripper = MakeMKVRipper(config, process_registry=registry)
+
+        threading.Timer(0.5, lambda: registry.kill(7)).start()
+        assert ripper.scan_disc("/dev/sr0", job_id=7) == {}
+        assert ripper.scan_cancelled is True
+        assert "stopped" in ripper.last_scan_error
+
+    def test_the_scan_is_registered_so_cancel_can_reach_it(self, tmp_path, monkeypatch):
+        import threading
+
+        from adr.pipeline import ProcessRegistry
+
+        self._slow(tmp_path)
+        registry = ProcessRegistry()
+        config = types.SimpleNamespace(
+            makemkv_path=str(tmp_path / "makemkvcon"),
+            min_title_length=120, raw_path=tmp_path,
+        )
+        ripper = MakeMKVRipper(config, process_registry=registry)
+
+        seen = []
+        threading.Timer(0.5, lambda: seen.append(registry.kill(9))).start()
+        ripper.scan_disc("/dev/sr0", job_id=9)
+        assert seen == [True], "the scan was invisible to the process registry"
+
+    def test_a_cancelled_scan_is_not_retried(self, tmp_path, monkeypatch):
+        """Retrying would hold the drive for a second full timeout."""
+        import threading
+
+        from adr.pipeline import ProcessRegistry
+
+        self._slow(tmp_path)
+        slept = []
+        monkeypatch.setattr("adr.ripper.time.sleep", slept.append)
+        registry = ProcessRegistry()
+        config = types.SimpleNamespace(
+            makemkv_path=str(tmp_path / "makemkvcon"),
+            min_title_length=120, raw_path=tmp_path,
+        )
+        ripper = MakeMKVRipper(config, process_registry=registry)
+        threading.Timer(0.5, lambda: registry.kill(3)).start()
+        ripper.scan_disc("/dev/sr0", job_id=3)
+        assert slept == [], "a cancelled scan was tried again"

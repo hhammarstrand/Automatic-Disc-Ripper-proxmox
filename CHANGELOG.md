@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.18.1
+
+**"/dev/sr0 is already ripping" after cancelling a rip.** It was not wrong,
+which was the problem: the drive really was still held, by a scan that Cancel
+could not reach.
+
+Two faults, both about killing the wrong thing.
+
+The disc scan ran as a plain `subprocess.run`, invisible to the process
+registry — so Cancel killed nothing at all and the drive's lock stayed held
+until the scan finished on its own. That was five minutes before 1.18.0 and
+fifteen after it, twice over with the retry. The scan is now spawned,
+registered and killable like every other tool this application runs.
+
+And cancelling used `proc.kill()`, which kills the one process we hold a
+handle to. MakeMKV and HandBrake are both started in their own session
+precisely so the whole tree can be killed; the stall watchdog has always done
+that, cancelling never did. A surviving child holds the stdout pipe open, the
+reader waits on it for ever, and the drive is unusable until the service
+restarts.
+
+A cancelled scan is also no longer read as a disc with no titles. Those are
+the same value — an empty result — and opposite meanings, and the answer to
+"no titles" is to rip all of them. So Cancel during the scan started a full
+rip of the disc that had just been cancelled.
+
+The refusal itself now names the job holding the drive and says Cancel is the
+way out, rather than "already ripping", which reads as the application being
+wrong when it is merely being slow.
+
 ## 1.18.0
 
 **A diagnostics bundle went out with a live TMDb key in it.** The settings

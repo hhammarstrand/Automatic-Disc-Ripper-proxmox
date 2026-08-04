@@ -131,7 +131,7 @@ class TestRouting:
             reached["ripped"] = True
             return _rip_failure()
 
-        monkeypatch.setattr(drive._ripper, "scan_disc", lambda d: {})
+        monkeypatch.setattr(drive._ripper, "scan_disc", lambda d, job_id=None: {})
         monkeypatch.setattr(drive._ripper, "rip", fake_rip)
         drive._run_pipeline(None)
         assert reached.get("ripped")
@@ -141,7 +141,7 @@ class TestRouting:
             disctype, "classify",
             lambda d: DiscInfo(kind=disctype.KIND_VIDEO, detail="Video."),
         )
-        monkeypatch.setattr(drive._ripper, "scan_disc", lambda d: {})
+        monkeypatch.setattr(drive._ripper, "scan_disc", lambda d, job_id=None: {})
         monkeypatch.setattr(drive._ripper, "rip", lambda **kw: _rip_failure())
         drive._run_pipeline(None)
         session = get_session()

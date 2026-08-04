@@ -4,6 +4,7 @@ Drives makemkvcon in robot mode, parsing real-time progress
 and title information from stdout.
 """
 
+import contextlib
 import logging
 import os
 import re
@@ -94,6 +95,11 @@ class MakeMKVRipper:
         #: The last error MakeMKV printed during a rip. An exit code alone is
         #: not an explanation, and this nearly always is one.
         self.last_message_error: str = ""
+        #: Whether the last scan was stopped rather than finishing. A stopped
+        #: scan reports no titles, which is indistinguishable from a disc that
+        #: has none — and that is how a cancelled job went on to rip all of
+        #: them.
+        self.scan_cancelled: bool = False
 
         if not os.path.isfile(self._exe):
             logger.warning("MakeMKV not found at %s", self._exe)
@@ -125,7 +131,7 @@ class MakeMKVRipper:
             d += ":"
         return f"dev:{d}"
 
-    def scan_disc(self, drive_letter: str) -> dict[int, dict]:
+    def scan_disc(self, drive_letter: str, job_id: int | None = None) -> dict[int, dict]:
         """Scan a disc and return title information without ripping.
 
         Returns dict mapping title index -> info dict, and leaves the reason
@@ -142,18 +148,29 @@ class MakeMKVRipper:
         against the forty minutes of ripping the wrong thing.
         """
         self.last_scan_error = ""
+        self.scan_cancelled = False
         for attempt in (1, 2):
-            titles = self._scan_once(drive_letter, attempt)
+            titles = self._scan_once(drive_letter, attempt, job_id)
             if titles:
                 self.last_scan_error = ""
                 return titles
+            if self.scan_cancelled:
+                return {}
             if attempt == 1:
                 logger.info("Retrying the disc scan of %s once", drive_letter)
                 time.sleep(SCAN_RETRY_DELAY)
         return {}
 
-    def _scan_once(self, drive_letter: str, attempt: int) -> dict[int, dict]:
-        """One `makemkvcon info` run. See :meth:`scan_disc`."""
+    def _scan_once(self, drive_letter: str, attempt: int,
+                   job_id: int | None = None) -> dict[int, dict]:
+        """One `makemkvcon info` run. See :meth:`scan_disc`.
+
+        Spawned rather than run, so that it can be registered and killed. The
+        scan used to be a plain ``subprocess.run``, invisible to the process
+        registry — so Cancel killed nothing, the drive's lock stayed held for
+        the whole timeout, and every later attempt was told the drive was
+        already ripping. Fifteen minutes of that, twice, once the limit grew.
+        """
         titles: dict[int, dict] = {}
         source = self._make_dev_source(drive_letter)
         cmd = [
@@ -164,9 +181,9 @@ class MakeMKVRipper:
         ]
         logger.info("Scanning disc (attempt %d): %s", attempt, " ".join(cmd))
         try:
-            result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=SCAN_TIMEOUT,
-            )
+            result = self._run_scan(cmd, job_id)
+            if result is None:
+                return {}
             logger.debug("Scan exit code: %d, stdout lines: %d",
                          result.returncode, len(result.stdout.splitlines()))
             last_error = ""
@@ -207,6 +224,44 @@ class MakeMKVRipper:
             self.last_scan_error = str(exc)
             logger.error("Disc scan failed: %s", exc, exc_info=True)
         return titles
+
+    def _run_scan(self, cmd: list[str], job_id: int | None):
+        """Run the scan as a killable child. None means it was cancelled.
+
+        ``subprocess.run`` would be shorter and is what this was. The registry
+        needs a handle to kill, though, and a scan nobody can kill is a drive
+        nobody can use until it finishes on its own.
+        """
+        proc = subprocess.Popen(  # noqa: S603
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, start_new_session=True,
+        )
+        self._active_proc = proc
+        if self._process_registry and job_id:
+            self._process_registry.register(job_id, proc)
+        try:
+            stdout, stderr = proc.communicate(timeout=SCAN_TIMEOUT)
+        except subprocess.TimeoutExpired:
+            kill_process_tree(proc)
+            with contextlib.suppress(subprocess.SubprocessError, OSError):
+                proc.communicate(timeout=10)
+            raise
+        finally:
+            self._active_proc = None
+            if self._process_registry and job_id:
+                self._process_registry.unregister(job_id, proc)
+
+        # A negative code is a signal, and the only thing sending one here is
+        # a cancel or a shutdown. Reporting that as "the scan found no titles"
+        # is how a cancelled job went on to rip every title on the disc.
+        if proc.returncode is not None and proc.returncode < 0:
+            self.scan_cancelled = True
+            self.last_scan_error = (
+                f"the disc scan was stopped (signal {-proc.returncode})"
+            )
+            logger.info("Disc scan was stopped by signal %d", -proc.returncode)
+            return None
+        return subprocess.CompletedProcess(cmd, proc.returncode, stdout, stderr)
 
     def rip(
         self,

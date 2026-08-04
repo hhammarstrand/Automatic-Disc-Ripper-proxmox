@@ -278,7 +278,7 @@ class TestMakeMkvScan:
         # One constant, shared, rather than two that can drift apart.
         assert drivetest.SCAN_TIMEOUT is ripper_module.SCAN_TIMEOUT
         assert ripper_module.SCAN_TIMEOUT >= 300
-        source = inspect.getsource(ripper_module.MakeMKVRipper._scan_once)
+        source = inspect.getsource(ripper_module.MakeMKVRipper._run_scan)
         assert "timeout=SCAN_TIMEOUT" in source, "the scan stopped using it"
 
     def test_no_disc_skips_the_scan(self, openable, monkeypatch):

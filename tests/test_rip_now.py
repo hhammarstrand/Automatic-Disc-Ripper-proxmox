@@ -93,7 +93,12 @@ class TestItRefuses:
         manager.drive_pipelines["/dev/sr0"].busy = True
         ok, message = manager.rip_now("/dev/sr0")
         assert ok is False
-        assert "already ripping" in message
+        # Not "already ripping" any more. Pressing Cancel and then Rip and
+        # being told the drive is already ripping reads as the application
+        # being wrong; naming the job and the way out makes it a slow answer
+        # rather than a false one.
+        assert "still" in message
+        assert "seconds" in message
         assert manager.drive_pipelines["/dev/sr0"].calls == []
 
     def test_a_disabled_drive(self, manager, loaded):

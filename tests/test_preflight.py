@@ -88,7 +88,7 @@ class TestItAgreesWithThePipeline:
             lambda d: DiscInfo(kind=disctype.KIND_VIDEO, detail="Video."),
         )
         drive = pipeline_mod.DrivePipeline("/dev/sr0", config, queue.Queue())
-        monkeypatch.setattr(drive._ripper, "scan_disc", lambda d: {})
+        monkeypatch.setattr(drive._ripper, "scan_disc", lambda d, job_id=None: {})
         monkeypatch.setattr(drive._ripper, "rip", lambda **kw: _rip_failure())
         drive._run_pipeline("HAPPY_FEET_TWO")
         session = get_session()

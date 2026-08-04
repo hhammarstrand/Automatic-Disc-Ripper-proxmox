@@ -55,6 +55,7 @@ from adr.storage import should_stage
 from adr.utils import (
     BYTES_PER_MB,
     format_duration,
+    kill_process_tree,
     make_plex_folder_name,
     normalize_drive,
     parse_duration,
@@ -98,15 +99,24 @@ class ProcessRegistry:
                     self._procs.pop(job_id, None)
 
     def kill(self, job_id: int) -> bool:
-        """Kill all subprocesses for a job. Returns True if any process was killed."""
+        """Kill all subprocesses for a job. Returns True if any process was killed.
+
+        The whole tree, not the one process we hold a handle to. MakeMKV and
+        HandBrake are both started in their own session so that this is
+        possible, and killing only the leader leaves its children alive holding
+        the stdout pipe open — which the reader loop waits on for ever, so the
+        drive's lock is never released and every later attempt is told the
+        drive is already ripping. The stall watchdog has always used the tree;
+        cancelling used ``proc.kill()`` and did not.
+        """
         with self._lock:
             procs = self._procs.pop(job_id, [])
         killed_any = False
         for proc in procs:
             if proc and proc.poll() is None:
                 try:
-                    proc.kill()
-                    logger.info("Killed subprocess for job %s (pid=%s)", job_id, proc.pid)
+                    kill_process_tree(proc)
+                    logger.info("Killed subprocess tree for job %s (pid=%s)", job_id, proc.pid)
                     killed_any = True
                 except OSError:
                     logger.warning("Could not kill subprocess for job %s", job_id, exc_info=True)
@@ -1052,9 +1062,23 @@ class DrivePipeline:
                     # why, and "why" decides whether the whole disc gets ripped.
                     self._ripper.log_sink = JobLog(self._config, job.id).sink("rip")
                     try:
-                        scan_titles = self._ripper.scan_disc(self.drive)
+                        scan_titles = self._ripper.scan_disc(self.drive, job.id)
                     finally:
                         self._ripper.log_sink = None
+
+                    # A scan that was stopped reports no titles, which is
+                    # indistinguishable from a disc that has none — and the
+                    # answer to "no titles" is to rip all of them. So a Cancel
+                    # pressed during the scan started a full rip of the disc
+                    # the user had just cancelled.
+                    if self._ripper.scan_cancelled:
+                        session.refresh(job)
+                        job.status = JobStatus.CANCELLED
+                        job.completed_at = utcnow()
+                        session.commit()
+                        job_log.append("rip", "Cancelled while scanning the disc.")
+                        logger.info("Job %s cancelled during the disc scan", job.id)
+                        return
                     logger.info("Scan found %d title(s): %s",
                                 len(scan_titles),
                                 {idx: (t.get("duration", "?"), t.get("size", "?"))
@@ -1742,6 +1766,27 @@ class PipelineManager:
         self.disc_watcher.on_disc_inserted(pipeline.handle_disc_inserted)
         logger.info("Pipeline registered for hot-added drive %s", drive_letter)
 
+    @staticmethod
+    def _busy_job(drive: str) -> dict | None:
+        """The job holding *drive*, for a refusal that names it. Never raises."""
+        try:
+            from adr.models import ACTIVE_STATUSES, Job, get_session
+
+            session = get_session()
+            try:
+                job = (
+                    session.query(Job)
+                    .filter(Job.drive == drive, Job.status.in_(ACTIVE_STATUSES))
+                    .order_by(Job.id.desc())
+                    .first()
+                )
+                return {"id": job.id, "status": job.status.value} if job else None
+            finally:
+                session.close()
+        except Exception:                          # noqa: BLE001 - never fatal
+            logger.debug("Could not name the job holding %s", drive, exc_info=True)
+            return None
+
     def rip_now(self, drive: str) -> tuple[bool, str]:
         """Rip the disc that is already sitting in the drive.
 
@@ -1759,7 +1804,22 @@ class PipelineManager:
         if normalize_drive(drive) in self.config.disabled_drives:
             return False, f"{drive} is disabled under Settings."
         if pipeline.is_busy:
-            return False, f"{drive} is already ripping."
+            # Name the job, because "already ripping" right after pressing
+            # Cancel reads as the application being wrong. Usually it is not:
+            # the tool takes a moment to die and the drive is genuinely still
+            # held. Saying which job, and that Cancel is the way out, is the
+            # difference between a wrong answer and a slow one.
+            busy = self._busy_job(drive)
+            if busy:
+                return False, (
+                    f"{drive} is still working on job {busy['id']} "
+                    f"({busy['status']}). Cancel it on the dashboard first, or "
+                    "give it a few seconds to stop."
+                )
+            return False, (
+                f"{drive} is still finishing the last job. Give it a few "
+                "seconds and try again."
+            )
         # In the drive's own words. "No readable disc" covered an empty tray,
         # an open tray, a missing device node and a cgroup denial with one
         # sentence, and only one of the four is fixed by putting a disc in.
