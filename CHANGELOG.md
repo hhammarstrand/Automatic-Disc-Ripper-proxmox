@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.11.0
+
+**The Settings page was seventeen cards in one column.** Forty-eight fields,
+nine hundred lines of scrolling, and no way to tell the two settings you change
+while setting up from the twelve you will never touch. Everything was equally
+prominent, which is the same as nothing being prominent.
+
+It is five tabs now:
+
+| | |
+|---|---|
+| **Library** | where films go, Plex, duplicates |
+| **Encoding** | the encoder and what you want out of it |
+| **Discs** | ripping, drives, television, audio CDs, data discs |
+| **Integrations** | TMDb, MakeMKV key, notifications, watch folder |
+| **Advanced** | web interface, logging, where the tools live |
+
+Nothing was removed and nothing was reworded away — the cards moved intact,
+help text and all. The **Paths** card was the one real edit: where films go is
+a Library concern and stays there, while where MakeMKV and HandBrake are
+installed went to Advanced, which is where a setting the installer gets right
+belongs.
+
+It is still one form, so saving saves everything regardless of which tab is
+open, and the tab you were on is remembered between visits.
+
+Tests hold the shape: every field that existed still renders, every field on
+the page is one the API accepts, every card sits inside a pane, and the markup
+parses with nothing left open. That last one earned its place immediately — it
+caught a stray `</div>` that put a whole card outside its tab, which a browser
+would have papered over silently.
+
 ## 1.10.1
 
 **The audio layout now mirrors a real HandBrake preset instead of a guess at

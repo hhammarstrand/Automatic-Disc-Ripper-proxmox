@@ -6,481 +6,71 @@
 
 <form id="settingsForm" onsubmit="return saveSettings(event)">
 
-    <!-- Paths -->
-    <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-folder me-1"></i>Paths</div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label class="form-label">MakeMKV path</label>
-                <input type="text" class="form-control"
-                       name="makemkv_path" value="{{ config.makemkv_path }}">
-                <div class="form-text">Path to makemkvcon (default /usr/bin/makemkvcon)</div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">HandBrakeCLI path</label>
-                <input type="text" class="form-control"
-                       name="handbrake_path" value="{{ config.handbrake_path }}">
-                <div class="form-text">Path to HandBrakeCLI (default /usr/bin/HandBrakeCLI)</div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Raw MKV folder (temporary)</label>
-                <input type="text" class="form-control"
-                       name="raw_path" value="{{ config.raw_path }}">
-                <div class="form-text">Stays on the container's own disk. Cleared after each encode.</div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Completed MP4 folder</label>
-                <input type="text" class="form-control"
-                       name="completed_path" value="{{ config.completed_path }}">
-                <div class="form-text">
-                    Where finished films end up. <code>/opt/adr/completed</code> keeps them
-                    on the container; <code>/mnt/media</code> is where a NAS or host
-                    storage is mounted — see <a href="/storage">Storage</a>.
-                </div>
-            </div>
-        </div>
-    </div>
+    <ul class="nav nav-tabs mb-4" id="settingsTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="tab-library" data-bs-toggle="tab"
+                    data-bs-target="#pane-library" type="button" role="tab"
+                    aria-controls="pane-library" aria-selected="true">
+                <i class="bi bi-collection me-1"></i>Library
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-encoding" data-bs-toggle="tab"
+                    data-bs-target="#pane-encoding" type="button" role="tab"
+                    aria-controls="pane-encoding" aria-selected="false">
+                <i class="bi bi-camera-reels me-1"></i>Encoding
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-discs" data-bs-toggle="tab"
+                    data-bs-target="#pane-discs" type="button" role="tab"
+                    aria-controls="pane-discs" aria-selected="false">
+                <i class="bi bi-disc me-1"></i>Discs
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-extras" data-bs-toggle="tab"
+                    data-bs-target="#pane-extras" type="button" role="tab"
+                    aria-controls="pane-extras" aria-selected="false">
+                <i class="bi bi-plug me-1"></i>Integrations
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="tab-advanced" data-bs-toggle="tab"
+                    data-bs-target="#pane-advanced" type="button" role="tab"
+                    aria-controls="pane-advanced" aria-selected="false">
+                <i class="bi bi-wrench me-1"></i>Advanced
+            </button>
+        </li>
+    </ul>
 
-    <!-- Ripping settings -->
-    <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-disc me-1"></i>Ripping</div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label class="form-label">Minimum title length (seconds)</label>
-                <input type="number" class="form-control"
-                       name="min_title_length" value="{{ config.min_title_length }}" min="0">
-                <div class="form-text">Titles shorter than this are ignored (skips menus, trailers, etc.)</div>
-            </div>
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="mainFeatureOnly"
-                           name="main_feature_only" {% if config.main_feature_only %}checked{% endif %}>
-                    <label class="form-check-label" for="mainFeatureOnly">Select main feature only</label>
-                </div>
-                <div class="form-text">Scans the disc first and rips only the longest title (main feature). Other titles such as trailers and bonus material are skipped.</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Duplicates -->
-    <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-files me-1"></i>Duplicates</div>
-        <div class="card-body">
-            <p class="small text-secondary">
-                Before ripping, the disc is checked against three things: whether the
-                film's folder already holds video at the destination (the only check
-                that survives a cleared history), whether an earlier completed job has
-                the same TMDb id (a different pressing of the same film), and finally
-                the disc label. A duplicate is always logged and can be notified about.
-            </p>
-            <div class="mb-0">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="skipDuplicates"
-                           name="skip_duplicates" {% if config.skip_duplicates %}checked{% endif %}>
-                    <label class="form-check-label" for="skipDuplicates">
-                        Skip discs already ripped
-                    </label>
-                </div>
-                <div class="form-text">
-                    Off by default. Re-ripping is legitimate when the first attempt came
-                    from a scratched disc or a worse preset, and a false positive that
-                    silently cancels a disc is harder to notice than one that only warns.
-                    Turn it on when working through a large shelf.
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Television -->
-    <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-collection-play me-1"></i>Television</div>
-        <div class="card-body">
-            <p class="small text-secondary">
-                A box-set disc has no "main feature" — several episodes of similar
-                length instead. These decide what that looks like. They are a
-                judgement, not a fact: anime runs to 24 minutes, a documentary series
-                to 55, and some box set will sit outside any default. Detection only
-                ever suggests; you confirm on the dashboard before encoding.
-            </p>
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="seriesDetection"
-                           name="series_detection" {% if config.series_detection %}checked{% endif %}>
-                    <label class="form-check-label" for="seriesDetection">Detect TV discs</label>
-                </div>
-                <div class="form-text">Off means every disc is treated as a film.</div>
-            </div>
-            <div class="row">
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">Shortest episode (minutes)</label>
-                    <input type="number" class="form-control" min="1" max="240"
-                           name="series_min_minutes" value="{{ config.series_min_minutes }}">
-                </div>
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">Longest episode (minutes)</label>
-                    <input type="number" class="form-control" min="1" max="240"
-                           name="series_max_minutes" value="{{ config.series_max_minutes }}">
-                </div>
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">Episodes needed</label>
-                    <input type="number" class="form-control" min="2" max="20"
-                           name="series_min_episodes" value="{{ config.series_min_episodes }}">
-                    <div class="form-text">Fewer than this is a film with extras.</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Audio CDs -->
-    <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-music-note-beamed me-1"></i>Audio CDs</div>
-        <div class="card-body">
-            <p class="small text-secondary">
-                An audio CD has no video titles, so it takes its own path: cdparanoia
-                reads each track, ffmpeg encodes and tags it, and MusicBrainz supplies
-                the artist, album and track names. A CD nobody has submitted still
-                rips — it is filed under its disc ID instead.
-            </p>
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="audioCdEnabled"
-                           name="audio_cd_enabled" {% if config.audio_cd_enabled %}checked{% endif %}>
-                    <label class="form-check-label" for="audioCdEnabled">Rip audio CDs</label>
-                </div>
-                <div class="form-text">Off means an audio CD is left alone rather than ripped.</div>
-            </div>
-            <div class="row">
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">Format</label>
-                    <select class="form-select" name="audio_cd_format">
-                        <option value="flac" {% if config.audio_cd_format == 'flac' %}selected{% endif %}>FLAC (lossless)</option>
-                        <option value="mp3" {% if config.audio_cd_format == 'mp3' %}selected{% endif %}>MP3</option>
-                    </select>
-                </div>
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">MP3 bitrate</label>
-                    <input type="text" class="form-control" name="audio_cd_mp3_bitrate"
-                           value="{{ config.audio_cd_mp3_bitrate }}">
-                    <div class="form-text">Ignored when the format is FLAC.</div>
-                </div>
-                <div class="col-md-4 mb-3">
-                    <label class="form-label">Music folder</label>
-                    <input type="text" class="form-control" name="music_path"
-                           value="{{ config.music_path }}"
-                           placeholder="{{ defaults.music_path }}">
-                    <div class="form-text">Empty uses the folder shown.</div>
-                </div>
-            </div>
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">cdparanoia</label>
-                    <input type="text" class="form-control" name="cdparanoia_path"
-                           value="{{ config.cdparanoia_path }}">
-                </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">ffmpeg</label>
-                    <input type="text" class="form-control" name="ffmpeg_path"
-                           value="{{ config.ffmpeg_path }}">
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Data discs -->
-    <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-device-hdd me-1"></i>Data discs</div>
-        <div class="card-body">
-            <p class="small text-secondary">
-                There is nothing to transcode on a data disc, so the useful thing to
-                do with one is keep it: a byte-for-byte ISO image that outlives the
-                plastic. Only the recorded part of the disc is read, so the image is
-                the size of the data rather than the size the drive claims.
-            </p>
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="dataDiscEnabled"
-                           name="data_disc_enabled" {% if config.data_disc_enabled %}checked{% endif %}>
-                    <label class="form-check-label" for="dataDiscEnabled">Back data discs up as ISO images</label>
-                </div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Image folder</label>
-                <input type="text" class="form-control" name="data_disc_path"
-                       value="{{ config.data_disc_path }}"
-                       placeholder="{{ defaults.data_disc_path }}">
-                <div class="form-text">Empty uses the folder shown.</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Encoding settings -->
-    <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-camera-reels me-1"></i>Encoding</div>
-        <div class="card-body">
-            <div class="mb-3">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="transcodeEnabled"
-                           name="transcode_enabled" {% if config.transcode_enabled %}checked{% endif %}>
-                    <label class="form-check-label" for="transcodeEnabled">Transcode with HandBrake</label>
-                </div>
-                <div class="form-text">
-                    Off keeps the MKV exactly as MakeMKV produced it: lossless, and
-                    minutes rather than hours, at several times the size. Everything
-                    else is unchanged — the same folder, the same name, the same move
-                    into the library. The watch folder still transcodes; that is the
-                    only reason it exists.
-                </div>
-            </div>
-            <div class="mb-3 p-3 rounded border">
-                <div class="fw-semibold mb-2">
-                    <i class="bi bi-sliders me-1"></i>What you want out — either encoder
-                </div>
-                <div class="form-text mb-3">
-                    These three describe the <em>result</em>, so switching encoder
-                    does not silently change what you get. Left at their defaults
-                    they change nothing: HandBrake keeps every value in its preset,
-                    and the GPU encoder uses its own defaults.
-                </div>
+    <div class="tab-content">
+        <div class="tab-pane fade show active" id="pane-library" role="tabpanel" aria-labelledby="tab-library">
+        <!-- Paths -->
+        <div class="card mb-4">
+            <div class="card-header"><i class="bi bi-folder me-1"></i>Where films go</div>
+            <div class="card-body">
                 <div class="mb-3">
-                    <label class="form-label">Spoken language</label>
-                    <input type="text" class="form-control" name="audio_language"
-                           value="{{ config.audio_language }}" placeholder="swe">
+                    <label class="form-label">Completed films</label>
+                    <input type="text" class="form-control"
+                           name="completed_path" value="{{ config.completed_path }}">
                     <div class="form-text">
-                        As a disc spells it — <code>swe</code>, <code>eng</code>,
-                        <code>nor</code>; <code>sv</code> works too. Set it and
-                        you get that language and nothing else: an AAC stereo
-                        track and the surround track, which is the shape a
-                        HandBrake "Surround" preset produces. Empty keeps every
-                        track the disc has, in its own order — right when you
-                        have not said which language you want, a coin toss when
-                        the disc carries two.
+                        <code>/opt/adr/completed</code> keeps them on the container;
+                        <code>/mnt/media</code> is where a NAS or host storage is
+                        mounted — see <a href="/storage">Storage</a>.
                     </div>
                 </div>
                 <div class="mb-3">
-                    <label class="form-label">Quality (0 = leave it to the preset)</label>
-                    <input type="number" class="form-control" name="video_quality"
-                           value="{{ config.video_quality }}" min="0" max="35">
+                    <label class="form-label">Working folder</label>
+                    <input type="text" class="form-control"
+                           name="raw_path" value="{{ config.raw_path }}">
                     <div class="form-text">
-                        A quantiser: lower is better and bigger. Around 20–22 is
-                        close to the source. Fixed-function GPU encoders need a
-                        lower number than x264 for the same perceived quality.
+                        Where the rip lands before encoding. Stays on the container's
+                        own disk and is cleared after each job.
                     </div>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label">Cap height (0 = leave the source alone)</label>
-                    <input type="number" class="form-control" name="max_height"
-                           value="{{ config.max_height }}" min="0" max="2160">
-                    <div class="form-text">1080 halves the size of a 4K rip. Never upscales.</div>
-                </div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Encoder</label>
-                <select class="form-select" id="encoderBackend" name="encoder_backend">
-                    <option value="handbrake" {% if config.encoder_backend != 'vaapi' %}selected{% endif %}>
-                        HandBrake — presets, CPU or its own hardware support
-                    </option>
-                    <option value="vaapi" {% if config.encoder_backend == 'vaapi' %}selected{% endif %}>
-                        ffmpeg on the GPU (VA-API) — much faster, no presets
-                    </option>
-                </select>
-                <div class="form-text">
-                    HandBrake reaches Intel graphics through the Media SDK, which is
-                    deprecated and no longer starts on current drivers — so a container
-                    can have a working GPU that HandBrake cannot use. ffmpeg reaches the
-                    same hardware through VA-API. The Doctor page's encoder test tries
-                    both and tells you which works here.
-                </div>
-            </div>
-            <div id="vaapiSettings" class="{% if config.encoder_backend != 'vaapi' %}d-none{% endif %}">
-                <div class="mb-3">
-                    <label class="form-label">GPU codec</label>
-                    <select class="form-select" name="vaapi_codec">
-                        <option value="h264" {% if config.vaapi_codec == 'h264' %}selected{% endif %}>
-                            H.264 — plays on everything
-                        </option>
-                        <option value="hevc" {% if config.vaapi_codec == 'hevc' %}selected{% endif %}>
-                            HEVC / H.265 — same quality, noticeably smaller files
-                        </option>
-                    </select>
-                </div>
-                <div class="mb-3">
-                    <label class="form-label">Render node (optional)</label>
-                    <input type="text" class="form-control" name="vaapi_device"
-                           value="{{ config.vaapi_device }}" placeholder="/dev/dri/renderD128">
-                    <div class="form-text">Empty means the first one found.</div>
-                </div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">HandBrake preset</label>
-                <div class="input-group">
-                    <select class="form-select" id="presetSelect" name="handbrake_preset">
-                        <option value="{{ config.handbrake_preset }}" selected>{{ config.handbrake_preset or '— Select preset —' }}</option>
-                    </select>
-                    <button class="btn btn-outline-secondary" type="button" id="refreshPresetsBtn" title="Fetch presets from HandBrake">
-                        <i class="bi bi-arrow-clockwise"></i>
-                    </button>
-                </div>
-                <div class="form-text">
-                    Click <i class="bi bi-arrow-clockwise"></i> to fetch available presets from HandBrake
-                    (built-in + custom from the <code>presets/</code> folder).
-                </div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">HandBrake preset file (optional)</label>
-                <input type="text" class="form-control"
-                       name="handbrake_preset_file" value="{{ config.handbrake_preset_file }}">
-                <div class="form-text">
-                    Path to a JSON preset file exported from HandBrake GUI.
-                    Place the file in the <code>presets/</code> folder inside the project directory.
-                    Leave empty to use HandBrake's built-in presets.
-                </div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Extra HandBrake arguments</label>
-                <input type="text" class="form-control"
-                       name="handbrake_extra_args" value="{{ config.handbrake_extra_args }}">
-                <div class="form-text">Appended after the preset flag, e.g. "-e x265 -q 20"</div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Max parallel encode jobs</label>
-                <input type="number" class="form-control"
-                       name="max_encode_jobs" value="{{ config.max_encode_jobs }}" min="1" max="8">
-            </div>
         </div>
     </div>
-
-    <!-- Drives -->
-    <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-hdd me-1"></i>Drives</div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label class="form-label">Monitored drives</label>
-                <input type="text" class="form-control"
-                       name="drives" value="{{ config.drives }}">
-                <div class="form-text">"auto" for automatic detection, or comma-separated device paths (e.g. "/dev/sr0, /dev/sr1")</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Hidden drives -->
-    <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-eye-slash me-1"></i>Hidden Drives</div>
-        <div class="card-body" id="hiddenDrivesCard">
-            {% if hidden_drives %}
-            <p class="form-text mb-3">These drives are hidden from the dashboard. Click to show them again.</p>
-            <div class="d-flex gap-2 flex-wrap" id="hiddenDrivesList">
-                {% for dl in hidden_drives %}
-                <button class="btn btn-outline-success" onclick="unhideDrive('{{ dl }}')">
-                    <i class="bi bi-eye me-1"></i>{{ dl }}
-                </button>
-                {% endfor %}
-            </div>
-            {% else %}
-            <p class="text-secondary mb-0"><i class="bi bi-check-circle me-1"></i>No hidden drives. Hide drives from the dashboard using the <i class="bi bi-eye-slash"></i> button on the drive card.</p>
-            {% endif %}
-        </div>
-    </div>
-
-    <!-- Drive labels -->
-    <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-tag me-1"></i>Drive Labels</div>
-        <div class="card-body">
-            {% if all_drives %}
-            <p class="form-text mb-3">Give your DVD/Blu-ray drives custom names to easily tell them apart.</p>
-            {% for d in all_drives %}
-            <div class="row g-2 align-items-center mb-2">
-                <div class="col-auto">
-                    <span class="badge bg-secondary">{{ d.letter }}</span>
-                </div>
-                {% if d.model %}
-                <div class="col-auto">
-                    <small class="text-secondary">{{ d.model }}</small>
-                </div>
-                {% endif %}
-                <div class="col">
-                    <input type="text" class="form-control form-control-sm"
-                           id="driveLabel_{{ d.letter | replace(':', '') }}"
-                           placeholder="Enter name..."
-                           value="{{ d.label }}">
-                </div>
-                <div class="col-auto">
-                    <button class="btn btn-outline-primary btn-sm" onclick="saveDriveLabel('{{ d.letter }}')">
-                        <i class="bi bi-check-lg"></i>
-                    </button>
-                </div>
-            </div>
-            {% endfor %}
-            {% else %}
-            <p class="text-secondary mb-0">No drives found. Start ADR to detect optical drives.</p>
-            {% endif %}
-        </div>
-    </div>
-
-    <!-- Watch folder -->
-    <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-folder-symlink me-1"></i>Watch Folder</div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label class="form-label">Watched folder</label>
-                <input type="text" class="form-control"
-                       name="watch_path" value="{{ config.watch_path }}">
-                <div class="form-text">
-                    Path to a folder to watch. Video files (.mkv, .avi, .mp4, .iso, etc.) placed here
-                    are automatically converted using the HandBrake preset. Leave empty to disable.
-                </div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Watch folder output path</label>
-                <input type="text" class="form-control"
-                       name="watch_output_path" value="{{ config.watch_output_path }}">
-                <div class="form-text">Leave empty to use the same output folder as ripped discs (completed_path).</div>
-            </div>
-            <div class="mb-3">
-                <label class="form-label">Scan interval (seconds)</label>
-                <input type="number" class="form-control"
-                       name="watch_interval" value="{{ config.watch_interval }}" min="1" max="300">
-                <div class="form-text">How often the folder is scanned for new files.</div>
-            </div>
-        </div>
-    </div>
-
-    <!-- TMDb -->
-    <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-search me-1"></i>TMDb</div>
-        <div class="card-body">
-            <div class="mb-3">
-                <label class="form-label">TMDb API key</label>
-                <input type="text" class="form-control"
-                       name="tmdb_api_key" value="{{ config.tmdb_api_key }}">
-                <div class="form-text">
-                    Get a free key at
-                    <a href="https://www.themoviedb.org/settings/api" target="_blank" class="text-info">themoviedb.org</a>.
-                    Used to automatically identify movies and fetch posters.
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- MakeMKV registration key -->
-    <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-key me-1"></i>MakeMKV key</div>
-        <div class="card-body">
-            <p class="text-muted small mb-2">
-                MakeMKV needs a registration key. While MakeMKV is in beta a free key is
-                published on the forum and rotates roughly monthly. Click refresh to fetch
-                the current beta key automatically, or paste your own purchased key.
-            </p>
-            <div class="input-group mb-2">
-                <input type="text" class="form-control" id="makemkvKeyInput"
-                       placeholder="T-… (leave blank to fetch the free beta key)">
-                <button class="btn btn-outline-info" type="button" onclick="refreshMakemkvKey()">
-                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh / save key
-                </button>
-            </div>
-            <div id="makemkvKeyStatus" class="form-text"></div>
-        </div>
-    </div>
-
     <!-- Plex -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-collection-play me-1"></i>Plex</div>
@@ -562,7 +152,413 @@
             </div>
         </div>
     </div>
-
+    <!-- Duplicates -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-files me-1"></i>Duplicates</div>
+        <div class="card-body">
+            <p class="small text-secondary">
+                Before ripping, the disc is checked against three things: whether the
+                film's folder already holds video at the destination (the only check
+                that survives a cleared history), whether an earlier completed job has
+                the same TMDb id (a different pressing of the same film), and finally
+                the disc label. A duplicate is always logged and can be notified about.
+            </p>
+            <div class="mb-0">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="skipDuplicates"
+                           name="skip_duplicates" {% if config.skip_duplicates %}checked{% endif %}>
+                    <label class="form-check-label" for="skipDuplicates">
+                        Skip discs already ripped
+                    </label>
+                </div>
+                <div class="form-text">
+                    Off by default. Re-ripping is legitimate when the first attempt came
+                    from a scratched disc or a worse preset, and a false positive that
+                    silently cancels a disc is harder to notice than one that only warns.
+                    Turn it on when working through a large shelf.
+                </div>
+            </div>
+        </div>
+    </div>
+        </div>
+        <div class="tab-pane fade" id="pane-encoding" role="tabpanel" aria-labelledby="tab-encoding">
+        <!-- Encoding settings -->
+        <div class="card mb-4">
+            <div class="card-header"><i class="bi bi-camera-reels me-1"></i>Encoding</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="transcodeEnabled"
+                               name="transcode_enabled" {% if config.transcode_enabled %}checked{% endif %}>
+                        <label class="form-check-label" for="transcodeEnabled">Transcode with HandBrake</label>
+                    </div>
+                    <div class="form-text">
+                        Off keeps the MKV exactly as MakeMKV produced it: lossless, and
+                        minutes rather than hours, at several times the size. Everything
+                        else is unchanged — the same folder, the same name, the same move
+                        into the library. The watch folder still transcodes; that is the
+                        only reason it exists.
+                    </div>
+                </div>
+                <div class="mb-3 p-3 rounded border">
+                    <div class="fw-semibold mb-2">
+                        <i class="bi bi-sliders me-1"></i>What you want out — either encoder
+                    </div>
+                    <div class="form-text mb-3">
+                        These three describe the <em>result</em>, so switching encoder
+                        does not silently change what you get. Left at their defaults
+                        they change nothing: HandBrake keeps every value in its preset,
+                        and the GPU encoder uses its own defaults.
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Spoken language</label>
+                        <input type="text" class="form-control" name="audio_language"
+                               value="{{ config.audio_language }}" placeholder="swe">
+                        <div class="form-text">
+                            As a disc spells it — <code>swe</code>, <code>eng</code>,
+                            <code>nor</code>; <code>sv</code> works too. Set it and
+                            you get that language and nothing else: an AAC stereo
+                            track and the surround track, which is the shape a
+                            HandBrake "Surround" preset produces. Empty keeps every
+                            track the disc has, in its own order — right when you
+                            have not said which language you want, a coin toss when
+                            the disc carries two.
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Quality (0 = leave it to the preset)</label>
+                        <input type="number" class="form-control" name="video_quality"
+                               value="{{ config.video_quality }}" min="0" max="35">
+                        <div class="form-text">
+                            A quantiser: lower is better and bigger. Around 20–22 is
+                            close to the source. Fixed-function GPU encoders need a
+                            lower number than x264 for the same perceived quality.
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Cap height (0 = leave the source alone)</label>
+                        <input type="number" class="form-control" name="max_height"
+                               value="{{ config.max_height }}" min="0" max="2160">
+                        <div class="form-text">1080 halves the size of a 4K rip. Never upscales.</div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Encoder</label>
+                    <select class="form-select" id="encoderBackend" name="encoder_backend">
+                        <option value="handbrake" {% if config.encoder_backend != 'vaapi' %}selected{% endif %}>
+                            HandBrake — presets, CPU or its own hardware support
+                        </option>
+                        <option value="vaapi" {% if config.encoder_backend == 'vaapi' %}selected{% endif %}>
+                            ffmpeg on the GPU (VA-API) — much faster, no presets
+                        </option>
+                    </select>
+                    <div class="form-text">
+                        HandBrake reaches Intel graphics through the Media SDK, which is
+                        deprecated and no longer starts on current drivers — so a container
+                        can have a working GPU that HandBrake cannot use. ffmpeg reaches the
+                        same hardware through VA-API. The Doctor page's encoder test tries
+                        both and tells you which works here.
+                    </div>
+                </div>
+                <div id="vaapiSettings" class="{% if config.encoder_backend != 'vaapi' %}d-none{% endif %}">
+                    <div class="mb-3">
+                        <label class="form-label">GPU codec</label>
+                        <select class="form-select" name="vaapi_codec">
+                            <option value="h264" {% if config.vaapi_codec == 'h264' %}selected{% endif %}>
+                                H.264 — plays on everything
+                            </option>
+                            <option value="hevc" {% if config.vaapi_codec == 'hevc' %}selected{% endif %}>
+                                HEVC / H.265 — same quality, noticeably smaller files
+                            </option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Render node (optional)</label>
+                        <input type="text" class="form-control" name="vaapi_device"
+                               value="{{ config.vaapi_device }}" placeholder="/dev/dri/renderD128">
+                        <div class="form-text">Empty means the first one found.</div>
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">HandBrake preset</label>
+                    <div class="input-group">
+                        <select class="form-select" id="presetSelect" name="handbrake_preset">
+                            <option value="{{ config.handbrake_preset }}" selected>{{ config.handbrake_preset or '— Select preset —' }}</option>
+                        </select>
+                        <button class="btn btn-outline-secondary" type="button" id="refreshPresetsBtn" title="Fetch presets from HandBrake">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                    <div class="form-text">
+                        Click <i class="bi bi-arrow-clockwise"></i> to fetch available presets from HandBrake
+                        (built-in + custom from the <code>presets/</code> folder).
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">HandBrake preset file (optional)</label>
+                    <input type="text" class="form-control"
+                           name="handbrake_preset_file" value="{{ config.handbrake_preset_file }}">
+                    <div class="form-text">
+                        Path to a JSON preset file exported from HandBrake GUI.
+                        Place the file in the <code>presets/</code> folder inside the project directory.
+                        Leave empty to use HandBrake's built-in presets.
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Extra HandBrake arguments</label>
+                    <input type="text" class="form-control"
+                           name="handbrake_extra_args" value="{{ config.handbrake_extra_args }}">
+                    <div class="form-text">Appended after the preset flag, e.g. "-e x265 -q 20"</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Max parallel encode jobs</label>
+                    <input type="number" class="form-control"
+                           name="max_encode_jobs" value="{{ config.max_encode_jobs }}" min="1" max="8">
+                </div>
+        </div>
+    </div>
+        </div>
+        <div class="tab-pane fade" id="pane-discs" role="tabpanel" aria-labelledby="tab-discs">
+        <!-- Ripping settings -->
+        <div class="card mb-4">
+            <div class="card-header"><i class="bi bi-disc me-1"></i>Ripping</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">Minimum title length (seconds)</label>
+                    <input type="number" class="form-control"
+                           name="min_title_length" value="{{ config.min_title_length }}" min="0">
+                    <div class="form-text">Titles shorter than this are ignored (skips menus, trailers, etc.)</div>
+                </div>
+                <div class="mb-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="mainFeatureOnly"
+                               name="main_feature_only" {% if config.main_feature_only %}checked{% endif %}>
+                        <label class="form-check-label" for="mainFeatureOnly">Select main feature only</label>
+                    </div>
+                    <div class="form-text">Scans the disc first and rips only the longest title (main feature). Other titles such as trailers and bonus material are skipped.</div>
+                </div>
+        </div>
+    </div>
+    <!-- Drives -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-hdd me-1"></i>Drives</div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label">Monitored drives</label>
+                <input type="text" class="form-control"
+                       name="drives" value="{{ config.drives }}">
+                <div class="form-text">"auto" for automatic detection, or comma-separated device paths (e.g. "/dev/sr0, /dev/sr1")</div>
+            </div>
+        </div>
+    </div>
+    <!-- Drive labels -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-tag me-1"></i>Drive Labels</div>
+        <div class="card-body">
+            {% if all_drives %}
+            <p class="form-text mb-3">Give your DVD/Blu-ray drives custom names to easily tell them apart.</p>
+            {% for d in all_drives %}
+            <div class="row g-2 align-items-center mb-2">
+                <div class="col-auto">
+                    <span class="badge bg-secondary">{{ d.letter }}</span>
+                </div>
+                {% if d.model %}
+                <div class="col-auto">
+                    <small class="text-secondary">{{ d.model }}</small>
+                </div>
+                {% endif %}
+                <div class="col">
+                    <input type="text" class="form-control form-control-sm"
+                           id="driveLabel_{{ d.letter | replace(':', '') }}"
+                           placeholder="Enter name..."
+                           value="{{ d.label }}">
+                </div>
+                <div class="col-auto">
+                    <button class="btn btn-outline-primary btn-sm" onclick="saveDriveLabel('{{ d.letter }}')">
+                        <i class="bi bi-check-lg"></i>
+                    </button>
+                </div>
+            </div>
+            {% endfor %}
+            {% else %}
+            <p class="text-secondary mb-0">No drives found. Start ADR to detect optical drives.</p>
+            {% endif %}
+        </div>
+    </div>
+    <!-- Hidden drives -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-eye-slash me-1"></i>Hidden Drives</div>
+        <div class="card-body" id="hiddenDrivesCard">
+            {% if hidden_drives %}
+            <p class="form-text mb-3">These drives are hidden from the dashboard. Click to show them again.</p>
+            <div class="d-flex gap-2 flex-wrap" id="hiddenDrivesList">
+                {% for dl in hidden_drives %}
+                <button class="btn btn-outline-success" onclick="unhideDrive('{{ dl }}')">
+                    <i class="bi bi-eye me-1"></i>{{ dl }}
+                </button>
+                {% endfor %}
+            </div>
+            {% else %}
+            <p class="text-secondary mb-0"><i class="bi bi-check-circle me-1"></i>No hidden drives. Hide drives from the dashboard using the <i class="bi bi-eye-slash"></i> button on the drive card.</p>
+            {% endif %}
+        </div>
+    </div>
+    <!-- Television -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-collection-play me-1"></i>Television</div>
+        <div class="card-body">
+            <p class="small text-secondary">
+                A box-set disc has no "main feature" — several episodes of similar
+                length instead. These decide what that looks like. They are a
+                judgement, not a fact: anime runs to 24 minutes, a documentary series
+                to 55, and some box set will sit outside any default. Detection only
+                ever suggests; you confirm on the dashboard before encoding.
+            </p>
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="seriesDetection"
+                           name="series_detection" {% if config.series_detection %}checked{% endif %}>
+                    <label class="form-check-label" for="seriesDetection">Detect TV discs</label>
+                </div>
+                <div class="form-text">Off means every disc is treated as a film.</div>
+            </div>
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Shortest episode (minutes)</label>
+                    <input type="number" class="form-control" min="1" max="240"
+                           name="series_min_minutes" value="{{ config.series_min_minutes }}">
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Longest episode (minutes)</label>
+                    <input type="number" class="form-control" min="1" max="240"
+                           name="series_max_minutes" value="{{ config.series_max_minutes }}">
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Episodes needed</label>
+                    <input type="number" class="form-control" min="2" max="20"
+                           name="series_min_episodes" value="{{ config.series_min_episodes }}">
+                    <div class="form-text">Fewer than this is a film with extras.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Audio CDs -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-music-note-beamed me-1"></i>Audio CDs</div>
+        <div class="card-body">
+            <p class="small text-secondary">
+                An audio CD has no video titles, so it takes its own path: cdparanoia
+                reads each track, ffmpeg encodes and tags it, and MusicBrainz supplies
+                the artist, album and track names. A CD nobody has submitted still
+                rips — it is filed under its disc ID instead.
+            </p>
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="audioCdEnabled"
+                           name="audio_cd_enabled" {% if config.audio_cd_enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="audioCdEnabled">Rip audio CDs</label>
+                </div>
+                <div class="form-text">Off means an audio CD is left alone rather than ripped.</div>
+            </div>
+            <div class="row">
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Format</label>
+                    <select class="form-select" name="audio_cd_format">
+                        <option value="flac" {% if config.audio_cd_format == 'flac' %}selected{% endif %}>FLAC (lossless)</option>
+                        <option value="mp3" {% if config.audio_cd_format == 'mp3' %}selected{% endif %}>MP3</option>
+                    </select>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">MP3 bitrate</label>
+                    <input type="text" class="form-control" name="audio_cd_mp3_bitrate"
+                           value="{{ config.audio_cd_mp3_bitrate }}">
+                    <div class="form-text">Ignored when the format is FLAC.</div>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Music folder</label>
+                    <input type="text" class="form-control" name="music_path"
+                           value="{{ config.music_path }}"
+                           placeholder="{{ defaults.music_path }}">
+                    <div class="form-text">Empty uses the folder shown.</div>
+                </div>
+            </div>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">cdparanoia</label>
+                    <input type="text" class="form-control" name="cdparanoia_path"
+                           value="{{ config.cdparanoia_path }}">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">ffmpeg</label>
+                    <input type="text" class="form-control" name="ffmpeg_path"
+                           value="{{ config.ffmpeg_path }}">
+                </div>
+            </div>
+        </div>
+    </div>
+    <!-- Data discs -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-device-hdd me-1"></i>Data discs</div>
+        <div class="card-body">
+            <p class="small text-secondary">
+                There is nothing to transcode on a data disc, so the useful thing to
+                do with one is keep it: a byte-for-byte ISO image that outlives the
+                plastic. Only the recorded part of the disc is read, so the image is
+                the size of the data rather than the size the drive claims.
+            </p>
+            <div class="mb-3">
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" id="dataDiscEnabled"
+                           name="data_disc_enabled" {% if config.data_disc_enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="dataDiscEnabled">Back data discs up as ISO images</label>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Image folder</label>
+                <input type="text" class="form-control" name="data_disc_path"
+                       value="{{ config.data_disc_path }}"
+                       placeholder="{{ defaults.data_disc_path }}">
+                <div class="form-text">Empty uses the folder shown.</div>
+            </div>
+        </div>
+    </div>
+        </div>
+        <div class="tab-pane fade" id="pane-extras" role="tabpanel" aria-labelledby="tab-extras">
+        <!-- TMDb -->
+        <div class="card mb-4">
+            <div class="card-header"><i class="bi bi-search me-1"></i>TMDb</div>
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label">TMDb API key</label>
+                    <input type="text" class="form-control"
+                           name="tmdb_api_key" value="{{ config.tmdb_api_key }}">
+                    <div class="form-text">
+                        Get a free key at
+                        <a href="https://www.themoviedb.org/settings/api" target="_blank" class="text-info">themoviedb.org</a>.
+                        Used to automatically identify movies and fetch posters.
+                    </div>
+                </div>
+        </div>
+    </div>
+    <!-- MakeMKV registration key -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-key me-1"></i>MakeMKV key</div>
+        <div class="card-body">
+            <p class="text-muted small mb-2">
+                MakeMKV needs a registration key. While MakeMKV is in beta a free key is
+                published on the forum and rotates roughly monthly. Click refresh to fetch
+                the current beta key automatically, or paste your own purchased key.
+            </p>
+            <div class="input-group mb-2">
+                <input type="text" class="form-control" id="makemkvKeyInput"
+                       placeholder="T-… (leave blank to fetch the free beta key)">
+                <button class="btn btn-outline-info" type="button" onclick="refreshMakemkvKey()">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Refresh / save key
+                </button>
+            </div>
+            <div id="makemkvKeyStatus" class="form-text"></div>
+        </div>
+    </div>
     <!-- Notifications -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-bell me-1"></i>Notifications</div>
@@ -630,26 +626,53 @@
             <div class="form-text mt-2" id="notifyStatus"></div>
         </div>
     </div>
-
-    <!-- Web UI -->
+    <!-- Watch folder -->
     <div class="card mb-4">
-        <div class="card-header"><i class="bi bi-globe me-1"></i>Web Interface</div>
+        <div class="card-header"><i class="bi bi-folder-symlink me-1"></i>Watch Folder</div>
         <div class="card-body">
-            <div class="row">
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Host</label>
-                    <input type="text" class="form-control"
-                           name="web_host" value="{{ config.web_host }}">
+            <div class="mb-3">
+                <label class="form-label">Watched folder</label>
+                <input type="text" class="form-control"
+                       name="watch_path" value="{{ config.watch_path }}">
+                <div class="form-text">
+                    Path to a folder to watch. Video files (.mkv, .avi, .mp4, .iso, etc.) placed here
+                    are automatically converted using the HandBrake preset. Leave empty to disable.
                 </div>
-                <div class="col-md-6 mb-3">
-                    <label class="form-label">Port</label>
-                    <input type="number" class="form-control"
-                           name="web_port" value="{{ config.web_port }}" min="1" max="65535">
-                </div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Watch folder output path</label>
+                <input type="text" class="form-control"
+                       name="watch_output_path" value="{{ config.watch_output_path }}">
+                <div class="form-text">Leave empty to use the same output folder as ripped discs (completed_path).</div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Scan interval (seconds)</label>
+                <input type="number" class="form-control"
+                       name="watch_interval" value="{{ config.watch_interval }}" min="1" max="300">
+                <div class="form-text">How often the folder is scanned for new files.</div>
             </div>
         </div>
     </div>
-
+        </div>
+        <div class="tab-pane fade" id="pane-advanced" role="tabpanel" aria-labelledby="tab-advanced">
+        <!-- Web UI -->
+        <div class="card mb-4">
+            <div class="card-header"><i class="bi bi-globe me-1"></i>Web Interface</div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Host</label>
+                        <input type="text" class="form-control"
+                               name="web_host" value="{{ config.web_host }}">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Port</label>
+                        <input type="number" class="form-control"
+                               name="web_port" value="{{ config.web_port }}" min="1" max="65535">
+                    </div>
+                </div>
+        </div>
+    </div>
     <!-- Logging -->
     <div class="card mb-4">
         <div class="card-header"><i class="bi bi-journal-text me-1"></i>Logging</div>
@@ -662,6 +685,30 @@
                     {% endfor %}
                 </select>
             </div>
+        </div>
+    </div>
+    <!-- Tool paths -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-terminal me-1"></i>Where the tools live</div>
+        <div class="card-body">
+            <p class="small text-secondary">
+                The installer sets these and they are almost never wrong. Worth
+                looking at only if a tool was installed somewhere unusual.
+            </p>
+            <div class="row">
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">MakeMKV</label>
+                    <input type="text" class="form-control"
+                           name="makemkv_path" value="{{ config.makemkv_path }}">
+                </div>
+                <div class="col-md-6 mb-3">
+                    <label class="form-label">HandBrakeCLI</label>
+                    <input type="text" class="form-control"
+                           name="handbrake_path" value="{{ config.handbrake_path }}">
+                </div>
+            </div>
+        </div>
+    </div>
         </div>
     </div>
 
@@ -844,6 +891,21 @@ refreshBtn.addEventListener('click', loadPresets);
 
 // Auto-load presets on page load
 loadPresets();
+
+// ---- Remember which tab was open ----
+// The page reloads on some actions and is revisited constantly while setting
+// something up. Landing back on the first tab every time turns a five-second
+// change into a hunt.
+const TAB_KEY = 'adr.settings.tab';
+document.querySelectorAll('#settingsTabs button[data-bs-toggle="tab"]')
+    .forEach(button => button.addEventListener('shown.bs.tab', () => {
+        try { localStorage.setItem(TAB_KEY, button.id); } catch (e) { /* private mode */ }
+    }));
+try {
+    const saved = localStorage.getItem(TAB_KEY);
+    const button = saved && document.getElementById(saved);
+    if (button) new bootstrap.Tab(button).show();
+} catch (e) { /* no storage; the first tab is a fine default */ }
 
 // ---- Encoder backend: show only the settings that apply ----
 // A page that shows HandBrake preset fields while ffmpeg is doing the
