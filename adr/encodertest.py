@@ -275,3 +275,65 @@ def with_ctid(result: dict, ctid: str | None) -> dict:
         if step.get("fix"):
             step["fix"] = step["fix"].replace("{ctid}", ctid or "<CTID>")
     return result
+
+
+# ------------------------------------------------------------------ #
+# The way out that needs nothing from the Proxmox host
+#
+# Passing a GPU through means editing the container's config, which the
+# container deliberately cannot do. Changing the preset needs nothing but this
+# page — so when the encoder is the problem, that is the fix worth offering,
+# and offering it as a button rather than a sentence about where to go.
+# ------------------------------------------------------------------ #
+
+#: Built-in presets whose names give away a hardware encoder.
+_HARDWARE_IN_NAME = ("qsv", "nvenc", "vce", "vaapi", "videotoolbox", "mf ")
+
+
+def _builtin_presets(exe: str) -> list[str]:
+    """Every preset HandBrake knows without importing a file."""
+    code, output = _run([exe, "--preset-list"], PRESET_TIMEOUT)
+    if code == -1:
+        return []
+    names = []
+    for line in output.splitlines():
+        stripped = line.strip()
+        # HandBrake indents preset names under their category heading and
+        # follows each with a wrapped description; the names are the lines
+        # that are indented but not deeply, and carry no sentence punctuation.
+        if not stripped or stripped.endswith("/") or stripped.endswith("."):
+            continue
+        indent = len(line) - len(line.lstrip())
+        if 2 <= indent <= 8 and len(stripped) < 60:
+            names.append(stripped)
+    return names
+
+
+def software_alternatives(config) -> list[str]:
+    """Software presets that could replace the current one, closest first.
+
+    Ordered by resemblance to the name already configured, because someone who
+    chose "Super HQ 1080p30 Surround (Svenska)" wants that quality, not the
+    first entry in an alphabetical list. The stock "Super HQ 1080p30 Surround"
+    is the same preset without the hardware encoder, and that is the answer.
+    """
+    import difflib
+
+    names = [
+        name for name in _builtin_presets(config.handbrake_path)
+        if not any(marker in name.lower() for marker in _HARDWARE_IN_NAME)
+    ]
+    if not names:
+        return []
+
+    current = (config.handbrake_preset or "").lower()
+    # Strip a parenthesised suffix: a localised copy is still the same preset.
+    base = re.sub(r"\s*\([^)]*\)\s*$", "", current).strip()
+
+    # Resemblance orders the list; it must not shorten it. Every software
+    # preset HandBrake has is a valid choice, and dropping the ones that
+    # happen not to resemble the broken name would hide the good ones.
+    def similarity(name: str) -> float:
+        return difflib.SequenceMatcher(None, base, name.lower()).ratio()
+
+    return sorted(names, key=similarity, reverse=True)

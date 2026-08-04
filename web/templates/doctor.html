@@ -87,6 +87,23 @@
       video with it.
     </p>
     <div id="encoderResult"></div>
+    <div id="encoderRescue" class="d-none mt-3 p-3 rounded border border-info">
+      <div class="fw-semibold mb-1">
+        <i class="bi bi-cpu me-1"></i>Encode in software instead
+      </div>
+      <div class="small text-secondary mb-2">
+        Passing a GPU through means editing the container's config on the
+        Proxmox host, which this container cannot do. Changing the preset needs
+        nothing but this page — slower, and it works today.
+      </div>
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <select class="form-select form-select-sm w-auto" id="softwarePreset"></select>
+        <button class="btn btn-sm btn-info" id="useSoftwareBtn" onclick="useSoftware()">
+          Switch and re-test
+        </button>
+      </div>
+      <div id="rescueStatus" class="small mt-2"></div>
+    </div>
   </div>
 </div>
 
@@ -350,11 +367,65 @@ function testEncoder() {
             </li>`).join('')}
         </ul>`;
       loadChecks();
+      // Offer the way out that needs nothing from the host, but only when
+      // that is actually the problem — a button for a fix that does not
+      // apply is worse than no button.
+      const hardware = d.steps.some(s =>
+        s.status === 'fail' && /hardware encoder|qsv|nvenc|vaapi|quick sync/i.test(s.detail + s.fix));
+      if (hardware) offerSoftware();
     })
     .catch(err => {
       btn.disabled = false;
       btn.innerHTML = original;
       box.innerHTML = `<div class="alert alert-danger small mb-0">Could not run the test: ${escapeHtml(err.message)}</div>`;
+    });
+}
+
+function offerSoftware() {
+  fetch('/api/encoder/software-options')
+    .then(r => r.json())
+    .then(d => {
+      if (!d.options || !d.options.length) return;
+      const select = document.getElementById('softwarePreset');
+      select.innerHTML = d.options
+        .map(name => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`)
+        .join('');
+      document.getElementById('encoderRescue').classList.remove('d-none');
+    })
+    .catch(() => {});
+}
+
+function useSoftware() {
+  const btn = document.getElementById('useSoftwareBtn');
+  const status = document.getElementById('rescueStatus');
+  const preset = document.getElementById('softwarePreset').value;
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testing…';
+  status.className = 'small mt-2 text-secondary';
+  status.textContent = `Switching to '${preset}' and encoding a sample with it…`;
+
+  fetch('/api/encoder/use-software', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({preset}),
+  })
+    .then(r => r.json().then(d => ({ok: r.ok, d})))
+    .then(({ok, d}) => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      status.className = 'small mt-2 ' + (ok ? 'text-success' : 'text-danger');
+      status.textContent = d.message || (ok ? 'Done.' : 'It did not work.');
+      if (ok) {
+        document.getElementById('encoderRescue').classList.add('d-none');
+        testEncoder();
+      }
+    })
+    .catch(err => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      status.className = 'small mt-2 text-danger';
+      status.textContent = 'Could not switch: ' + err.message;
     });
 }
 

@@ -1,5 +1,34 @@
 # Changelog
 
+## 1.7.1
+
+**Passing a GPU through needs the Proxmox host. Changing the preset does not.**
+
+For someone without host access, "pass the GPU through or pick a software
+preset" is one instruction they cannot follow and one sentence telling them
+where to go and what to type. The second is now a button on the encode test:
+*Encode in software instead*.
+
+It lists the software presets HandBrake actually has — asked of HandBrake, not
+assumed — ordered by resemblance to the one configured. Someone who chose
+"Super HQ 1080p30 Surround (Svenska)" wanted that quality, so the stock "Super
+HQ 1080p30 Surround" is offered first rather than whatever comes first
+alphabetically. A parenthesised suffix is ignored when matching, because a
+localised copy is still the same preset.
+
+Then it switches and **re-runs the test**, because the entire point of that
+page is that a preset which cannot encode looks exactly like one that can
+until something tries. If the replacement fails too, the previous preset is
+restored: leaving a setting in place that has just been proven not to work is
+a worse state than the one you started in. And only presets from that list are
+accepted, since the endpoint exists to escape a hardware preset, not to set an
+arbitrary string that fails the same way.
+
+The button appears only when the failure was actually about hardware. A button
+for a fix that does not apply is worse than no button.
+
+---
+
 ## 1.7.0
 
 **The preset wanted a GPU the container did not have.** The encoder test

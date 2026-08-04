@@ -435,9 +435,17 @@ character major and a bind of `/dev/dri` — alongside the optical drive it
 already handles. It only offers this when the host actually has a render node,
 because binding a device that is not there would be noise.
 
-If you would rather not, a software preset (`Fast 1080p30`, or anything x264
-or x265) needs nothing from the host. It is slower and that is the whole
-trade.
+**No access to the host right now?** The encode test offers a second button:
+*Encode in software instead*. It lists the software presets HandBrake actually
+has, ordered by resemblance to the one configured — someone who chose "Super
+HQ 1080p30 Surround (Svenska)" wanted that quality, so the stock "Super HQ
+1080p30 Surround" is offered first — then switches and **re-runs the test to
+prove it**. If the new preset cannot encode either, the old one is put back,
+because leaving a setting in place that has just been shown not to work is
+worse than the state you started in.
+
+Software is slower than Quick Sync and that is the whole trade. Nothing about
+it needs the Proxmox host.
 
 ### Asking someone for help
 

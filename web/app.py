@@ -1365,6 +1365,79 @@ def _register_api_routes(app: Flask) -> None:
             os.environ.get("ADR_CTID", "").strip() or None,
         ))
 
+    @app.route("/api/encoder/software-options")
+    def api_encoder_software_options():
+        """Software presets that could replace the current one.
+
+        Offered because passing a GPU through means editing the container's
+        config from the Proxmox host, which the container cannot do and should
+        not be able to. Changing the preset needs nothing but this page.
+        """
+        from adr import encodertest
+
+        return jsonify({
+            "current": _config.handbrake_preset,
+            "options": encodertest.software_alternatives(_config),
+        })
+
+    @app.route("/api/encoder/use-software", methods=["POST"])
+    def api_encoder_use_software():
+        """Switch to a software preset and prove it works.
+
+        The test is re-run afterwards rather than reporting success on the
+        strength of having written a setting: the whole point of this page is
+        that a preset which cannot encode looks exactly like one that can
+        until something tries.
+        """
+        from adr import encodertest
+
+        data = request.get_json(silent=True) or {}
+        wanted = str(data.get("preset", "")).strip()
+        options = encodertest.software_alternatives(_config)
+        if not wanted:
+            if not options:
+                return jsonify({
+                    "ok": False,
+                    "message": "HandBrake offered no software presets to switch to.",
+                }), 409
+            wanted = options[0]
+        elif options and wanted not in options:
+            # Only presets this HandBrake actually has, and only software ones:
+            # the endpoint exists to escape a hardware preset, not to set an
+            # arbitrary string that fails the same way.
+            return jsonify({
+                "ok": False,
+                "message": f"'{wanted}' is not one of the software presets HandBrake offers.",
+            }), 400
+
+        previous = _config.handbrake_preset
+        _config.update({"handbrake_preset": wanted})
+        result = encodertest.with_ctid(
+            encodertest.test_encoder(_config),
+            os.environ.get("ADR_CTID", "").strip() or None,
+        )
+        if not result["ok"]:
+            # Put it back. Leaving a preset in place that has just been shown
+            # not to work would be a worse state than the one we started in.
+            _config.update({"handbrake_preset": previous})
+            return jsonify({
+                "ok": False,
+                "preset": wanted,
+                "reverted_to": previous,
+                "message": f"'{wanted}' could not encode either, so nothing was changed.",
+                "test": result,
+            }), 409
+
+        logger.info("Preset changed from %r to %r after a hardware failure",
+                    previous, wanted)
+        return jsonify({
+            "ok": True,
+            "preset": wanted,
+            "previous": previous,
+            "message": f"Now using '{wanted}'. It encoded a test sample, so ripping will work.",
+            "test": result,
+        })
+
     @app.route("/api/preflight")
     def api_preflight():
         """Whether a rip started right now would finish.
