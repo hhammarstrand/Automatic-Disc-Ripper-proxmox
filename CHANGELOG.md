@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.16.0
+
+**Updating from the web UI now refuses while a job is running, instead of
+failing.** 1.8.2 taught `update.sh` to protect a rip in progress — stopping the
+service takes MakeMKV with it, and MakeMKV writes each title as it goes, so the
+rip dies part-way and leaves files that look ordinary and are truncated
+mid-frame. But the Doctor page went on offering the button, so the click would
+be accepted, the unit would run, and the script would decline. A button offered
+and then declined teaches people the button is unreliable.
+
+It is withheld now, and says when it will come back.
+
+**And the page says that updating happens there at all.** The Version card had
+a "Check GitHub" button and no sentence explaining that this is how you update
+— which is worth stating, because the alternative people fall back to is a
+shell they should never need to open.
+
 ## 1.15.2
 
 **The README was describing an older application.** It promised a button

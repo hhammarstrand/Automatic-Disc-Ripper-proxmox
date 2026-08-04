@@ -886,7 +886,8 @@ would go straight through it. It says so and stops.
 
 ### Updating
 
-**From the web UI:** the **Doctor** page checks GitHub for a newer commit and
+**From the web UI — this is the normal way.** No shell, no `pct exec`. The
+**Doctor** page checks GitHub for a newer commit and
 applies it with one button, streaming the log as it goes. The service restarts
 itself at the end and the page reconnects.
 
@@ -898,6 +899,13 @@ the update by touching a flag file; `adr-update.path` notices and starts
 in that unit, never in the HTTP request — so the endpoint cannot be talked into
 fetching code from somewhere else. The most an unauthenticated caller on your
 LAN can do is ask for the update you already configured.
+
+The button is withheld while a job is ripping or encoding, and says so.
+Updating restarts the service, which takes MakeMKV with it — and MakeMKV writes
+each title as it goes, so the rip would die part-way and leave files that look
+perfectly ordinary in a directory listing and are truncated mid-frame. An
+offered button that then fails teaches people the button is unreliable; the
+refusal is the honest version.
 
 Running it as a separate unit also matters mechanically: `update.sh` stops and
 starts `adr.service`, so an update spawned as a child of the web app would kill

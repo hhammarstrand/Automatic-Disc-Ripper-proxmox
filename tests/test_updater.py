@@ -183,3 +183,79 @@ class TestUpdateStatus:
     def test_a_missing_log_is_not_an_error(self, monkeypatch):
         self._unit(monkeypatch, ActiveState="inactive", ExecMainStatus="0")
         assert updater.update_status()["log"] == ""
+
+
+class TestItWillNotUpdateOnTopOfARunningJob:
+    """update.sh stops the service, which kills MakeMKV with it. MakeMKV
+    writes each title as it goes, so the rip dies part-way and leaves files
+    that look perfectly ordinary in a directory listing and are truncated
+    mid-frame. An hour, gone, for a button press.
+
+    The script refuses for the same reason. Refusing here too is what makes
+    that an answer rather than a failed click — a button offered and then
+    declined teaches people the button is unreliable.
+    """
+
+    @pytest.fixture
+    def ready(self, monkeypatch, tmp_path):
+        """An install where everything else about updating is fine."""
+        unit = tmp_path / "adr-update.service"
+        unit.write_text("")
+        monkeypatch.setattr(updater, "UPDATE_UNIT", unit.name)
+        monkeypatch.setattr(
+            updater.Path, "exists", lambda self: True, raising=False)
+        monkeypatch.setattr(updater, "_unit_active", lambda unit: True)
+
+    def _job(self, status):
+        from adr.models import Job, JobStatus, get_session, init_db
+        from adr.utils import utcnow
+
+        init_db()
+        session = get_session()
+        session.add(Job(disc_label="X", title="X", drive="/dev/sr0",
+                        status=getattr(JobStatus, status), started_at=utcnow()))
+        session.commit()
+        session.close()
+
+    def test_a_rip_in_progress_blocks_it(self, ready):
+        self._job("RIPPING")
+        supported, why = updater.updates_supported()
+        assert supported is False
+        assert "ripping" in why
+
+    def test_an_encode_in_progress_blocks_it_too(self, ready):
+        self._job("ENCODING")
+        assert updater.updates_supported()[0] is False
+
+    def test_it_says_when_the_button_comes_back(self, ready):
+        """A refusal with no end in sight reads as a broken feature."""
+        self._job("RIPPING")
+        assert "when the job finishes" in updater.updates_supported()[1]
+
+    def test_a_finished_job_does_not_block_it(self, ready):
+        self._job("DONE")
+        assert updater.updates_supported()[0] is True
+
+    def test_no_jobs_at_all_does_not_block_it(self, ready):
+        from adr.models import init_db
+
+        init_db()
+        assert updater.updates_supported()[0] is True
+
+    def test_a_database_it_cannot_read_does_not_block_it(self, ready, monkeypatch):
+        """The script checks again before it stops anything, so the worst
+        case is an offer the script then declines — which beats refusing to
+        update because a query failed."""
+        monkeypatch.setattr(
+            updater, "_job_in_progress",
+            lambda: (_ for _ in ()).throw(RuntimeError("no database")))
+        with pytest.raises(RuntimeError):
+            updater._job_in_progress()
+
+    def test_the_helper_swallows_its_own_errors(self, monkeypatch):
+        import adr.models
+
+        monkeypatch.setattr(
+            adr.models, "get_session",
+            lambda: (_ for _ in ()).throw(RuntimeError("gone")))
+        assert updater._job_in_progress() == ""

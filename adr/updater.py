@@ -138,7 +138,44 @@ def updates_supported() -> tuple[bool, str]:
             "unnoticed. On the Proxmox host: "
             f"pct exec <CTID> -- systemctl enable --now {WATCH_UNIT}"
         )
+
+    busy = _job_in_progress()
+    if busy:
+        # update.sh stops the service, which kills MakeMKV with it. MakeMKV
+        # writes each title as it goes, so the rip dies part-way and leaves
+        # files that look perfectly ordinary in a directory listing and are
+        # truncated mid-frame — an hour gone.
+        #
+        # The script refuses for the same reason. Refusing here as well is
+        # what turns that into an answer rather than a failed click: a button
+        # offered and then declined teaches people the button is unreliable.
+        return False, (
+            f"A job is {busy} right now. Updating restarts the service, which "
+            "would kill it part-way and leave files that cannot be encoded. "
+            "The button comes back when the job finishes."
+        )
     return True, ""
+
+
+def _job_in_progress() -> str:
+    """What the pipeline is doing, or "" — never raises.
+
+    A database that cannot be read is not a reason to block an update; the
+    script checks again before it stops anything, so the worst case here is
+    an offer that the script then declines.
+    """
+    try:
+        from adr.models import ACTIVE_STATUSES, Job, get_session
+
+        session = get_session()
+        try:
+            job = session.query(Job).filter(Job.status.in_(ACTIVE_STATUSES)).first()
+            return job.status.value if job else ""
+        finally:
+            session.close()
+    except Exception:                            # noqa: BLE001 - never fatal
+        logger.debug("Could not check for running jobs", exc_info=True)
+        return ""
 
 
 def request_update() -> tuple[bool, str]:

@@ -18,6 +18,12 @@
     </button>
   </div>
   <div class="card-body">
+    <p class="small text-secondary mb-2">
+      Updating happens here — no shell, no <code>pct exec</code>. The app cannot
+      install its own update (it runs unprivileged, deliberately), so the button
+      asks a root-side systemd unit to do it and shows you the output live. Your
+      configuration, database and media are untouched.
+    </p>
     <div id="updateBox" class="text-secondary small">
       <span class="spinner-border spinner-border-sm me-2"></span>Checking for updates…
     </div>
