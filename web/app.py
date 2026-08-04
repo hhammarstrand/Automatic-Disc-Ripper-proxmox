@@ -77,6 +77,28 @@ def _isotime(value) -> str:
         return ""
 
 
+def _without_encoder_flag(extra: str) -> str:
+    """Drop any existing ``-e``/``--encoder`` from the extra arguments.
+
+    Appending a second one would leave HandBrake with two, and the winner is
+    whichever it parses last — so switching encoders would appear to work
+    once and then quietly stop working the next time it was changed.
+    """
+    parts = (extra or "").split()
+    out, skip = [], False
+    for part in parts:
+        if skip:
+            skip = False
+            continue
+        if part in ("-e", "--encoder"):
+            skip = True
+            continue
+        if part.startswith("--encoder="):
+            continue
+        out.append(part)
+    return " ".join(out)
+
+
 def _preflight():
     """Would a rip started now finish? Cached for a few seconds.
 
@@ -1515,6 +1537,68 @@ def _register_api_routes(app: Flask) -> None:
             "message": f"Back to HandBrake, preset '{_config.handbrake_preset}'.",
         })
 
+    @app.route("/api/encoder/use-handbrake-gpu", methods=["POST"])
+    def api_encoder_use_handbrake_gpu():
+        """Keep HandBrake and give it the GPU, by pinning the VA driver.
+
+        The case this exists for is invisible from every other angle: the GPU
+        works, the Media SDK is installed, HandBrake has Quick Sync compiled
+        in — and libva loads a VA driver the Media SDK was not built against,
+        so Quick Sync reports the hardware as absent. One environment variable
+        connects them, and nothing on the system says which value.
+        """
+        from adr import encodertest
+
+        data = request.get_json(silent=True) or {}
+        encoder = str(data.get("encoder", "")).strip()
+        driver = str(data.get("driver", "")).strip()
+
+        previous = {
+            "encoder_backend": _config.encoder_backend,
+            "libva_driver": _config.libva_driver,
+            "handbrake_extra_args": _config.handbrake_extra_args,
+        }
+        # -e overrides the preset's own encoder, so the preset keeps every
+        # other decision in it — the quality, the audio, the filters — and
+        # only the one setting that could not work is replaced.
+        extra = _without_encoder_flag(_config.handbrake_extra_args)
+        if encoder:
+            extra = (extra + f" -e {encoder}").strip()
+        _config.update({
+            "encoder_backend": "handbrake",
+            "libva_driver": driver,
+            "handbrake_extra_args": extra,
+        })
+
+        result = encodertest.with_ctid(
+            encodertest.test_encoder(_config),
+            os.environ.get("ADR_CTID", "").strip() or None,
+        )
+        if not result["ok"]:
+            # Proved, not assumed. Leaving settings in place that have just
+            # been shown not to work is worse than the state we started in.
+            _config.update(previous)
+            return jsonify({
+                "ok": False,
+                "message": "That combination did not encode after all, so "
+                           "nothing was changed.",
+                "test": result,
+            }), 409
+
+        logger.info("HandBrake GPU enabled: encoder=%r LIBVA_DRIVER_NAME=%r",
+                    encoder, driver)
+        return jsonify({
+            "ok": True,
+            "encoder": encoder,
+            "driver": driver,
+            "message": (
+                f"HandBrake is now encoding with {encoder or 'the preset'}"
+                + (f", using the {driver} driver" if driver else "")
+                + ". It encoded a test sample, so ripping will work."
+            ),
+            "test": result,
+        })
+
     @app.route("/api/preflight")
     def api_preflight():
         """Whether a rip started right now would finish.
@@ -1663,8 +1747,8 @@ def _register_api_routes(app: Flask) -> None:
         "makemkv_path", "handbrake_path", "raw_path", "completed_path",
         "min_title_length", "handbrake_preset", "handbrake_preset_file",
         "handbrake_extra_args", "max_encode_jobs", "transcode_enabled",
-        "encoder_backend", "vaapi_device", "vaapi_codec", "vaapi_quality",
-        "vaapi_max_height",
+        "encoder_backend", "libva_driver", "vaapi_device", "vaapi_codec",
+        "vaapi_quality", "vaapi_max_height",
         "drives", "tmdb_api_key",
         "watch_path", "watch_output_path", "watch_interval", "web_host",
         "web_port", "log_level", "log_path", "disabled_drives", "eject_after_rip",

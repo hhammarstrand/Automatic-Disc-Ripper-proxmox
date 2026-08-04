@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.9.0
+
+**HandBrake on the GPU: the variable nobody could have guessed.**
+
+Every check said this container's hardware encoding should work. The render
+node is passed through, the service user can open it, `vainfo` loads the Intel
+driver and lists encode profiles, the Media SDK runtime is installed, and
+HandBrake has Quick Sync compiled in. And Quick Sync still reported the
+hardware as absent.
+
+Quick Sync does not open the GPU itself. It goes through whichever VA-API
+driver **libva** loads, and the Media SDK is built against a particular one. A
+container with both `iHD` and `i965` installed can therefore have a working
+GPU, a working Media SDK, and no way to connect them — because libva picked
+the other driver. The symptom is `qsv is not available on the system`, which
+is also exactly what it says when there is no GPU at all.
+
+`LIBVA_DRIVER_NAME` decides it, and nothing on the system says which value is
+right. So the encoder test tries them: every hardware encoder against every
+candidate driver, each one a real two-second encode, stopping at the first
+that works. When one does, **Use HandBrake with the GPU** appears — it pins
+the driver, overrides only the preset's video encoder (everything else in the
+preset survives), and re-runs the test before committing. If the combination
+fails on the second look, every setting goes back.
+
+A note on what was removed: the probe used to try `vaapi_h264` and
+`vaapi_h265`. HandBrake has no VA-API encoder on any platform — Intel goes
+through Quick Sync, AMD through VCE — so those attempts could never have
+succeeded. It now tries `qsv_h265` and `qsv_h264` as the alternatives, which
+are encoders HandBrake actually has.
+
 ## 1.8.2
 
 **Updating in the middle of a rip destroyed the rip, quietly.** `update.sh`

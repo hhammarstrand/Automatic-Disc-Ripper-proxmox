@@ -51,10 +51,33 @@ def _last_meaningful(lines: list[str]) -> str:
     return candidates[-1]
 
 
+def encode_env(config) -> dict | None:
+    """The environment HandBrake should run in, or None to inherit ours.
+
+    Exists for one variable. HandBrake reaches an Intel GPU through Quick
+    Sync, and Quick Sync reaches the hardware through a VA-API driver — but
+    which one it gets is decided by ``LIBVA_DRIVER_NAME``, and libva's default
+    is not always the one the Media SDK was built against. A container with
+    both ``iHD`` and ``i965`` installed can therefore have a working GPU, a
+    working Quick Sync, and no way to connect them, purely because libva
+    picked the other driver.
+
+    Nothing here guesses which is right. The encoder test tries each one and
+    the setting records the answer.
+    """
+    driver = (getattr(config, "libva_driver", "") or "").strip()
+    if not driver:
+        return None
+    env = dict(os.environ)
+    env["LIBVA_DRIVER_NAME"] = driver
+    return env
+
+
 class HandBrakeEncoder:
     """Wrapper around HandBrakeCLI for video transcoding."""
 
     def __init__(self, config: Config):
+        self._config = config
         self._exe = config.handbrake_path
         self._preset = config.handbrake_preset
         self._preset_file = config.handbrake_preset_file
@@ -178,11 +201,16 @@ class HandBrakeEncoder:
         logger.info("Starting HandBrake encode: %s -> %s", input_path.name, output_path)
         logger.debug("HandBrake cmd: %s", " ".join(cmd))
 
+        env = encode_env(self._config)
+        if env is not None:
+            logger.debug("LIBVA_DRIVER_NAME=%s", env.get("LIBVA_DRIVER_NAME"))
+
         try:
             proc = subprocess.Popen(
                 cmd,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
+                env=env,
             )
             self._active_proc = proc
 

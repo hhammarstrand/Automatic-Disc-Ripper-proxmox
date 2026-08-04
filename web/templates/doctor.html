@@ -87,6 +87,24 @@
       video with it.
     </p>
     <div id="encoderResult"></div>
+    <div id="encoderHbGpu" class="d-none mt-3 p-3 rounded border border-success">
+      <div class="fw-semibold mb-1">
+        <i class="bi bi-gpu-card me-1"></i>Use HandBrake with the GPU
+      </div>
+      <div class="small text-secondary mb-2">
+        HandBrake <em>can</em> reach this GPU — the combination below encoded a
+        test sample. Your preset keeps everything else in it; only the video
+        encoder is overridden. This is the option that keeps HandBrake's
+        quality tuning <em>and</em> the hardware.
+      </div>
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <select class="form-select form-select-sm w-auto" id="hbGpuPairing"></select>
+        <button class="btn btn-sm btn-success" id="useHbGpuBtn" onclick="useHandBrakeGpu()">
+          Switch and re-test
+        </button>
+      </div>
+      <div id="hbGpuStatus" class="small mt-2"></div>
+    </div>
     <div id="encoderGpu" class="d-none mt-3 p-3 rounded border border-success">
       <div class="fw-semibold mb-1">
         <i class="bi bi-gpu-card me-1"></i>Encode on the GPU with ffmpeg
@@ -393,9 +411,11 @@ function testEncoder() {
       const hardware = d.steps.some(s =>
         s.status === 'fail' && /hardware encoder|qsv|nvenc|vaapi|quick sync/i.test(s.detail + s.fix));
       if (hardware) {
-        // The GPU first when it is genuinely available. Someone who chose a
-        // hardware preset wanted the hardware; offering software before the
-        // GPU that has just been shown to work would bury the better answer.
+        // Best answer first. Someone who chose a hardware preset wanted the
+        // hardware, so HandBrake-with-the-GPU beats ffmpeg (it keeps the
+        // preset), and both beat giving the hardware up for software.
+        const pairings = d.steps.map(s => s.working).find(x => x && x.length);
+        if (pairings) offerHandBrakeGpu(pairings);
         const gpu = d.steps.map(s => s.ffmpeg_gpu).find(x => x && x.ok);
         if (gpu) offerGpu(gpu);
         offerSoftware();
@@ -420,6 +440,51 @@ function offerSoftware() {
       document.getElementById('encoderRescue').classList.remove('d-none');
     })
     .catch(() => {});
+}
+
+function offerHandBrakeGpu(pairings) {
+  const select = document.getElementById('hbGpuPairing');
+  select.innerHTML = pairings.map(p => {
+    const label = p.driver
+      ? `${p.encoder} — with the ${p.driver} driver`
+      : `${p.encoder}`;
+    return `<option value="${escapeHtml(JSON.stringify(p))}">${escapeHtml(label)}</option>`;
+  }).join('');
+  document.getElementById('encoderHbGpu').classList.remove('d-none');
+}
+
+function useHandBrakeGpu() {
+  const btn = document.getElementById('useHbGpuBtn');
+  const status = document.getElementById('hbGpuStatus');
+  const pairing = JSON.parse(document.getElementById('hbGpuPairing').value);
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testing…';
+  status.className = 'small mt-2 text-secondary';
+  status.textContent = 'Encoding a sample with HandBrake on the GPU…';
+
+  fetch('/api/encoder/use-handbrake-gpu', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(pairing),
+  })
+    .then(r => r.json().then(d => ({ok: r.ok, d})))
+    .then(({ok, d}) => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      status.className = 'small mt-2 ' + (ok ? 'text-success' : 'text-danger');
+      status.textContent = d.message || (ok ? 'Done.' : 'It did not work.');
+      if (ok) {
+        document.getElementById('encoderGpu').classList.add('d-none');
+        document.getElementById('encoderRescue').classList.add('d-none');
+      }
+    })
+    .catch(err => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      status.className = 'small mt-2 text-danger';
+      status.textContent = 'Could not switch: ' + err.message;
+    });
 }
 
 const CODEC_LABELS = {

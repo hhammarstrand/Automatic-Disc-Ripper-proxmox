@@ -341,8 +341,8 @@ class TestAdviceWhenThePresetWantsAGPU:
             runtime={"ok": True, "drivers": [], "detail": "", "fix": ""},
         )
         advice = encodertest._hardware_advice(
-            "/bin/true", {"working": ["vaapi_h265"]})
-        assert "vaapi_h265" in advice
+            "/bin/true", {"working": [{"encoder": "qsv_h265", "driver": ""}]})
+        assert "qsv_h265" in advice
         assert "VideoEncoder" in advice, "it must say what to change"
 
     def test_a_working_gpu_that_still_encodes_nothing_is_an_honest_dead_end(
@@ -454,7 +454,7 @@ class TestShowingTheHardwareEvidence:
         assert "qsv_h264" in step["detail"], "what HandBrake reports"
         assert "the node is there" in step["detail"], "the passthrough"
         assert "vainfo" in step["detail"], "what the stack itself says"
-        assert "these hardware encoders work here" in step["detail"], (
+        assert "HandBrake encoded with" in step["detail"], (
             "the only line that is evidence rather than inference"
         )
         assert step["status"] == "ok"
@@ -477,18 +477,18 @@ class TestShowingTheHardwareEvidence:
         assert step["working"] == []
 
     def test_an_alternative_that_works_is_found(self, tmp_path, monkeypatch):
-        """The answer that keeps the hardware: Quick Sync will not start, and
-        VAAPI on the very same driver will."""
+        """The preset's own encoder will not start and another one will —
+        which keeps the hardware instead of retreating to the CPU."""
         self._gpu(monkeypatch)
         config = _config(tmp_path,
-                         handbrake_path=self._handbrake(tmp_path, working="vaapi_h265"),
+                         handbrake_path=self._handbrake(tmp_path, working="qsv_h265"),
                          handbrake_preset="Hardware",
                          handbrake_preset_file=self._preset(tmp_path),
                          ffmpeg_path=self._ffmpeg(tmp_path))
         step = next(s for s in encodertest.test_encoder(config)["steps"]
                     if s["name"] == "Hardware")
-        assert step["working"] == ["vaapi_h265"]
-        assert "vaapi_h265" in step["detail"]
+        assert step["working"] == [{"encoder": "qsv_h265", "driver": ""}]
+        assert "qsv_h265" in step["detail"]
 
     def test_a_decode_only_stack_is_flagged(self, tmp_path, monkeypatch):
         from adr import gpu
@@ -556,3 +556,119 @@ class TestAskingTheBuildWhatItHas:
 
     def test_a_handbrake_that_will_not_run_answers_nothing(self, tmp_path):
         assert encodertest.build_hardware_encoders(str(tmp_path / "gone")) == []
+
+
+class TestFindingTheDriverThatConnectsThem:
+    """The failure nobody could guess at.
+
+    Quick Sync does not open the GPU itself; it goes through whichever VA-API
+    driver libva loads, and the Media SDK is built against a particular one. A
+    container with both iHD and i965 installed can have a working GPU, a
+    working Media SDK and no way to connect them — reported as "qsv is not
+    available on the system", which is also what it says with no GPU at all.
+    """
+
+    def _handbrake(self, tmp_path, needs_driver=None, encoder="qsv_h264"):
+        """A HandBrake that only encodes with *encoder*, and only when
+        LIBVA_DRIVER_NAME matches *needs_driver* (None = any)."""
+        check = "" if needs_driver is None else f'''
+            [ "$LIBVA_DRIVER_NAME" = "{needs_driver}" ] || exit 3
+        '''
+        return _script(tmp_path / "hb", f"""
+            [ "$1" = "--help" ] && exit 0
+            case " $* " in *" --preset-list "*) echo 'Super HQ'; exit 0;; esac
+            enc=''; out=''
+            while [ $# -gt 0 ]; do
+              case "$1" in
+                -e) enc="$2"; shift;;
+                -o) out="$2"; shift;;
+              esac
+              shift
+            done
+            [ "$enc" = "{encoder}" ] || exit 3
+            {check}
+            [ -n "$out" ] && printf video > "$out"
+            exit 0
+        """)
+
+    def _sample(self, tmp_path):
+        sample = tmp_path / "sample.mkv"
+        sample.write_bytes(b"x")
+        return sample
+
+    def test_the_default_is_tried_first(self, tmp_path):
+        """Setting the variable when nothing needs it would be cargo cult."""
+        exe = self._handbrake(tmp_path)
+        working = encodertest._working_hardware_encoders(
+            exe, self._sample(tmp_path), tmp_path, "qsv_h264")
+        assert working[0] == {"encoder": "qsv_h264", "driver": ""}
+
+    def test_a_driver_that_is_needed_is_found(self, tmp_path):
+        exe = self._handbrake(tmp_path, needs_driver="i965")
+        working = encodertest._working_hardware_encoders(
+            exe, self._sample(tmp_path), tmp_path, "qsv_h264")
+        assert working[0] == {"encoder": "qsv_h264", "driver": "i965"}
+
+    def test_the_other_driver_too(self, tmp_path):
+        exe = self._handbrake(tmp_path, needs_driver="iHD")
+        working = encodertest._working_hardware_encoders(
+            exe, self._sample(tmp_path), tmp_path, "qsv_h264")
+        assert working[0]["driver"] == "iHD"
+
+    def test_nothing_working_is_an_empty_answer_not_a_guess(self, tmp_path):
+        exe = self._handbrake(tmp_path, encoder="never")
+        assert encodertest._working_hardware_encoders(
+            exe, self._sample(tmp_path), tmp_path, "qsv_h264") == []
+
+    def test_it_stops_at_the_first_driver_that_works(self, tmp_path):
+        """The answer is "one that works", not "all of them" — and each
+        attempt is a real encode."""
+        exe = self._handbrake(tmp_path)
+        working = encodertest._working_hardware_encoders(
+            exe, self._sample(tmp_path), tmp_path, "qsv_h264")
+        assert len([w for w in working if w["encoder"] == "qsv_h264"]) == 1
+
+    def test_the_driver_is_spelled_out_rather_than_applied_silently(self):
+        assert "LIBVA_DRIVER_NAME=i965" in encodertest._describe_pairing(
+            {"encoder": "qsv_h264", "driver": "i965"})
+
+    def test_no_driver_needs_no_explanation(self):
+        assert encodertest._describe_pairing(
+            {"encoder": "qsv_h264", "driver": ""}) == "qsv_h264"
+
+    def test_the_advice_names_the_variable_that_fixed_it(self, monkeypatch):
+        from adr import gpu
+
+        monkeypatch.setattr(gpu, "describe", lambda: {
+            "available": True, "nodes": ["/dev/dri/renderD128"],
+            "detail": "", "fix": "",
+            "runtime": {"ok": True, "drivers": [], "detail": "", "fix": ""},
+        })
+        advice = encodertest._hardware_advice(
+            "/bin/true", {"working": [{"encoder": "qsv_h264", "driver": "i965"}]})
+        assert "LIBVA_DRIVER_NAME" in advice
+        assert "i965" in advice
+        assert "can* use this GPU" in advice or "can use this GPU" in advice
+
+
+class TestTheEnvironmentHandBrakeRunsIn:
+    def test_nothing_is_set_when_nothing_is_configured(self):
+        from adr.encoder import encode_env
+
+        assert encode_env(types.SimpleNamespace(libva_driver="")) is None
+
+    def test_the_driver_is_passed_through(self):
+        from adr.encoder import encode_env
+
+        env = encode_env(types.SimpleNamespace(libva_driver="i965"))
+        assert env["LIBVA_DRIVER_NAME"] == "i965"
+
+    def test_the_rest_of_the_environment_survives(self):
+        """Replacing it wholesale would drop PATH and HOME, and MakeMKV and
+        HandBrake both read HOME."""
+        import os
+
+        from adr.encoder import encode_env
+
+        env = encode_env(types.SimpleNamespace(libva_driver="iHD"))
+        assert env.get("PATH") == os.environ.get("PATH")

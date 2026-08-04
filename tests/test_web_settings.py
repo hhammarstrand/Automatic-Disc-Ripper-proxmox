@@ -101,3 +101,27 @@ class TestDoctor:
     def test_the_audio_tool_check_is_on_the_page(self, client):
         ids = [check["id"] for check in client.get("/api/doctor").get_json()["checks"]]
         assert "audio_tools" in ids
+
+
+class TestSwitchingHandBrakeOntoTheGPU:
+    """The option the user actually wanted: keep HandBrake's preset tuning
+    and use the hardware, rather than choosing between them."""
+
+    def test_an_existing_encoder_flag_is_replaced_not_appended(self):
+        """Two -e flags leave HandBrake with whichever it parses last, so
+        changing encoders would appear to work once and then quietly stop."""
+        from web.app import _without_encoder_flag
+
+        assert _without_encoder_flag("-e qsv_h264 --verbose") == "--verbose"
+        assert _without_encoder_flag("--encoder qsv_h265") == ""
+        assert _without_encoder_flag("--encoder=qsv_h265 -x") == "-x"
+
+    def test_unrelated_arguments_survive(self):
+        from web.app import _without_encoder_flag
+
+        assert _without_encoder_flag("--verbose --no-dvdnav") == "--verbose --no-dvdnav"
+
+    def test_nothing_at_all(self):
+        from web.app import _without_encoder_flag
+
+        assert _without_encoder_flag("") == ""

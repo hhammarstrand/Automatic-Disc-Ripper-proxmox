@@ -453,6 +453,26 @@ driver is checked against the PCI vendor of the actual card, and the runtime
 is told apart from the *dispatcher* (`libvpl.so`), which loads a runtime and
 encodes nothing itself.
 
+### The variable that connects Quick Sync to the GPU
+
+Quick Sync does not open the GPU itself. It goes through whichever VA-API
+driver **libva** loads, and the Media SDK is built against a particular one. A
+container with both `iHD` and `i965` installed can therefore have a working
+GPU, a working Media SDK, and no way to connect them — because libva picked
+the other driver. What it reports is `qsv is not available on the system`,
+which is exactly what it says when there is no GPU at all.
+
+`LIBVA_DRIVER_NAME` decides it and nothing on the system says which value is
+right, so the encoder test tries them: every hardware encoder against every
+candidate driver, each attempt a real two-second encode. When a pairing works,
+**Use HandBrake with the GPU** pins the driver, overrides only the preset's
+video encoder — the rest of the preset survives — and re-runs the test before
+committing. If it fails on the second look, every setting goes back.
+
+HandBrake has no VA-API encoder on any platform: Intel goes through Quick
+Sync, AMD through VCE. `qsv_h265` and `qsv_h264` are the alternatives worth
+trying, and they are what the probe tries.
+
 ### When HandBrake cannot reach a GPU that works
 
 There is a case where everything above is correct and hardware encoding still

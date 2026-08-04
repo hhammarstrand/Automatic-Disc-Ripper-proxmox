@@ -74,6 +74,18 @@ VENDOR_DRIVERS = {
 #: Where the DRM class lives, for reading a node's PCI vendor.
 DRM_CLASS_DIR = Path("/sys/class/drm")
 
+#: The VA driver names worth trying in ``LIBVA_DRIVER_NAME``, in the order a
+#: person would. ``None`` means "leave it unset and let libva choose", which
+#: is right on most machines and is why it goes first.
+#:
+#: This matters more than it looks. Quick Sync does not open the GPU itself;
+#: it goes through whichever VA driver libva loads, and the Media SDK is built
+#: against a particular one. A container with both installed can have a
+#: working GPU, a working Media SDK, and no way to connect them — and the
+#: symptom is "qsv is not available on the system", identical to having no GPU
+#: at all.
+LIBVA_DRIVER_CANDIDATES = (None, "iHD", "i965")
+
 #: Quick Sync needs a second thing above the VA driver, and it comes in two
 #: parts that are easy to mistake for each other.
 #:

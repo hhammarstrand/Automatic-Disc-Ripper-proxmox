@@ -130,15 +130,22 @@ def _hardware_advice(exe: str = "", hardware: dict | None = None) -> str:
     working = (hardware or {}).get("working") or []
 
     if working:
-        # Something does work — which makes this a preset problem, and a
-        # cheap one. Naming the encoder matters: it is the difference between
-        # keeping the hardware and giving it up over one word in a file.
+        best = working[0]
+        if best["driver"]:
+            # The answer nobody could have guessed: the GPU, the Media SDK and
+            # HandBrake were all fine, and libva was loading the wrong driver.
+            return (
+                f"HandBrake *can* use this GPU — {best['encoder']} encoded the "
+                f"test sample once LIBVA_DRIVER_NAME was set to "
+                f"{best['driver']}. Without it libva loads a different VA "
+                "driver, and Quick Sync reports the hardware as absent. "
+                "'Use HandBrake with the GPU' below sets it and re-tests."
+            )
         return (
-            "Quick Sync will not start on this machine, but the GPU is not the "
-            f"problem: {', '.join(working)} encoded the test sample. Change "
-            "VideoEncoder in your preset file to one of those, or use "
-            "'Encode in software instead' below if you would rather not edit "
-            "the preset."
+            "The preset's encoder will not start, but this HandBrake can use "
+            f"the GPU: {', '.join(w['encoder'] for w in working)} encoded the "
+            "test sample. Change VideoEncoder in your preset file to one of "
+            "those, or use 'Use HandBrake with the GPU' below."
         )
 
     # The GPU is not lost just because HandBrake cannot reach it. ffmpeg goes
@@ -214,11 +221,12 @@ def _meaningful(output: str, limit: int = 6) -> str:
     return "\n".join(chosen[-limit:])
 
 
-def _run(cmd: list[str], timeout: int) -> tuple[int, str]:
+def _run(cmd: list[str], timeout: int, env: dict | None = None) -> tuple[int, str]:
     """Run HandBrake and return ``(exit code, combined output)``."""
     try:
         proc = subprocess.run(  # noqa: S603
             cmd, capture_output=True, text=True, errors="replace", timeout=timeout,
+            env=env,
         )
     except FileNotFoundError:
         return -1, f"{cmd[0]} is not installed."
@@ -361,13 +369,33 @@ def _make_sample(config, workdir: Path) -> tuple[Path | None, str]:
     return sample, ""
 
 
-def _try_encoder(exe: str, sample: Path, encoder: str, workdir: Path) -> bool:
-    """Can HandBrake actually encode with *encoder*, right now, on this box?"""
-    output = workdir / f"probe-{encoder}.mp4"
+def _try_encoder(
+    exe: str, sample: Path, encoder: str, workdir: Path, driver: str | None = None,
+) -> bool:
+    """Can HandBrake actually encode with *encoder*, right now, on this box?
+
+    *driver* is the value for ``LIBVA_DRIVER_NAME``, or None to leave libva to
+    its own choice. It is a parameter rather than a constant because which one
+    works is not knowable in advance — it depends on what the Media SDK in
+    this container was built against, which nothing reports.
+    """
+    output = workdir / f"probe-{encoder}-{driver or 'default'}.mp4"
+    env = None
+    if driver:
+        env = dict(os.environ)
+        env["LIBVA_DRIVER_NAME"] = driver
     code, _ = _run([
         exe, "-i", str(sample), "-o", str(output), "-e", encoder,
-    ], ENCODE_TIMEOUT)
+    ], ENCODE_TIMEOUT, env=env)
     return code == 0 and output.exists() and output.stat().st_size > 0
+
+
+def _describe_pairing(pairing: dict) -> str:
+    """"qsv_h264 (with LIBVA_DRIVER_NAME=i965)" — the driver matters and is
+    invisible, so it is spelled out rather than silently applied."""
+    if pairing["driver"]:
+        return f"{pairing['encoder']} (with LIBVA_DRIVER_NAME={pairing['driver']})"
+    return pairing["encoder"]
 
 
 def _hardware_step(
@@ -430,8 +458,8 @@ def _hardware_step(
         lines.append("No sample could be made, so no encoder was actually tried.")
     elif working:
         lines.append(
-            "Tried on two seconds of video, these hardware encoders work here: "
-            + ", ".join(working) + "."
+            "Tried on two seconds of video, HandBrake encoded with: "
+            + ", ".join(_describe_pairing(w) for w in working) + "."
         )
     else:
         lines.append(
@@ -469,22 +497,39 @@ def _hardware_step(
 
 def _working_hardware_encoders(
     exe: str, sample: Path | None, workdir: Path, wanted: str,
-) -> list[str]:
-    """Which hardware encoders actually encode, of the ones worth trying.
+) -> list[dict]:
+    """Which hardware encoder and VA driver pairing actually encodes.
 
-    Kept short deliberately: each candidate is a real encode, and a diagnostic
-    button that takes a minute is one nobody presses. The preset's own encoder
-    comes first because it is the question being asked; VAAPI follows because
-    on Linux it is the path that works when Quick Sync's runtime will not
-    start, and it uses the very driver vainfo just exercised.
+    Two things vary and neither can be read off anything: which encoder this
+    build can start, and which VA-API driver its Quick Sync was built against.
+    A container with both ``iHD`` and ``i965`` installed can have a working
+    GPU and a working Media SDK that cannot see each other, because libva
+    loaded the other one — and it reports that as "qsv is not available on the
+    system", which is what it also says when there is no GPU at all.
+
+    So every pairing is tried. Each is a real two-second encode, and the loop
+    stops at the first success per encoder, because the answer is "one that
+    works", not "all of them".
+
+    Returns ``[{"encoder", "driver"}]``, driver being "" for libva's default.
     """
+    from adr import gpu
+
     if sample is None:
         return []
-    candidates = [wanted] if wanted else []
-    for alternative in ("vaapi_h265", "vaapi_h264"):
-        if alternative not in candidates:
-            candidates.append(alternative)
-    return [enc for enc in candidates if _try_encoder(exe, sample, enc, workdir)]
+
+    encoders = [wanted] if wanted else []
+    for alternative in ("qsv_h265", "qsv_h264"):
+        if alternative not in encoders:
+            encoders.append(alternative)
+
+    working = []
+    for encoder in encoders:
+        for driver in gpu.LIBVA_DRIVER_CANDIDATES:
+            if _try_encoder(exe, sample, encoder, workdir, driver):
+                working.append({"encoder": encoder, "driver": driver or ""})
+                break
+    return working
 
 
 def _preset_file(config) -> str:

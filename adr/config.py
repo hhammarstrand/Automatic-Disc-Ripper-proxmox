@@ -42,6 +42,13 @@ _DEFAULTS: dict[str, Any] = {
     # through VA-API, and on current drivers that no longer initialises. The
     # Encoding page probes both and offers the switch when it applies.
     "encoder_backend": "handbrake",
+    # Which VA-API driver HandBrake's Quick Sync should load, via
+    # LIBVA_DRIVER_NAME. Empty leaves libva to choose, which is right on a
+    # machine with one driver installed and can be wrong on a container that
+    # has several: the Media SDK is built against a particular one, and libva
+    # picking the other looks exactly like having no GPU at all. The encoder
+    # test tries each and fills this in.
+    "libva_driver": "",
     # Empty means the first render node found.
     "vaapi_device": "",
     "vaapi_codec": "h264",
@@ -263,6 +270,10 @@ class Config:
         """
         value = str(self._data.get("encoder_backend", "handbrake") or "").lower()
         return value if value in ("handbrake", "vaapi") else "handbrake"
+
+    @property
+    def libva_driver(self) -> str:
+        return self._data.get("libva_driver", "") or ""
 
     @property
     def vaapi_device(self) -> str:

@@ -40,8 +40,8 @@ SAFE_KEYS = frozenset({
     # authenticate nothing, and redacting them makes the section about
     # hardware encoding unreadable in exactly the bundle someone pastes when
     # hardware encoding is what has gone wrong.
-    "encoder_backend", "vaapi_device", "vaapi_codec", "vaapi_quality",
-    "vaapi_max_height",
+    "encoder_backend", "libva_driver", "vaapi_device", "vaapi_codec",
+    "vaapi_quality", "vaapi_max_height",
     "drives", "disabled_drives", "no_eject_drives", "drive_labels",
     "eject_after_rip", "main_feature_only", "log_level",
     "require_completed_mount", "stage_locally", "auto_move_to_plex",
