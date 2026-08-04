@@ -159,6 +159,12 @@ function card(title, icon, d) {
   } else if (d.is_mount) {
     badge = '<span class="badge bg-info text-dark">mounted</span>';
     note = `${escapeHtml(d.fstype || 'local')} — ${escapeHtml(d.source || '')}`;
+  } else if (d.on_separate_filesystem) {
+    // A folder inside a mount is not itself a mount point, and calling it
+    // "container disk" would be flatly wrong — it is on the attached storage,
+    // which is the whole reason someone put their library there.
+    badge = '<span class="badge bg-info text-dark">inside a mount</span>';
+    note = `A folder on attached storage (${escapeHtml(d.fstype || 'mounted')}), not the container disk.`;
   } else {
     badge = '<span class="badge bg-secondary">container disk</span>';
     note = 'Not a mount point — this is local storage inside the container.';

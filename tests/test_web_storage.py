@@ -11,6 +11,7 @@ subtly wrong:
 """
 
 import os
+import pathlib
 
 import pytest
 import yaml
@@ -256,3 +257,58 @@ class TestSeriesIdentification:
         response = _client(_make_config(tmp_path)).post(
             f"/api/jobs/{job_id}/content-type", json={"content_type": "documentary"})
         assert response.status_code == 400
+
+
+class TestASubfolderOfAMountIsNotTheContainerDisk:
+    """A library inside the share is on the share, and must be labelled so.
+
+    os.path.ismount is true only of the mount point itself, so a folder inside
+    a mount fails it — which is why /mnt/media/Filmer was refused as a
+    destination, and why the Storage page would have called it "container
+    disk". Both are the same mistake: asking whether the path *is* a mount
+    rather than which filesystem it is *on*.
+    """
+
+    @pytest.fixture
+    def share(self):
+        import shutil
+        import uuid
+
+        if not os.path.ismount("/dev/shm"):
+            pytest.skip("no tmpfs at /dev/shm to stand in for the share")
+        root = pathlib.Path("/dev/shm") / f"adr-web-{uuid.uuid4().hex[:8]}"
+        (root / "Filmer").mkdir(parents=True)
+        yield root
+        shutil.rmtree(root, ignore_errors=True)
+
+    def test_the_api_reports_it_as_being_on_its_own_filesystem(self, share):
+        from adr.storage import describe_path
+
+        info = describe_path(share / "Filmer")
+        assert info["is_mount"] is False, "a folder inside a mount never is one"
+        assert info["on_separate_filesystem"] is True
+
+    def test_the_container_disk_is_still_reported_as_such(self, tmp_path):
+        from adr.storage import describe_path
+
+        assert describe_path(tmp_path)["on_separate_filesystem"] is False
+
+    def test_a_library_inside_the_share_raises_no_warning(self, tmp_path, share):
+        """The reported setup: share mounted at one path, library below it."""
+        config = _make_config(
+            tmp_path,
+            completed_path=str(share),
+            plex_path=str(share / "Filmer"),
+            auto_move_to_plex=True,
+            require_completed_mount=True,
+        )
+        data = _client(config).get("/api/storage").get_json()
+        assert data["warnings"] == [], data["warnings"]
+
+    def test_the_page_can_tell_the_two_apart(self, tmp_path, share):
+        config = _make_config(
+            tmp_path, completed_path=str(share), plex_path=str(share / "Filmer"),
+        )
+        paths = _client(config).get("/api/storage").get_json()["paths"]
+        assert paths["plex"]["on_separate_filesystem"] is True
+        assert paths["raw"]["on_separate_filesystem"] is False

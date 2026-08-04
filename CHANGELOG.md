@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.2
+
+The Storage page had the last copy of the same mistake. A folder inside a
+mount is not a mount point, so a library at `/mnt/media/Filmer` fell through
+to the final branch and was labelled **container disk — "this is local storage
+inside the container"**, which is flatly untrue: it is on the share, which is
+the whole reason it is there. A network share was saved from this by a
+separate check for its filesystem type; a plain bind-mount was not.
+
+It now says *inside a mount*, and names the filesystem it is actually on.
+
+---
+
 ## 1.4.1
 
 **A film library inside the share was refused, even with the share mounted,
