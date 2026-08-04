@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.7.3
+
+**`adr-doctor` gave a clean bill of health from a script that never looked.**
+
+It lives on the Proxmox host but is *copied* out of the container at install
+time, and the in-container updater cannot write to the host. So updating the
+application does not update it: an old copy silently skips every check added
+since it was taken, and then prints **"Nothing wrong found."**
+
+That is worse than failing. Someone updated to 1.7.2 for the GPU passthrough,
+ran `adr-doctor --fix`, and was told everything was fine by a copy that had no
+GPU section in it at all.
+
+It now carries the version it was taken from, asks the container what version
+it is running, and says plainly when the two differ — with the one command
+that refreshes it, and a prompt before going on. A stale copy can still be
+used deliberately; it can no longer pretend.
+
+The updater's parting advice was part of the problem too: a two-line `for`
+loop over a `name:name` mapping, easy to mistype and easy to skip. It is two
+plain `pct pull` commands now, and it says why they matter rather than
+mentioning them in passing.
+
+---
+
 ## 1.7.2
 
 **Passing the GPU through is only half of it.** `/dev/dri/renderD128` is

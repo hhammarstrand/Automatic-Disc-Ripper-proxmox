@@ -225,13 +225,14 @@ fi
 [[ -n "${ADR_CTID:-}" ]] && CTID_HINT="$ADR_CTID"
 
 echo
-msg_info "The host-side helpers are not updated by this script."
-msg_info "To refresh them, run this on the Proxmox host:"
+msg_warn "The host-side helpers were NOT updated — this script runs inside the"
+msg_warn "container and cannot write to the host. adr-doctor is a copy, and an old"
+msg_warn "copy skips whatever checks are new and then says 'nothing wrong found'."
 echo
-echo "    for f in setup-nas:adr-setup-nas adr-doctor:adr-doctor; do"
-echo "      pct pull ${CTID_HINT} /opt/adr/scripts/\${f%%:*}.sh /usr/local/sbin/\${f##*:} \\"
-echo "        && chmod +x /usr/local/sbin/\${f##*:}"
-echo "    done"
+msg_info "Run these two on the Proxmox host, in this order:"
 echo
-msg_info "Then check the container over with:  adr-doctor --fix ${CTID_HINT}"
+echo "    pct pull ${CTID_HINT} /opt/adr/scripts/adr-doctor.sh /usr/local/sbin/adr-doctor && chmod +x /usr/local/sbin/adr-doctor"
+echo "    pct pull ${CTID_HINT} /opt/adr/scripts/setup-nas.sh /usr/local/sbin/adr-setup-nas && chmod +x /usr/local/sbin/adr-setup-nas"
+echo
+msg_info "Then:  adr-doctor --fix ${CTID_HINT}"
 echo

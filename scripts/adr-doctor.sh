@@ -24,6 +24,16 @@
 #
 set -euo pipefail
 
+# The version of the application this copy of the script was taken from.
+#
+# adr-doctor lives on the Proxmox host, but it is *copied* out of the
+# container at install time — so updating the app does not update this. A
+# stale copy silently skips whatever checks were added since, and then reports
+# "nothing wrong found", which is worse than failing: it is a clean bill of
+# health from a script that never looked. Compared against the container's own
+# version below.
+ADR_DOCTOR_VERSION="1.7.3"
+
 CT_MEDIA_PATH="${CT_MEDIA_PATH:-/mnt/media}"
 # The user the service runs as inside the container.
 RUN_USER="${RUN_USER:-adr}"
@@ -66,8 +76,35 @@ note_fixed()   { REPAIRED=$((REPAIRED + 1)); msg_ok "fixed: $*"; }
 would_fix()    { msg_warn "        run with --fix to: $*"; }
 
 echo
-echo "  Automatic Disc Ripper — checking container ${CTID}"
+echo "  Automatic Disc Ripper — checking container ${CTID}  (doctor ${ADR_DOCTOR_VERSION})"
 echo
+
+# ----------------------------------------------------------------------------- #
+# 0. Is this copy of the script current?
+#
+# It is copied out of the container at install time and never updated by the
+# in-container updater, which cannot write to the host. An old copy quietly
+# skips every check added since it was taken and then prints "nothing wrong
+# found" — a clean bill of health from a script that never looked for the
+# problem. Better to say so before running anything.
+# ----------------------------------------------------------------------------- #
+CT_VERSION="$(pct exec "$CTID" -- /opt/adr/.venv/bin/python -c \
+    'import sys; sys.path.insert(0, "/opt/adr"); import adr; print(adr.__version__)' \
+    2>/dev/null | tr -d "[:space:]")" || CT_VERSION=""
+
+if [[ -n "$CT_VERSION" && "$CT_VERSION" != "$ADR_DOCTOR_VERSION" ]]; then
+    msg_warn "This adr-doctor is ${ADR_DOCTOR_VERSION}; container ${CTID} runs ${CT_VERSION}."
+    msg_warn "        Checks added after ${ADR_DOCTOR_VERSION} will be skipped, and a clean"
+    msg_warn "        result below would not mean much. Refresh it first:"
+    echo
+    echo "    pct pull ${CTID} /opt/adr/scripts/adr-doctor.sh /usr/local/sbin/adr-doctor && chmod +x /usr/local/sbin/adr-doctor"
+    echo
+    if [[ "$ASSUME_YES" -eq 0 ]]; then
+        read -r -p "  Carry on with the old version anyway? [y/N] " reply
+        [[ "$reply" =~ ^[Yy]$ ]] || exit 1
+        echo
+    fi
+fi
 
 # ----------------------------------------------------------------------------- #
 # 1. Which optical drives does the HOST have?
