@@ -490,10 +490,18 @@ encoding and delivers a failed job would be the same mistake in a new place.
 
 What it gives up is presets: HandBrake's are a large body of tuning and none
 of it transfers, so this offers what VA-API actually exposes — a codec, a
-quality number and a resolution cap. Audio is copied when the container can
-hold it and re-encoded to AC-3 640k when it cannot, because MP4 cannot carry
-the TrueHD or DTS-HD a Blu-ray rip arrives with, and ffmpeg only discovers
-that when it writes the trailer — after the entire encode.
+quality number and a resolution cap.
+
+Audio follows the shape of HandBrake's "Surround" presets, because that is
+what someone coming from one expects and because the shape is right: **an AAC
+stereo track first, then every source track behind it.** Copying the disc's
+AC-3 straight through and stopping there is legal, and it is a track plenty of
+hardware will not decode from an MP4 — a TV, a phone, a browser — so the film
+plays silently and nothing says why. The stereo track is the guarantee that
+something comes out of the speakers, and it is marked default so the player
+does not choose a language by coin toss. Anything MP4 cannot hold at all
+(TrueHD, DTS-HD) becomes AC-3 at 640k, decided up front rather than
+discovered when ffmpeg writes the trailer after the entire encode.
 
 Changing the encoder takes effect on the next job, without restarting the
 service.

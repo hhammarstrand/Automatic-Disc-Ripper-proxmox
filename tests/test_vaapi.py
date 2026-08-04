@@ -95,48 +95,90 @@ class TestTheCommandItBuilds:
 
 
 class TestWhatHappensToTheAudio:
-    """A rip's surround track is often the reason the disc was kept."""
+    """A film that plays silently is worse than one that fails to encode.
 
-    def test_audio_is_copied_when_the_container_can_hold_it(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: ["ac3", "aac"])
-        assert vaapi.audio_args("ffmpeg", Path("in.mkv"), tmp_path / "out.mp4") == [
-            "-c:a", "copy",
-        ]
+    Copying the disc's AC-3 into an MP4 and stopping there is legal and is
+    what a lot of hardware will not decode — a TV, a phone, a browser. The
+    film plays with no sound and nothing anywhere says why. HandBrake's
+    "Surround" presets put an AAC stereo track first for exactly this reason,
+    and that is the shape mirrored here.
+    """
 
-    def test_truehd_into_mp4_is_re_encoded_rather_than_attempted(
+    def _plan(self, tmp_path, monkeypatch, codecs, suffix=".mp4"):
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: codecs)
+        return vaapi.audio_plan("ffmpeg", Path("in.mkv"), tmp_path / f"out{suffix}")
+
+    def test_a_stereo_track_comes_first(self, tmp_path, monkeypatch):
+        """The guarantee that something comes out of the speakers."""
+        plan = self._plan(tmp_path, monkeypatch, ["ac3"])
+        assert plan[plan.index("-c:a:0") + 1] == "aac"
+        assert plan[plan.index("-ac:a:0") + 1] == "2"
+
+    def test_the_stereo_track_is_the_default_one(self, tmp_path, monkeypatch):
+        """Otherwise the player picks whichever track the file lists first,
+        which on a multi-language disc is a coin toss over the language."""
+        plan = self._plan(tmp_path, monkeypatch, ["ac3", "ac3"])
+        assert plan[plan.index("-disposition:a:0") + 1] == "default"
+
+    def test_the_surround_track_is_kept_alongside_it(self, tmp_path, monkeypatch):
+        """Surround is usually the reason the disc was kept."""
+        plan = self._plan(tmp_path, monkeypatch, ["ac3"])
+        assert plan[plan.index("-c:a:1") + 1] == "copy"
+
+    def test_every_source_track_survives(self, tmp_path, monkeypatch):
+        """A Swedish disc carries Swedish and English. Picking for the user
+        would be choosing which language they are allowed."""
+        plan = self._plan(tmp_path, monkeypatch, ["ac3", "ac3", "ac3"])
+        assert "-c:a:1" in plan and "-c:a:2" in plan and "-c:a:3" in plan
+
+    def test_truehd_becomes_ac3_rather_than_failing_at_the_end(
         self, tmp_path, monkeypatch,
     ):
         """MP4 cannot hold TrueHD, and ffmpeg only finds out when it writes
         the trailer — which is to say after the entire encode."""
-        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: ["truehd"])
-        args = vaapi.audio_args("ffmpeg", Path("in.mkv"), tmp_path / "out.mp4")
-        assert args[:2] == ["-c:a", "ac3"]
+        plan = self._plan(tmp_path, monkeypatch, ["truehd"])
+        assert plan[plan.index("-c:a:1") + 1] == "ac3"
+        assert plan[plan.index("-b:a:1") + 1] == "640k"
 
     def test_dts_too(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: ["dts"])
-        assert "ac3" in vaapi.audio_args("ffmpeg", Path("i.mkv"), tmp_path / "o.mp4")
+        plan = self._plan(tmp_path, monkeypatch, ["dts"])
+        assert plan[plan.index("-c:a:1") + 1] == "ac3"
 
-    def test_one_bad_track_is_enough_to_re_encode(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: ["ac3", "dts"])
-        assert "ac3" in vaapi.audio_args("ffmpeg", Path("i.mkv"), tmp_path / "o.mp4")[1]
+    def test_each_track_is_judged_on_its_own(self, tmp_path, monkeypatch):
+        """One DTS track is no reason to re-encode the AC-3 next to it."""
+        plan = self._plan(tmp_path, monkeypatch, ["ac3", "dts"])
+        assert plan[plan.index("-c:a:1") + 1] == "copy"
+        assert plan[plan.index("-c:a:2") + 1] == "ac3"
 
     def test_the_fallback_keeps_surround(self, tmp_path, monkeypatch):
-        """Downmixing to stereo would throw away the reason for the rip."""
-        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: ["truehd"])
-        args = vaapi.audio_args("ffmpeg", Path("i.mkv"), tmp_path / "o.mp4")
-        assert "-ac" not in args, "no downmix"
-        assert "640k" in args, "enough bitrate for 5.1"
+        """640k is enough for 5.1; downmixing it would throw away the reason
+        for the rip. Only the added stereo track is two channels."""
+        plan = self._plan(tmp_path, monkeypatch, ["truehd"])
+        assert "-ac:a:1" not in plan, "the surround track keeps its channels"
 
     def test_unreadable_audio_takes_the_safe_road(self, tmp_path, monkeypatch):
         """Re-encoding costs quality on a track that might have copied fine.
         The other way round costs the whole encode."""
-        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: [])
-        assert "ac3" in vaapi.audio_args("ffmpeg", Path("i.mkv"), tmp_path / "o.mp4")
+        plan = self._plan(tmp_path, monkeypatch, [])
+        assert "ac3" in plan
 
-    def test_mkv_copies_anything(self, tmp_path):
-        assert vaapi.audio_args("ffmpeg", Path("i.mkv"), tmp_path / "o.mkv") == [
-            "-c:a", "copy",
-        ]
+    def test_mkv_copies_anything(self, tmp_path, monkeypatch):
+        """MKV holds TrueHD, DTS-HD and PGS, so nothing has to be decided."""
+        plan = self._plan(tmp_path, monkeypatch, ["truehd"], suffix=".mkv")
+        assert plan == ["-map", "0:a?", "-c:a", "copy"]
+
+    def test_the_plan_brings_its_own_maps(self, tmp_path, monkeypatch):
+        """How many output tracks there are depends on the source, so the
+        mapping and the codecs have to be decided together or they drift."""
+        plan = self._plan(tmp_path, monkeypatch, ["ac3"])
+        assert plan[:4] == ["-map", "0:a:0", "-map", "0:a?"]
+
+    def test_the_command_does_not_map_audio_twice(self, tmp_path):
+        """A second -map 0:a? in build_command would duplicate every track."""
+        cmd = vaapi.build_command(
+            "ffmpeg", Path("in.mkv"), tmp_path / "out.mp4", _config(tmp_path),
+            ["-map", "0:a:0", "-map", "0:a?", "-c:a:0", "aac"])
+        assert cmd.count("0:a?") == 1
 
     def test_mp4_does_not_carry_disc_subtitles(self, tmp_path):
         """PGS and VOBSUB are bitmaps and MP4 holds neither. Mapping them in

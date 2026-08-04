@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.9.1
+
+**Films encoded on the GPU played silently.** The ffmpeg path copied the
+disc's AC-3 into the MP4 and stopped there. That is legal, and it is a track
+plenty of hardware will not decode from an MP4 — a TV, a phone, a browser. The
+film plays with no sound, and nothing anywhere says why.
+
+HandBrake's "Surround" presets put an **AAC stereo track first** for exactly
+this reason, and that is now the shape: a stereo downmix as track one, marked
+default, with every source track behind it. The stereo track is the guarantee
+that something comes out of the speakers; the surround track is there for
+whatever can use it. Marking it default matters too — otherwise the player
+picks whichever track the file lists first, which on a multi-language disc is
+a coin toss over the language.
+
+Every source track is kept rather than one being chosen. A Swedish disc
+carries Swedish and English, and picking would be deciding which language the
+user is allowed. Each is judged on its own: one DTS track is no reason to
+re-encode the AC-3 next to it.
+
 ## 1.9.0
 
 **HandBrake on the GPU: the variable nobody could have guessed.**

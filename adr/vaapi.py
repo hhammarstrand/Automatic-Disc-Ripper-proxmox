@@ -93,26 +93,57 @@ def audio_streams(exe: str, path: Path) -> list[str]:
     return [line.strip().lower() for line in proc.stdout.splitlines() if line.strip()]
 
 
-def audio_args(exe: str, input_path: Path, output_path: Path) -> list[str]:
-    """How to handle audio: copy it, or re-encode what the container refuses.
+#: The stereo track every player can decode, and its bitrate. 192k is what
+#: HandBrake's own presets use for AAC stereo.
+STEREO_CODEC = "aac"
+STEREO_BITRATE = "192k"
 
-    Copying is right whenever it works — a lossless surround track is often
-    the reason someone keeps a disc, and re-encoding it by default would
-    quietly throw that away. But MP4 cannot hold TrueHD or DTS, and ffmpeg
-    only discovers that when it comes to write the trailer, which is to say
-    after the encode. Better to decide now.
+
+def audio_plan(exe: str, input_path: Path, output_path: Path) -> list[str]:
+    """The audio mapping and codecs for one encode.
+
+    Modelled on what HandBrake's "Surround" presets produce, because that is
+    what someone coming from one expects and because the shape is right:
+    **an AAC stereo track first, then the original surround track.**
+
+    Copying the disc's AC-3 straight through and stopping there is what this
+    used to do, and it is a track a lot of hardware will not decode from an
+    MP4 — a TV, a phone, a browser. The film plays with no sound and nothing
+    anywhere says why. The stereo track is the guarantee that something comes
+    out of the speakers; the surround track is there for whatever can use it.
+
+    Every source track is kept, not just one. A Swedish disc carries Swedish
+    and English, and picking for the user would be choosing which language
+    they are allowed.
+
+    MKV holds anything, so there it is a straight copy.
     """
     if output_path.suffix.lower() != ".mp4":
-        return ["-c:a", "copy"]
+        return ["-map", "0:a?", "-c:a", "copy"]
+
     codecs = audio_streams(exe, input_path)
-    if codecs and all(codec in MP4_AUDIO for codec in codecs):
-        return ["-c:a", "copy"]
     if not codecs:
-        # Nothing could be read about the audio. Re-encoding is the safe
-        # guess: it costs quality on a track that might have copied fine,
-        # where the other way round costs the entire encode.
-        return list(FALLBACK_AUDIO)
-    return list(FALLBACK_AUDIO)
+        # Nothing could be read about the audio. AC-3 for everything is the
+        # safe guess: it costs quality on a track that might have copied
+        # fine, where the other way round costs the entire encode.
+        return ["-map", "0:a?", *FALLBACK_AUDIO]
+
+    # Output 0 is a stereo downmix of the first source track; outputs 1..n
+    # are the source tracks themselves, in order.
+    args = ["-map", "0:a:0", "-map", "0:a?"]
+    args += [
+        "-c:a:0", STEREO_CODEC, "-ac:a:0", "2", "-b:a:0", STEREO_BITRATE,
+    ]
+    for index, codec in enumerate(codecs):
+        out = index + 1
+        if codec in MP4_AUDIO:
+            args += [f"-c:a:{out}", "copy"]
+        else:
+            args += [f"-c:a:{out}", "ac3", f"-b:a:{out}", "640k"]
+    # Without this the player picks whichever track the file happens to list
+    # first, which on a multi-language disc is a coin toss over the language.
+    args += ["-disposition:a:0", "default"]
+    return args
 
 
 def build_command(
@@ -150,12 +181,14 @@ def build_command(
         "-vaapi_device", _device(config),
         "-i", str(input_path),
         "-map", "0:v:0",
-        "-map", "0:a?",
         "-vf", ",".join(chain),
         "-c:v", codec,
         "-qp", str(quality),
     ]
-    cmd += audio if audio is not None else ["-c:a", "copy"]
+    # The audio plan brings its own -map entries: how many output tracks there
+    # are depends on what the source holds, so the mapping and the codecs have
+    # to be decided together or they drift apart.
+    cmd += audio if audio is not None else ["-map", "0:a?", "-c:a", "copy"]
 
     if output_path.suffix.lower() == ".mp4":
         # Disc subtitles are bitmap — PGS on Blu-ray, VOBSUB on DVD — and MP4
@@ -281,7 +314,7 @@ class VaapiEncoder:
         duration = probe_duration(self._exe, input_path)
         cmd = build_command(
             self._exe, input_path, output_path, self._config,
-            audio_args(self._exe, input_path, output_path),
+            audio_plan(self._exe, input_path, output_path),
         )
         # Progress on stdout in a parseable form, so stderr stays free for the
         # explanation when something goes wrong.
