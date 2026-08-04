@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.3.3
+
+**A job that failed before ripping left an empty log.** The terminal icon in
+the history is where you look to answer "why did this fail". Two failures wrote
+nothing to it: the destination check, which runs before any tool does, and an
+unhandled error in the pipeline itself. Those are the two most likely early
+failures there are, so a run of red jobs could be entirely undiagnosable from
+the interface — precisely when the interface is needed.
+
+Both now write what happened, traceback included.
+
+**The disc-type decision is recorded for every disc**, not only for audio CDs
+and data discs. A video disc logged nothing, which left no way to tell
+"classification ran and chose video" from "classification never ran" — the
+first question worth asking when a disc that used to rip stops.
+
+Also fixed: job logs default to a `logs/` folder beside the database, which in
+the test suite meant the checkout. Tests wrote there and read each other's
+files back, so an assertion about a log could pass on stale content from an
+earlier run. Two of the tests added here did exactly that until the isolation
+was fixed — the same mistake the database made before it was given a temporary
+directory per test.
+
+---
+
 ## 1.3.2
 
 **On a phone the history page could not tell you why anything failed.** The

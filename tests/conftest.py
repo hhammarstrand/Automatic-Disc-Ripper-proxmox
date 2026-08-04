@@ -31,6 +31,15 @@ def isolated_database(tmp_path, monkeypatch):
     monkeypatch.setattr(models, "DATABASE_PATH", str(db_path))
     monkeypatch.setattr(config_module, "DATABASE_PATH", str(db_path))
 
+    # Job logs default to PROJECT_ROOT/logs, which without this is the
+    # checkout. Two consequences, both real, and both the same ones the
+    # database had: the suite wrote into the repository, and job 1's log from
+    # an earlier run was still there for the next test to read back — so an
+    # assertion about a log could pass on stale content from a different test.
+    # joblog imports PROJECT_ROOT inside the function, so patching it here is
+    # enough.
+    monkeypatch.setattr(config_module, "PROJECT_ROOT", tmp_path)
+
     # get_engine() caches in a module global; clear it so the next call builds
     # an engine against the path just set, and again afterwards so nothing
     # leaks into the following test.

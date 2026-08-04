@@ -847,11 +847,15 @@ class DrivePipeline:
             # cannot be reached — which is the worst kind, because it sends
             # someone off debugging hardware that is fine.
             disc = disctype.classify(self.drive)
+            # Recorded for every disc, not only the unusual ones. A video disc
+            # that said nothing here left no way to tell "classification ran
+            # and chose video" from "classification never ran" — and that is
+            # the first question to ask when a disc that used to rip stops.
+            JobLog(self._config, job.id).append("detect", disc.detail)
+            logger.info("Job %s: %s", job.id, disc.detail)
             if disc.kind != disctype.KIND_VIDEO:
                 job.content_type = disc.kind
                 session.commit()
-                JobLog(self._config, job.id).append("detect", disc.detail)
-                logger.info("Job %s: %s", job.id, disc.detail)
             if disc.kind == disctype.KIND_AUDIO:
                 self._run_audio_cd(job, session, disc)
                 return
@@ -901,6 +905,14 @@ class DrivePipeline:
                 job.completed_at = utcnow()
                 session.commit()
                 logger.error("Job %s aborted before ripping: %s", job.id, dest_err)
+                # Into the job log too. Failing here wrote nothing to it, so
+                # the one place someone looks for "why did this fail" — the
+                # terminal icon in the history — was empty for exactly the
+                # failure that happens before any tool has run.
+                JobLog(self._config, job.id).append(
+                    "detect",
+                    f"Aborted before ripping: {dest_err}",
+                )
                 Notifier(self._config).job_failed(job)
                 return
 
@@ -1261,6 +1273,13 @@ class DrivePipeline:
             import traceback
             tb = traceback.format_exc()
             logger.exception("Pipeline error for drive %s", self.drive)
+            if job is not None:
+                # Best-effort and separate from the database write below: if
+                # the session is what broke, the traceback still has to land
+                # somewhere the user can read it.
+                with contextlib.suppress(Exception):
+                    JobLog(self._config, job.id).append("detect", f"Pipeline error: {exc}")
+                    JobLog(self._config, job.id).append("detect", tb)
             if job is not None and session is not None:
                 try:
                     job.status = JobStatus.ERROR
