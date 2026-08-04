@@ -52,6 +52,37 @@ def _last_meaningful(lines: list[str]) -> str:
     return candidates[-1]
 
 
+def describe_audio_request(config) -> str:
+    """What HandBrake has been told about audio, for the job log.
+
+    HandBrake's language rules live in the preset — a JSON file nobody opens
+    mid-encode — so when a film comes out in the wrong language there is
+    nothing on screen saying what was asked for. Three places it could have
+    gone wrong (the setting, the preset, the disc) and no way to tell them
+    apart.
+    """
+    from adr.encodingsettings import handbrake_overrides
+    from adr.vaapi import normalise_language
+
+    wanted = normalise_language(getattr(config, "audio_language", "") or "")
+    if not wanted:
+        preset = getattr(config, "handbrake_preset", "") or "the preset"
+        return (
+            f"Audio: no spoken language is set, so '{preset}' decides which "
+            "tracks to keep, using the rules inside it. "
+            "Settings → Encoding → Spoken language overrides that."
+        )
+
+    overrides = handbrake_overrides(config)
+    flags = " ".join(overrides) if overrides else "(none)"
+    return (
+        f"Audio: asking HandBrake for '{wanted}' — {flags}. How many matching "
+        "tracks it keeps is the preset's AudioTrackSelectionBehavior; if the "
+        "disc has no track in that language the preset falls back to its own "
+        "rules."
+    )
+
+
 def encode_env(config) -> dict | None:
     """The environment HandBrake should run in, or None to inherit ours.
 
@@ -207,6 +238,16 @@ class HandBrakeEncoder:
 
         logger.info("Starting HandBrake encode: %s -> %s", input_path.name, output_path)
         logger.debug("HandBrake cmd: %s", " ".join(cmd))
+
+        # What the audio was told to do, in the job's own log.
+        #
+        # HandBrake takes its language rules from the preset, which is a
+        # thousand-line JSON file nobody reads mid-encode. So when the result
+        # comes out in the wrong language there is nothing on screen saying
+        # what was asked for — and the setting, the preset and the disc are
+        # three different places it could have gone wrong.
+        if self.log_sink:
+            self.log_sink(describe_audio_request(self._config))
 
         env = encode_env(self._config)
         if env is not None:

@@ -188,6 +188,52 @@ SURROUND_BITRATE = "640k"
 SURROUND_FALLBACK = "aac"
 
 
+def describe_audio_choice(streams: list[dict], wanted: str) -> str:
+    """One line saying which audio track will lead, and why.
+
+    Written for the job log, and specifically for the question "why is this
+    still in English". That has three causes which look identical from the
+    outside: nothing was asked for, the disc carries no language tags at all,
+    or the language asked for is not on this disc. They need three different
+    things done about them — set the language, accept that this disc cannot be
+    matched, or check what the disc actually holds — so the line says which.
+    """
+    if not streams:
+        return "Audio: nothing could be read about the tracks on this file."
+
+    listing = ", ".join(
+        f"{index}:{stream.get('language') or 'untagged'} ({stream['codec']})"
+        for index, stream in enumerate(streams)
+    )
+
+    if not wanted:
+        return (
+            f"Audio: {len(streams)} track(s) — {listing}. No spoken language is "
+            "set, so the disc's own order is kept and track 0 leads. "
+            "Settings → Encoding → Spoken language changes that."
+        )
+
+    tagged = [s for s in streams if s.get("language")]
+    if not tagged:
+        return (
+            f"Audio: {len(streams)} track(s) — {listing}. None of them carries a "
+            f"language tag, so '{wanted}' cannot be matched against anything and "
+            "track 0 leads. That is how the disc was authored, not a setting."
+        )
+
+    chosen = preferred_track(streams, wanted)
+    if language_matches(streams[chosen].get("language", ""), wanted):
+        return (
+            f"Audio: {len(streams)} track(s) — {listing}. Track {chosen} matches "
+            f"'{wanted}' and leads; it is kept as a stereo downmix and as the "
+            "surround track."
+        )
+    return (
+        f"Audio: {len(streams)} track(s) — {listing}. None is '{wanted}', so the "
+        "disc's own order is kept and track 0 leads."
+    )
+
+
 def audio_plan(
     exe: str, input_path: Path, output_path: Path, language: str = "",
 ) -> list[str]:
@@ -461,10 +507,22 @@ class VaapiEncoder:
         result.output_path = output_path
 
         duration = probe_duration(self._exe, input_path)
+        wanted = getattr(self._config, "audio_language", "") or ""
+        streams = audio_streams(self._exe, input_path)
+
+        # Say which track was chosen and why, in the job's own log.
+        #
+        # "still in English" has three completely different causes — nothing
+        # was asked for, the disc tags no languages so nothing can be matched,
+        # or the language asked for is not on this disc — and from the outside
+        # they look identical. Each needs a different thing done about it, so
+        # the log says which one it was rather than leaving it to be guessed.
+        if self.log_sink:
+            self.log_sink(describe_audio_choice(streams, wanted))
+
         cmd = build_command(
             self._exe, input_path, output_path, self._config,
-            audio_plan(self._exe, input_path, output_path,
-                       getattr(self._config, "audio_language", "") or ""),
+            audio_plan(self._exe, input_path, output_path, wanted),
         )
         # Progress on stdout in a parseable form, so stderr stays free for the
         # explanation when something goes wrong.

@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.16.2
+
+**"Still in English" now says why.** That symptom has four causes which look
+identical from outside: no spoken language is set, the disc carries no language
+tags so nothing can be matched, the language asked for is not on this disc, or
+HandBrake's preset made the decision. They need four different things done
+about them, and there was nothing on screen to tell them apart.
+
+Each encode now writes one line into the job's own log — on the History page,
+beside the film it is about, not one `pct exec` away:
+
+```
+Audio: 2 track(s) — 0:eng (ac3), 1:swe (ac3). Track 1 matches 'swe' and leads;
+it is kept as a stereo downmix and as the surround track.
+
+Audio: 2 track(s) — 0:untagged (ac3), 1:untagged (ac3). None of them carries a
+language tag, so 'swe' cannot be matched against anything and track 0 leads.
+That is how the disc was authored, not a setting.
+```
+
+The HandBrake path says what it passed and what the preset still decides,
+because its language rules live in a JSON file nobody opens mid-encode — so
+when a film came out in the wrong language, nothing anywhere said what had
+been asked for.
+
 ## 1.16.1
 
 **Every time on screen was in UTC.** A fresh LXC is `Etc/UTC` and nothing ever
