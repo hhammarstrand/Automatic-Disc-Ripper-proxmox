@@ -236,6 +236,21 @@ def _hardware(config) -> str:
     # gets hardware speed or an hour per film.
     elsewhere = vaapi.probe(config)
     lines.append(f"ffmpeg gpu   {elsewhere['detail']}")
+
+    # The last question, and the only one the checks above cannot answer.
+    #
+    # "The driver is installed, the runtime is installed, ffmpeg encodes on
+    # this GPU, and HandBrake says qsv is not available" is where every check
+    # above runs out. The dispatcher knows which library it opened and why it
+    # turned it down; it just has to be asked. Only worth asking when there is
+    # something to explain — a working HandBrake needs no post-mortem.
+    if wanted and not any("qsv" in name for name in encoders):
+        dispatcher = gpu.qsv_dispatcher_log(config.handbrake_path)
+        lines.append(f"qsv verdict  {dispatcher['summary']}")
+        if dispatcher["log"]:
+            lines.append("")
+            lines.append("oneVPL dispatcher log (tail):")
+            lines.append(dispatcher["log"].strip())
     return "\n".join(lines)
 
 

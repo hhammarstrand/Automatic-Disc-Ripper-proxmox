@@ -327,3 +327,83 @@ class TestHardwareEncoding:
             "detail": "present", "fix": "",
         })
         assert diagnostics.check_hardware_encoding(_config(tmp_path))["status"] == "ok"
+
+
+class TestTheBundleCarriesTheQsvVerdict:
+    """The bundle is what gets pasted, so the answer has to be in it.
+
+    Without this the exchange is: paste the bundle, read "qsv runtime
+    libmfxhw64.so" and "hb encoders none", and still not know whether the
+    runtime was missing, refused, or never asked for.
+    """
+
+    def _config(self, tmp_path, **over):
+        import types
+
+        data = {
+            "handbrake_path": str(tmp_path / "HandBrakeCLI"),
+            "handbrake_preset": "Super HQ 1080p30 Surround (Svenska)",
+            "handbrake_preset_file": "",
+            "encoder_backend": "handbrake",
+            "audio_language": "swe", "video_quality": 0, "max_height": 0,
+            "ffmpeg_path": str(tmp_path / "ffmpeg"),
+            "vaapi_device": "", "vaapi_codec": "h264", "libva_driver": "",
+        }
+        data.update(over)
+        return types.SimpleNamespace(**data)
+
+    def test_it_is_asked_when_a_hardware_preset_has_no_hardware_encoder(
+        self, tmp_path, monkeypatch,
+    ):
+        from adr import bundle
+
+        asked = []
+        monkeypatch.setattr(
+            "adr.gpu.qsv_dispatcher_log",
+            lambda path, driver="iHD": asked.append(path) or {
+                "ran": True, "driver": driver,
+                "log": "libvpl: unloading libmfxhw64.so.1\n",
+                "summary": "The dispatcher opened libmfxhw64.so and turned it down.",
+            },
+        )
+        monkeypatch.setattr("adr.encodertest.build_hardware_encoders", lambda p: [])
+        monkeypatch.setattr(
+            "adr.gpu.preset_wants_hardware", lambda f, n: "qsv_h264",
+        )
+        text = bundle._hardware(self._config(tmp_path))
+        assert asked, "the dispatcher was never asked"
+        assert "qsv verdict" in text
+        assert "turned it down" in text
+        assert "oneVPL dispatcher log" in text
+
+    def test_a_working_handbrake_needs_no_post_mortem(self, tmp_path, monkeypatch):
+        from adr import bundle
+
+        asked = []
+        monkeypatch.setattr(
+            "adr.gpu.qsv_dispatcher_log",
+            lambda path, driver="iHD": asked.append(path) or {},
+        )
+        monkeypatch.setattr(
+            "adr.encodertest.build_hardware_encoders", lambda p: ["qsv_h264"],
+        )
+        monkeypatch.setattr(
+            "adr.gpu.preset_wants_hardware", lambda f, n: "qsv_h264",
+        )
+        bundle._hardware(self._config(tmp_path))
+        assert asked == [], "a working setup was made to run a diagnostic"
+
+    def test_a_software_preset_is_not_interrogated_about_quick_sync(
+        self, tmp_path, monkeypatch,
+    ):
+        from adr import bundle
+
+        asked = []
+        monkeypatch.setattr(
+            "adr.gpu.qsv_dispatcher_log",
+            lambda path, driver="iHD": asked.append(path) or {},
+        )
+        monkeypatch.setattr("adr.encodertest.build_hardware_encoders", lambda p: [])
+        monkeypatch.setattr("adr.gpu.preset_wants_hardware", lambda f, n: "")
+        bundle._hardware(self._config(tmp_path))
+        assert asked == []

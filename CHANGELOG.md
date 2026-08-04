@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.17.4
+
+**Asking the dispatcher instead of asking the user.** Every hardware check in
+this application reasons from file names, and on one machine they all ran out
+at the same place: the iHD driver loads and offers four encode profiles,
+`libmfxhw64.so` is installed, ffmpeg encodes h264 on the GPU — and HandBrake
+still says `encqsvInit: qsv is not available on the system`.
+
+That message covers three different problems with three different answers: no
+runtime, a runtime that refuses the chip, and a runtime the driver will not
+talk to. Nothing that reads a directory listing can tell them apart.
+
+The oneVPL dispatcher can, and will if asked. `ONEVPL_DISPATCHER_LOG=ON`
+makes it name every library it opened and why it turned each one down, and
+HandBrake builds its encoder list at startup, so `--help` is enough to make
+the attempt happen. The diagnostics bundle now runs that and includes both a
+one-line verdict and the log's tail — but only when there is something to
+explain: a hardware preset that has no hardware encoder. A working HandBrake
+gets no post-mortem.
+
 ## 1.17.3
 
 **The GPU packages were skipped by the check that was meant to install

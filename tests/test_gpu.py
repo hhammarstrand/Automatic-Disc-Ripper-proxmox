@@ -519,3 +519,78 @@ class TestTheRuntimeCanBeTheWrongOne:
         """A runtime added to the probe without an entry here would produce a
         KeyError in the middle of a diagnostic."""
         assert set(gpu.RUNTIME_COVERAGE) == set(gpu.QSV_RUNTIME_LIBS)
+
+
+class TestTheDispatcherIsAskedDirectly:
+    """"The driver is installed, the runtime is installed, ffmpeg encodes on
+    this GPU, and HandBrake says qsv is not available" is where every check
+    based on file names runs out. Three problems share that one symptom: no
+    runtime, a runtime that refuses the chip, and a runtime the driver will
+    not talk to. The dispatcher knows which; it just has to be asked.
+    """
+
+    def test_a_loaded_runtime_is_reported_as_loaded(self):
+        log = (
+            "libvpl: loading library /usr/lib/x86_64-linux-gnu/libmfxhw64.so.1\n"
+            "libvpl: library loaded successfully\n"
+        )
+        said = gpu.summarise_dispatcher_log(log)
+        assert "loaded" in said
+        assert "libmfxhw64.so" in said
+
+    def test_a_rejected_runtime_is_the_interesting_case(self):
+        """Installed and refused looks identical to missing from outside."""
+        log = (
+            "libvpl: loading library /usr/lib/x86_64-linux-gnu/libmfxhw64.so.1\n"
+            "libvpl: unloading library, implementation not supported\n"
+        )
+        said = gpu.summarise_dispatcher_log(log)
+        assert "turned it down" in said
+        assert "will not serve this GPU" in said
+
+    def test_nothing_found_says_so_plainly(self):
+        said = gpu.summarise_dispatcher_log("libvpl: searching /usr/lib\n")
+        assert "no Quick Sync runtime" in said
+
+    def test_an_empty_log_is_not_a_crash(self):
+        assert gpu.summarise_dispatcher_log("")
+
+    def test_a_missing_handbrake_is_answered_not_raised(self, tmp_path):
+        result = gpu.qsv_dispatcher_log(str(tmp_path / "nope"))
+        assert result["ran"] is False
+        assert "not installed" in result["summary"]
+
+    def test_the_probe_sets_the_variables_that_make_it_talk(self, tmp_path, monkeypatch):
+        exe = tmp_path / "HandBrakeCLI"
+        exe.write_text("#!/bin/sh\nexit 0\n")
+        exe.chmod(0o755)
+        seen = {}
+
+        import subprocess
+
+        def fake_run(cmd, **kwargs):
+            seen.update(kwargs.get("env") or {})
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+        gpu.qsv_dispatcher_log(str(exe), driver="iHD")
+        assert seen.get("ONEVPL_DISPATCHER_LOG") == "ON"
+        assert seen.get("ONEVPL_DISPATCHER_LOG_FILE")
+        assert seen.get("LIBVA_DRIVER_NAME") == "iHD"
+
+    def test_no_log_written_is_itself_an_answer(self, tmp_path, monkeypatch):
+        """A build that talks to the old Media SDK directly never goes through
+        the dispatcher, and writes nothing."""
+        exe = tmp_path / "HandBrakeCLI"
+        exe.write_text("#!/bin/sh\nexit 0\n")
+        exe.chmod(0o755)
+
+        import subprocess
+
+        monkeypatch.setattr(
+            subprocess, "run",
+            lambda cmd, **kw: subprocess.CompletedProcess(cmd, 0, stdout="x", stderr=""),
+        )
+        result = gpu.qsv_dispatcher_log(str(exe))
+        assert result["ran"] is True
+        assert "wrote no log" in result["summary"]

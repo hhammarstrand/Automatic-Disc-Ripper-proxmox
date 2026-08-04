@@ -183,6 +183,126 @@ def qsv_dispatcher_libs() -> list[str]:
     return _libs_matching(QSV_DISPATCHER_LIBS)
 
 
+#: How long to let HandBrake enumerate its encoders while logging. It builds
+#: the list at startup and exits; anything longer than this is a wedged stack,
+#: which is itself worth reporting.
+DISPATCHER_LOG_TIMEOUT = 60
+
+#: How much of the log to keep. The dispatcher is chatty about paths it looked
+#: in; the answer is in the lines about libraries it opened and rejected, and
+#: those come last.
+DISPATCHER_LOG_CHARS = 6000
+
+
+def qsv_dispatcher_log(handbrake_path: str, driver: str = "iHD") -> dict:
+    """What the oneVPL dispatcher found, loaded and rejected, in its own words.
+
+    Every check above this one reasons from file names and comes to the same
+    dead end: the driver is installed, the runtime is installed, the hardware
+    encodes under ffmpeg, and HandBrake still says ``qsv is not available on
+    the system``. That message is the same for a missing runtime, a runtime
+    that refuses the chip, and a runtime the driver will not talk to — three
+    problems with three different answers and one symptom.
+
+    The dispatcher knows which of the three it is, and will say so if asked:
+    ``ONEVPL_DISPATCHER_LOG=ON`` makes it name every library it opened and why
+    it turned each one down. HandBrake enumerates its encoders at startup, so
+    ``--help`` is enough to make the attempt happen.
+
+    ``{"ran", "driver", "log", "summary"}``. Never raises — a diagnostic that
+    can fail the thing it is diagnosing is worse than no diagnostic.
+    """
+    import subprocess
+    import tempfile
+
+    result = {"ran": False, "driver": driver, "log": "", "summary": ""}
+    if not handbrake_path or not os.path.isfile(handbrake_path):
+        result["summary"] = "HandBrake is not installed, so nothing asked the dispatcher."
+        return result
+
+    with tempfile.TemporaryDirectory() as workdir:
+        log_file = os.path.join(workdir, "dispatcher.log")
+        env = dict(os.environ)
+        env["ONEVPL_DISPATCHER_LOG"] = "ON"
+        env["ONEVPL_DISPATCHER_LOG_FILE"] = log_file
+        if driver:
+            env["LIBVA_DRIVER_NAME"] = driver
+        try:
+            proc = subprocess.run(  # noqa: S603
+                [handbrake_path, "--help"],
+                capture_output=True, text=True,
+                timeout=DISPATCHER_LOG_TIMEOUT, env=env,
+            )
+        except (OSError, subprocess.SubprocessError) as exc:
+            result["summary"] = f"HandBrake could not be run: {exc}"
+            return result
+
+        try:
+            with open(log_file, encoding="utf-8", errors="replace") as fh:
+                text = fh.read()
+        except OSError:
+            # No file at all means the dispatcher never ran — which happens
+            # when the build talks to the old Media SDK directly rather than
+            # through oneVPL, and is itself the answer.
+            text = ""
+
+        result["ran"] = True
+        if not text:
+            combined = (proc.stdout or "") + (proc.stderr or "")
+            result["summary"] = (
+                "The oneVPL dispatcher wrote no log, so nothing asked it for a "
+                "runtime. This build reaches Quick Sync some other way, or not "
+                "at all."
+            )
+            result["log"] = combined[-DISPATCHER_LOG_CHARS:]
+            return result
+
+        result["log"] = text[-DISPATCHER_LOG_CHARS:]
+        result["summary"] = summarise_dispatcher_log(text)
+    return result
+
+
+def summarise_dispatcher_log(text: str) -> str:
+    """One line naming which runtimes the dispatcher opened, and which it kept.
+
+    The log is long and mostly paths it looked in. What matters is the handful
+    of lines where a library was loaded and either accepted or turned down.
+    """
+    # The verdict is on the line *after* the one naming the library, so this
+    # reads as a small state machine rather than a per-line match. Matching
+    # each line alone reports "loaded" for a library the very next line
+    # unloads, which is precisely the case worth telling apart.
+    opened: list[str] = []
+    rejected: set[str] = set()
+    current = ""
+    for line in text.splitlines():
+        lowered = line.lower()
+        named = next((n for n in QSV_RUNTIME_LIBS if n in lowered), "")
+        if named:
+            current = named
+            if named not in opened:
+                opened.append(named)
+        if not current:
+            continue
+        if any(word in lowered for word in
+               ("unload", "not supported", "skip", "fail", "error", "invalid")):
+            rejected.add(current)
+
+    kept = [n for n in opened if n not in rejected]
+    turned_down = [n for n in opened if n in rejected]
+    if kept:
+        return f"The dispatcher loaded {', '.join(kept)}."
+    if turned_down:
+        return (
+            f"The dispatcher opened {', '.join(turned_down)} and turned it down "
+            "— the runtime is installed but will not serve this GPU."
+        )
+    return (
+        "The dispatcher found no Quick Sync runtime to load. Neither "
+        f"{' nor '.join(QSV_RUNTIME_LIBS)} answered."
+    )
+
+
 def runtime_state() -> dict:
     """Is the userspace half of hardware encoding installed?
 
