@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.3.2
+
+**On a phone the history page could not tell you why anything failed.** The
+status column sits several columns to the right of the title, which on a narrow
+screen is off the side of the screen entirely — so eleven red jobs looked
+identical and unexplained, and the one piece of information on the page worth
+reading was the one piece you had to scroll sideways to find.
+
+The reason now sits under the title, in the first column, in red. Only the
+first line, so a row stays a row; tapping it still opens the full text,
+traceback and all.
+
+---
+
 ## 1.3.1
 
 **Every per-drive button was broken, and Rip said so in a way that sounded

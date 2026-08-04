@@ -87,6 +87,19 @@
                         <i class="bi bi-files me-1"></i>already in library
                     </span>
                     {% endif %}
+
+                    {% if job.error_message and job.status and job.status.value in ('error', 'cancelled') %}
+                    <!-- Why it failed, in the first column.
+                         The status column is several columns to the right, which
+                         on a phone means off the side of the screen — so the one
+                         thing worth reading on this page was the one thing you
+                         could not see without scrolling sideways. -->
+                    <div class="small text-danger mt-1 job-reason"
+                         role="button" style="cursor:pointer;"
+                         onclick="showError({{ job.id }}, '{{ job.display_title | e }}', {{ job.error_message | tojson }})">
+                        <i class="bi bi-exclamation-triangle me-1"></i>{{ job.error_message.strip().split('\n')[0][:200] }}
+                    </div>
+                    {% endif %}
                 </td>
                 <td>{{ job.drive }}</td>
                 <td>

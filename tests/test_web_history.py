@@ -114,3 +114,52 @@ class TestFiltering:
         _jobs(5, status=JobStatus.ERROR)
         html = client.get("/history?status=error&page=2").data.decode()
         assert "status=error" in html, "the next-page link dropped the filter"
+
+
+class TestFailureIsReadable:
+    """The reason a job failed belongs in the first column.
+
+    The status column sits several columns to the right, which on a phone is
+    off the side of the screen — so the one thing worth reading on this page
+    was the one thing you could not see without scrolling sideways.
+    """
+
+    def _failed(self, message, status=JobStatus.ERROR):
+        session = get_session()
+        try:
+            session.add(Job(drive="/dev/sr0", disc_label="HAPPY_FEET_TWO",
+                            status=status, error_message=message))
+            session.commit()
+        finally:
+            session.close()
+
+    def test_the_reason_is_shown_without_scrolling(self, client):
+        self._failed("Destination /mnt/media/Filmer is not writable by uid 8420.")
+        html = client.get("/history").data.decode()
+        assert "job-reason" in html
+        assert "not writable" in html
+
+    def test_a_cancelled_job_says_why_too(self, client):
+        self._failed("Skipped as a duplicate.", status=JobStatus.CANCELLED)
+        assert "Skipped as a duplicate." in client.get("/history").data.decode()
+
+    def test_only_the_first_line_is_shown(self, client):
+        """A pipeline error carries its whole traceback; the row must stay a row.
+
+        The full text is still in the onclick, because the modal shows all of
+        it — so this checks the text that is actually rendered, between the
+        icon and the end of the element.
+        """
+        self._failed("The real reason\n\nTraceback (most recent call last):\n  File ...")
+        html = client.get("/history").data.decode()
+        after_icon = html.split("job-reason")[1].split("</i>")[1]
+        visible = after_icon.split("</div>")[0].strip()
+        assert visible == "The real reason"
+
+    def test_a_successful_job_has_no_reason_line(self, client):
+        _jobs(1, status=JobStatus.DONE)
+        assert "job-reason" not in client.get("/history").data.decode()
+
+    def test_a_job_with_no_message_has_no_reason_line(self, client):
+        self._failed(None)
+        assert "job-reason" not in client.get("/history").data.decode()
