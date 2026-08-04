@@ -1,5 +1,36 @@
 # Changelog
 
+## 1.3.1
+
+**Every per-drive button was broken, and Rip said so in a way that sounded
+like the drive was gone.** Pressing it answered *"DEV/SR0 is not a drive this
+instance watches"* — a name that exists nowhere.
+
+A Linux optical drive is identified by a device path, and the buttons put that
+path into the URL, which means percent-encoding its slashes. Werkzeug does two
+different things with that. For Rip it 308-redirected to the same path with the
+leading slash removed, so the handler received `dev/sr0`, treated it as a
+Windows drive letter, and upper-cased it into `DEV/SR0`. For auto-eject and
+hide-drive the URL simply did not match any route: 404, the handler never
+reached, the button silently doing nothing at all.
+
+The drive now travels in the request body, where a slash is just a character.
+The old URLs still work — a page already open in a browser goes on using them —
+because a device path that has lost its leading slash is now recognised and
+repaired rather than shouted back in capitals.
+
+**"Test with MakeMKV" reported "Test failed: Load failed" on a phone.** The
+probe allows five minutes, which is what a Blu-ray with many playlists needs,
+and it held the HTTP request open for all of it. A phone browser gives up long
+before that, and the page could then only say the request failed — which reads
+as a broken drive when the drive is fine and still reading. The test now starts
+in the background and the page asks every three seconds how it is getting on,
+showing the elapsed time while it waits. Asking twice joins the probe already
+running rather than starting a second one, because two MakeMKV processes on one
+drive is how a working drive is made to fail.
+
+---
+
 ## 1.3.0
 
 **Every disc went to MakeMKV, including the ones with no video on them.** An

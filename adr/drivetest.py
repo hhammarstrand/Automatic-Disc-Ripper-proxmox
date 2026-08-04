@@ -24,6 +24,8 @@ import fcntl
 import logging
 import os
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 from adr.ripper import MakeMKVRipper
@@ -388,3 +390,76 @@ def sg_node_for(device: str) -> str | None:
     except OSError:
         return None
     return None
+
+
+# ------------------------------------------------------------------ #
+# Running a probe in the background
+#
+# The MakeMKV probe allows five minutes, because that is what a Blu-ray with
+# many playlists legitimately needs. Holding an HTTP request open that long
+# does not work: a phone browser gives up long before, and the only thing the
+# page can then say is "Load failed" — which reads as a broken drive when the
+# drive is fine and still working.
+#
+# So the request starts the probe and returns immediately, and the page asks
+# how it is getting on. One probe per device at a time; asking again while one
+# is running joins the one already in flight rather than starting a second,
+# because two MakeMKV processes on one drive is how you make a working drive
+# fail.
+# ------------------------------------------------------------------ #
+
+_probes: dict[str, dict] = {}
+_probes_lock = threading.Lock()
+
+
+def _public(state: dict) -> dict:
+    """The part of a probe's state the API hands out."""
+    return {
+        "device": state["device"],
+        "running": state["running"],
+        "deep": state["deep"],
+        "elapsed": round(time.monotonic() - state["started_at"], 1),
+        "result": state["result"],
+        "error": state["error"],
+    }
+
+
+def start_probe(device: str, deep: bool = False) -> dict:
+    """Begin probing *device* in the background. Returns its current state."""
+    with _probes_lock:
+        existing = _probes.get(device)
+        if existing and existing["running"]:
+            logger.info("A probe of %s is already running; joining it", device)
+            return _public(existing)
+        state = {
+            "device": device,
+            "deep": deep,
+            "running": True,
+            "result": None,
+            "error": None,
+            "started_at": time.monotonic(),
+        }
+        _probes[device] = state
+
+    def run() -> None:
+        try:
+            result = probe_drive(device, deep=deep)
+        except Exception as exc:            # noqa: BLE001 - reported, not raised
+            logger.exception("Probe of %s failed", device)
+            with _probes_lock:
+                state["running"] = False
+                state["error"] = str(exc)
+            return
+        with _probes_lock:
+            state["running"] = False
+            state["result"] = result
+
+    threading.Thread(target=run, daemon=True, name=f"drivetest-{device}").start()
+    return _public(state)
+
+
+def probe_status(device: str) -> dict | None:
+    """The state of the last probe of *device*, or None if there has been none."""
+    with _probes_lock:
+        state = _probes.get(device)
+        return _public(state) if state else None

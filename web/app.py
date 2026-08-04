@@ -378,10 +378,28 @@ def _register_api_routes(app: Flask) -> None:
         finally:
             session.close()
 
-    @app.route("/api/drives/<drive_letter>/toggle", methods=["POST"])
-    def api_toggle_drive(drive_letter: str):
+    # ---------------------------------------------------------------- #
+    # Per-drive actions
+    #
+    # The drive goes in the request body, never in the URL path. A Linux
+    # optical drive is identified by a device path, and putting "/dev/sr0" in
+    # a URL means percent-encoding its slashes — which Werkzeug then either
+    # 308-redirects to a path with the leading slash gone, or refuses to match
+    # at all. Both happened here: Rip reported "DEV/SR0 is not a drive this
+    # instance watches", and eject-toggle and hide-drive returned 404.
+    #
+    # The old URL-path routes are kept below so a page cached in a browser
+    # from before this change still works.
+    # ---------------------------------------------------------------- #
+
+    def _requested_device() -> str:
+        """The device named in the request body, normalised."""
+        data = request.get_json(silent=True) or {}
+        return normalize_drive(str(data.get("device", "")).strip())
+
+    def _toggle_drive(drive_letter: str):
         """Enable or disable a drive. Body: {"disabled": true/false}"""
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         should_disable = data.get("disabled", True)
 
         disabled_list = list(_config.disabled_drives)
@@ -396,8 +414,7 @@ def _register_api_routes(app: Flask) -> None:
         _config.update({"disabled_drives": disabled_list})
         return jsonify({"ok": True, "disabled_drives": disabled_list})
 
-    @app.route("/api/drives/<drive_letter>/eject", methods=["POST"])
-    def api_eject_drive(drive_letter: str):
+    def _eject(drive_letter: str):
         """Eject the disc tray for a specific drive."""
         dl = normalize_drive(drive_letter)
         ok = eject_drive(dl)
@@ -405,10 +422,9 @@ def _register_api_routes(app: Flask) -> None:
             return jsonify({"ok": True})
         return jsonify({"ok": False, "error": f"Could not eject {dl}"}), 500
 
-    @app.route("/api/drives/<drive_letter>/label", methods=["POST"])
-    def api_set_drive_label(drive_letter: str):
+    def _set_label(drive_letter: str):
         """Set a custom label for a drive. Body: {"label": "My Drive"}"""
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         label = str(data.get("label", "")).strip()
         dl = normalize_drive(drive_letter)
         labels = dict(_config.drive_labels)
@@ -419,10 +435,9 @@ def _register_api_routes(app: Flask) -> None:
         _config.update({"drive_labels": labels})
         return jsonify({"ok": True, "label": label})
 
-    @app.route("/api/drives/<drive_letter>/eject-toggle", methods=["POST"])
-    def api_toggle_eject(drive_letter: str):
+    def _toggle_eject(drive_letter: str):
         """Toggle auto-eject for a specific drive. Body: {"auto_eject": true/false}"""
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         want_eject = data.get("auto_eject", True)
 
         no_eject_list = list(_config.no_eject_drives)
@@ -430,12 +445,47 @@ def _register_api_routes(app: Flask) -> None:
 
         if want_eject:
             no_eject_list = [d for d in no_eject_list if d != drive_upper]
-        else:
-            if drive_upper not in no_eject_list:
-                no_eject_list.append(drive_upper)
+        elif drive_upper not in no_eject_list:
+            no_eject_list.append(drive_upper)
 
         _config.update({"no_eject_drives": no_eject_list})
         return jsonify({"ok": True, "auto_eject": drive_upper not in no_eject_list})
+
+    def _rip(drive_letter: str):
+        """Rip the disc already in this drive.
+
+        The watcher fires on insertion only, so after a failed job the disc
+        sits there and nothing restarts it. This is the "try that again" the
+        drive card was missing.
+        """
+        if not _pipeline_manager:
+            return jsonify({"ok": False, "message": "The pipeline is not running."}), 503
+        ok, message = _pipeline_manager.rip_now(normalize_drive(drive_letter))
+        return jsonify({"ok": ok, "message": message}), (200 if ok else 409)
+
+    # The routes the UI uses: device in the body.
+    app.add_url_rule("/api/drives/toggle", "api_toggle_drive_body",
+                     lambda: _toggle_drive(_requested_device()), methods=["POST"])
+    app.add_url_rule("/api/drives/eject", "api_eject_drive_body",
+                     lambda: _eject(_requested_device()), methods=["POST"])
+    app.add_url_rule("/api/drives/label", "api_set_drive_label_body",
+                     lambda: _set_label(_requested_device()), methods=["POST"])
+    app.add_url_rule("/api/drives/eject-toggle", "api_toggle_eject_body",
+                     lambda: _toggle_eject(_requested_device()), methods=["POST"])
+    app.add_url_rule("/api/drives/rip", "api_drive_rip_body",
+                     lambda: _rip(_requested_device()), methods=["POST"])
+
+    # The old routes, kept so a browser still holding the previous page works.
+    app.add_url_rule("/api/drives/<path:drive_letter>/toggle", "api_toggle_drive",
+                     _toggle_drive, methods=["POST"])
+    app.add_url_rule("/api/drives/<path:drive_letter>/eject", "api_eject_drive",
+                     _eject, methods=["POST"])
+    app.add_url_rule("/api/drives/<path:drive_letter>/label", "api_set_drive_label",
+                     _set_label, methods=["POST"])
+    app.add_url_rule("/api/drives/<path:drive_letter>/eject-toggle", "api_toggle_eject",
+                     _toggle_eject, methods=["POST"])
+    app.add_url_rule("/api/drives/<path:drive_letter>/rip", "api_drive_rip",
+                     _rip, methods=["POST"])
 
     @app.route("/api/history/clear", methods=["POST"])
     def api_clear_history():
@@ -1178,29 +1228,35 @@ def _register_api_routes(app: Flask) -> None:
         from adr import drivetest
         from adr.disc import _sr_devices
 
-        data = request.get_json() or {}
+        data = request.get_json(silent=True) or {}
         device = str(data.get("device", "")).strip()
+        deep = bool(data.get("deep"))
 
         # Only devices this container can actually see. The endpoint takes a
         # path and opens it, so it must not accept an arbitrary one.
         if device not in _sr_devices():
             return jsonify({"error": f"Unknown optical device '{device}'."}), 400
 
-        return jsonify(drivetest.probe_drive(device, deep=bool(data.get("deep"))))
+        if not deep:
+            return jsonify(drivetest.probe_drive(device, deep=False))
 
-    @app.route("/api/drives/<path:drive_letter>/rip", methods=["POST"])
-    def api_drive_rip(drive_letter: str):
-        """Rip the disc already in this drive.
+        # The deep probe allows five minutes, because that is what a Blu-ray
+        # with many playlists needs. A phone browser gives up long before, and
+        # then the page can only say "Load failed" — which reads as a broken
+        # drive when the drive is fine and still working. Start it and let the
+        # page ask how it is getting on.
+        return jsonify(drivetest.start_probe(device, deep=True)), 202
 
-        The watcher fires on insertion only, so after a failed job the disc
-        sits there and nothing restarts it. This is the "try that again" the
-        drive card was missing.
-        """
-        if not _pipeline_manager:
-            return jsonify({"ok": False, "message": "The pipeline is not running."}), 503
+    @app.route("/api/drives/test/status")
+    def api_drive_test_status():
+        """How the background probe of a drive is getting on."""
+        from adr import drivetest
 
-        ok, message = _pipeline_manager.rip_now(normalize_drive(drive_letter))
-        return jsonify({"ok": ok, "message": message}), (200 if ok else 409)
+        device = (request.args.get("device") or "").strip()
+        state = drivetest.probe_status(device)
+        if state is None:
+            return jsonify({"error": f"No probe has been run for '{device}'."}), 404
+        return jsonify(state)
 
     @app.route("/api/drives/rescan", methods=["POST"])
     def api_drive_rescan():

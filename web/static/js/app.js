@@ -132,10 +132,10 @@ function toggleDrive(driveLetter, disable) {
     const action = disable ? 'disable' : 'enable';
     if (!confirm(`Do you want to ${action} drive ${driveLetter}?`)) return;
 
-    fetch(`/api/drives/${encodeURIComponent(driveLetter)}/toggle`, {
+    fetch('/api/drives/toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ disabled: disable }),
+        body: JSON.stringify({ device: driveLetter, disabled: disable }),
     })
         .then(r => r.json())
         .then(data => {
@@ -155,7 +155,11 @@ function toggleDrive(driveLetter, disable) {
 // ------------------------------------------------------------------ //
 
 function ripNow(driveLetter) {
-    fetch(`/api/drives/${encodeURIComponent(driveLetter)}/rip`, { method: 'POST' })
+    fetch('/api/drives/rip', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device: driveLetter }),
+    })
         .then(r => r.json().then(d => ({ ok: r.ok, d })))
         .then(({ ok, d }) => {
             if (!ok) { alert(d.message || 'Could not start the rip.'); return; }
@@ -172,10 +176,10 @@ function toggleEject(driveLetter, enable) {
     const label = enable ? 'enable auto-eject' : 'disable auto-eject';
     if (!confirm(`Do you want to ${label} for drive ${driveLetter}?`)) return;
 
-    fetch(`/api/drives/${encodeURIComponent(driveLetter)}/eject-toggle`, {
+    fetch('/api/drives/eject-toggle', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ auto_eject: enable }),
+        body: JSON.stringify({ device: driveLetter, auto_eject: enable }),
     })
         .then(r => r.json())
         .then(data => {
@@ -190,8 +194,10 @@ function toggleEject(driveLetter, enable) {
 // ------------------------------------------------------------------ //
 
 function ejectDrive(driveLetter) {
-    fetch(`/api/drives/${encodeURIComponent(driveLetter)}/eject`, {
+    fetch('/api/drives/eject', {
         method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ device: driveLetter }),
     })
         .then(r => r.json())
         .then(data => {
@@ -211,10 +217,10 @@ function saveDriveLabel(driveLetter) {
     if (!input) return;
     const label = input.value.trim();
 
-    fetch(`/api/drives/${encodeURIComponent(driveLetter)}/label`, {
+    fetch('/api/drives/label', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ label: label }),
+        body: JSON.stringify({ device: driveLetter, label: label }),
     })
         .then(r => r.json())
         .then(data => {

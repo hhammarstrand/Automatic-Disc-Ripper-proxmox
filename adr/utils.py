@@ -246,11 +246,21 @@ BYTES_PER_MB = 1_048_576
 # Drive helpers
 # ------------------------------------------------------------------ #
 
+#: A device path that has lost its leading slash. Percent-encoding "/dev/sr0"
+#: into a URL path makes Werkzeug 308-redirect to the same path without the
+#: leading slash, so the handler received "dev/sr0" — which was then treated as
+#: a Windows drive letter and upper-cased into "DEV/SR0". The drive endpoints
+#: no longer put the device in the URL, but a page cached in a browser from
+#: before that change still does.
+_LOST_SLASH_DEVICE = re.compile(r"^dev/[a-z][a-z0-9_-]*$")
+
+
 def normalize_drive(letter: str) -> str:
     """Normalize a drive identifier.
 
     Linux device paths are returned unchanged (they are case-sensitive):
         "/dev/sr0" -> "/dev/sr0"
+        "dev/sr0"  -> "/dev/sr0"
 
     Legacy Windows drive letters are upper-cased without trailing backslash so
     the parsers and tests that still exercise that form keep working:
@@ -260,6 +270,8 @@ def normalize_drive(letter: str) -> str:
     s = (letter or "").strip()
     if s.startswith("/dev/"):
         return s
+    if _LOST_SLASH_DEVICE.match(s):
+        return "/" + s
     return s.upper().rstrip("\\")
 
 

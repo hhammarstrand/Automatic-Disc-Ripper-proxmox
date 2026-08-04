@@ -209,17 +209,13 @@ function testDrive(device, deep, btn) {
       + 'take up to five minutes while the drive spins up and reads the title map.</div>'
     : '';
 
-  fetch('/api/drives/test', {
-    method: 'POST',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({device: device, deep: deep}),
-  }).then(r => r.json()).then(d => {
-    btn.disabled = false;
-    btn.innerHTML = original;
-    if (d.error) {
-      box.innerHTML = `<div class="alert alert-danger small mb-0">${escapeHtml(d.error)}</div>`;
-      return;
-    }
+  const done = () => { btn.disabled = false; btn.innerHTML = original; };
+  const fail = msg => {
+    done();
+    box.innerHTML = `<div class="alert alert-danger small mb-0">${escapeHtml(msg)}</div>`;
+  };
+  const render = d => {
+    done();
     box.innerHTML = `
       <div class="alert ${d.ok ? 'alert-success' : 'alert-danger'} small py-2">
         ${d.ok ? '<i class="bi bi-check-circle me-1"></i>' : '<i class="bi bi-x-circle me-1"></i>'}
@@ -234,11 +230,53 @@ function testDrive(device, deep, btn) {
           </li>`).join('')}
       </ul>`;
     loadChecks();
-  }).catch(err => {
-    btn.disabled = false;
-    btn.innerHTML = original;
-    box.innerHTML = `<div class="alert alert-danger small mb-0">Test failed: ${escapeHtml(err.message)}</div>`;
-  });
+  };
+
+  fetch('/api/drives/test', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({device: device, deep: deep}),
+  }).then(r => r.json()).then(d => {
+    if (d.error) { fail(d.error); return; }
+    // The shallow test answers immediately. The deep one is running in the
+    // background: holding the request open for five minutes is what made a
+    // working drive report "Load failed" on a phone.
+    if (d.running === undefined) { render(d); return; }
+    pollProbe(device, box, render, fail);
+  }).catch(err => fail('Test failed: ' + err.message));
+}
+
+// Ask every three seconds how the background probe is getting on. Ten minutes
+// is twice the probe's own limit, so reaching it means the answer was lost
+// rather than slow — a restart of the service mid-probe, most likely.
+const PROBE_POLL_MS = 3000;
+const PROBE_GIVE_UP_MS = 600000;
+
+function pollProbe(device, box, render, fail, startedAt) {
+  startedAt = startedAt || Date.now();
+  fetch('/api/drives/test/status?device=' + encodeURIComponent(device))
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { fail(d.error); return; }
+      if (!d.running) {
+        if (d.error_message || d.error) { fail(d.error_message || d.error); return; }
+        if (d.result) { render(d.result); return; }
+        fail('The test finished without a result.');
+        return;
+      }
+      box.innerHTML =
+        '<div class="small text-secondary">'
+        + '<span class="spinner-border spinner-border-sm me-2"></span>'
+        + 'MakeMKV is reading the disc — ' + Math.round(d.elapsed) + 's so far. '
+        + 'This can take up to five minutes on a Blu-ray. You can leave this page open.'
+        + '</div>';
+      if (Date.now() - startedAt > PROBE_GIVE_UP_MS) {
+        fail('No answer after ten minutes. Check the service is still running.');
+        return;
+      }
+      setTimeout(() => pollProbe(device, box, render, fail, startedAt), PROBE_POLL_MS);
+    })
+    .catch(err => fail('Lost contact with the server: ' + err.message));
 }
 
 function rescanDrives() {
