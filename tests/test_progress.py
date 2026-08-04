@@ -191,8 +191,21 @@ class TestTheRipReportsItsPace:
     percentage, which says where you are but not whether to wait."""
 
     def _run(self, tmp_path, monkeypatch, steps):
+        """Run one disc through the real pipeline with a controlled clock.
+
+        The clock stand-in replaces the *name* `time` inside adr.pipeline, not
+        an attribute of the time module — patching time.monotonic itself would
+        reach every other test and every thread in the process.
+
+        It is installed before the pipeline starts, because the rip records
+        its start time before the first progress report arrives; setting the
+        clock afterwards would put that start in a different epoch and make
+        every elapsed time nonsense.
+        """
         import json
         import queue
+        import time as real_time
+        import types as _types
 
         from adr import disctype
         from adr import pipeline as pipeline_mod
@@ -200,6 +213,13 @@ class TestTheRipReportsItsPace:
         from adr.disctype import DiscInfo
         from adr.models import Job, get_session, init_db
         from adr.ripper import RipResult
+
+        clock = [1000.0]
+        monkeypatch.setattr(pipeline_mod, "time", _types.SimpleNamespace(
+            monotonic=lambda: clock[0],
+            time=lambda: clock[0],
+            sleep=real_time.sleep,
+        ))
 
         path = tmp_path / "adr.yaml"
         path.write_text(
@@ -223,8 +243,6 @@ class TestTheRipReportsItsPace:
         def fake_rip(drive_letter, job_id, progress_callback=None, title_index=None):
             raw = config.raw_path / str(job_id)
             raw.mkdir(parents=True, exist_ok=True)
-            clock = [1000.0]
-            monkeypatch.setattr(pipeline_mod.time, "monotonic", lambda: clock[0])
             for fraction, written in steps:
                 (raw / "title_t00.mkv").write_bytes(b"\0" * written)
                 progress_callback({
