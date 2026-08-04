@@ -333,16 +333,21 @@ function doDelete(ids, deleteFiles) {
         .then(r => r.json())
         .then(data => {
             if (!data.ok) { notify('Could not delete: ' + (reasonFrom(data)), 'danger'); return; }
+
             let message = `${data.deleted} job(s) removed`;
             if (deleteFiles) message += `, ${data.files_deleted} file(s) deleted`;
-            if (data.failed && data.failed.length) {
-                message += `\n\nCould not delete:\n` + data.failed.join('\n');
-            }
-            if (data.skipped && data.skipped.length) {
-                message += `\n\nSkipped:\n` + data.skipped.join('\n');
-            }
-            notify(message, 'success');
-            location.reload();
+            const trouble = (data.failed || []).concat(data.skipped || []);
+            if (trouble.length) message += ` — but: ${trouble.join('; ')}`;
+
+            // A green toast reporting "3 removed — but: could not delete
+            // /mnt/media/…" is a success message carrying a failure, and the
+            // colour is what gets read. Something went wrong, so it says so
+            // and stays on screen until it is dismissed.
+            notify(message, trouble.length ? 'warning' : 'success');
+
+            // Only when it all worked. Reloading on top of a warning takes
+            // the warning away with it.
+            if (!trouble.length) location.reload();
         })
         .catch(err => notify('Error: ' + err.message, 'danger'));
 }

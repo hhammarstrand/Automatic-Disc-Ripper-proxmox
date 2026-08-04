@@ -11,9 +11,10 @@
 // and every call site uses them.
 //
 // notify() is for something that has happened: it appears, it does not stop
-// anyone doing the next thing, and it goes away. Failures stay until they are
-// dismissed, because a message you did not read is the same as no message and
-// the ones that matter are the ones that went wrong.
+// anyone doing the next thing, and it goes away. Anything that went wrong
+// stays until it is dismissed — a message you did not read is the same as no
+// message, and the ones that matter are exactly the ones nobody wants to
+// read.
 //
 // confirmAction() is for something about to happen. It returns a promise
 // rather than a boolean, which is the one place these are not a drop-in
@@ -58,9 +59,9 @@ function notify(message, kind = 'info') {
         </div>`;
     host.appendChild(element);
 
-    // A failure stays put. Everything else has said its piece in five seconds.
+    // Problems stay put. Everything else has said its piece in five seconds.
     const toast = new bootstrap.Toast(element, {
-        autohide: kind !== 'danger',
+        autohide: kind !== 'danger' && kind !== 'warning',
         delay: TOAST_MILLISECONDS,
     });
     element.addEventListener('hidden.bs.toast', () => element.remove());
@@ -924,7 +925,7 @@ function saveSeries() {
     // No job id: the modal was opened to start the mode rather than to fix a
     // single disc.
     if (!jobId) {
-        if (!payload.show) { notify('Enter the show name first.', 'success'); return; }
+        if (!payload.show) { notify('Enter the show name first.', 'warning'); return; }
         fetch('/api/series-mode', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},

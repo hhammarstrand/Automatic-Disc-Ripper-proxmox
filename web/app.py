@@ -1947,42 +1947,34 @@ def _register_api_routes(app: Flask) -> None:
             return fail(f"Unknown setting(s): {', '.join(sorted(unknown))}", 400)
 
         # Basic validation
-        errors = []
-        if "web_port" in data:
-            try:
-                p = int(data["web_port"])
-                if not (1 <= p <= 65535):
-                    errors.append("web_port must be 1\u201365535")
-            except (TypeError, ValueError):
-                errors.append("web_port must be an integer")
-        if "max_encode_jobs" in data:
-            try:
-                n = int(data["max_encode_jobs"])
-                if n < 1:
-                    errors.append("max_encode_jobs must be >= 1")
-            except (TypeError, ValueError):
-                errors.append("max_encode_jobs must be an integer")
-        if "watch_interval" in data:
-            try:
-                v = float(data["watch_interval"])
-                if v < 1:
-                    errors.append("watch_interval must be >= 1")
-            except (TypeError, ValueError):
-                errors.append("watch_interval must be a number")
-        if "log_level" in data and data["log_level"] not in ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"):
-            errors.append("Invalid log_level")
-        if "audio_cd_format" in data and data["audio_cd_format"] not in ("flac", "mp3"):
-            errors.append("audio_cd_format must be 'flac' or 'mp3'")
+        # One table of rules rather than a ladder of ifs. The ladder was why
+        # forty-four of forty-nine settings had no validation at all: adding a
+        # rule meant adding a branch, so nothing added since ever got one.
+        from adr import settingsrules
+
+        errors = settingsrules.check(data) + settingsrules.cross_check(data, _config)
         if errors:
             return fail("; ".join(errors), 400)
 
         _config.update(data)
 
-        # Indicate whether a restart is needed for changes to take effect
+        # Which settings take effect without restarting.
+        #
+        # Everything the encoder reads is in here: the worker rebuilds its
+        # encoder when the backend changes and reads the rest per job, so
+        # telling someone to restart after changing the spoken language is
+        # asking for a restart that changes nothing — and training them to
+        # ignore the notice for the settings that genuinely need one.
         _RUNTIME_KEYS = {
             "disabled_drives", "eject_after_rip", "no_eject_drives",
             "tmdb_api_key", "log_level", "plex_path", "auto_move_to_plex",
             "drive_labels",
+            "audio_language", "video_quality", "max_height",
+            "encoder_backend", "libva_driver", "vaapi_codec", "vaapi_device",
+            "handbrake_preset", "handbrake_preset_file", "handbrake_extra_args",
+            "transcode_enabled", "skip_duplicates", "main_feature_only",
+            "min_title_length", "series_detection", "series_min_minutes",
+            "series_max_minutes", "series_min_episodes",
         }
         needs_restart = bool(set(data.keys()) - _RUNTIME_KEYS)
         return jsonify({"ok": True, "config": _config.as_dict(), "requires_restart": needs_restart})

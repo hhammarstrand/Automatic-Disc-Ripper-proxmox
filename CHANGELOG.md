@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.15.0
+
+**Settings were validated five out of forty-nine, and the shape was why.** The
+checks were a ladder of `if "web_port" in data:` blocks, so adding a rule meant
+adding a branch — and every setting added since simply never got one. Typing
+"abc" into the quality box was accepted, stored, and silently discarded at the
+moment of use: the value gone, nothing said, and the encode running on the old
+number.
+
+It is a table now. Twenty-nine settings are checked, every complaint is
+reported at once rather than one press of Save at a time, and each says what
+would be right — the person reading it is looking at the box they just typed
+into, and "Invalid value" tells them neither which box nor what to do.
+
+A test asks a question the table cannot: *is every numeric setting bounded?* It
+found three that were not. A negative episode counter does not fail — it names
+the next file `S01E-1` and puts it somewhere nobody looks.
+
+Some rules need two settings to see. A shortest episode of 90 minutes and a
+longest of 75 are each fine alone and together make series detection match
+nothing at all, silently.
+
+**And the restart notice was wrong about most of them.** Changing the spoken
+language, the quality, the encoder — none of those need a restart; the worker
+rebuilds its encoder when the backend changes and reads the rest per job.
+Asking for a restart that changes nothing trains people to ignore the notice
+for the settings that genuinely need one.
+
+**Toasts that carry a failure are no longer green.** A bulk delete that could
+not remove two files reported "3 job(s) removed" in success colours, and the
+colour is what gets read. Problems now stay on screen until dismissed —
+warnings as well as failures, since five seconds is long enough for "saved"
+and not long enough for a list of paths.
+
 ## 1.14.0
 
 The polish pass, continued — the example config, the Doctor page, and the

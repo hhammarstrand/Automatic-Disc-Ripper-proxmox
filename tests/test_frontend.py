@@ -230,3 +230,71 @@ class TestTheEmptyPagesStillHelp:
         html = client.get(path).get_data(as_text=True)
         assert "DVD disc" not in html
         assert "DVD drive" not in html
+
+
+class TestTheToastsSayWhatTheyMean:
+    """The colour is what gets read, and a green toast carrying a failure is
+    read as a success. Worth pinning: the first sweep across sixty-four call
+    sites inferred each kind from the message, and inference is exactly what
+    goes wrong quietly."""
+
+    SOURCES = [Path("web/static/js/app.js"), *TEMPLATES]
+
+    @pytest.mark.parametrize("source", SOURCES, ids=lambda p: p.name)
+    def test_no_failure_is_dressed_as_a_success(self, source):
+        text = re.sub(r"//.*", "", source.read_text())
+        text = re.sub(r"<!--.*?-->", "", text, flags=re.S)
+        wrong = [
+            message for message, kind in re.findall(
+                r"notify\(\s*['\"`]([^'\"`]{4,120})['\"`][^,]*,\s*'(\w+)'", text)
+            if kind == "success" and re.search(
+                r"could not|cannot|failed|error|unable|no such|invalid", message, re.I)
+        ]
+        assert not wrong, f"{source.name}: {wrong}"
+
+    @staticmethod
+    def _calls(text: str) -> list[str]:
+        """Every notify(...) argument list, with nested parens intact.
+
+        A regex cannot do this: `notify('x: ' + (reasonFrom(d)), 'danger')`
+        ends at the first close paren and the kind falls off the end, so a
+        naive pattern reports correct code as broken.
+        """
+        found, index = [], 0
+        while True:
+            start = text.find("notify(", index)
+            if start == -1:
+                return found
+            if start and (text[start - 1].isalnum() or text[start - 1] in "_.$"):
+                index = start + 7
+                continue
+            depth, cursor = 0, start + 6
+            while cursor < len(text):
+                if text[cursor] == "(":
+                    depth += 1
+                elif text[cursor] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                cursor += 1
+            found.append(text[start + 7:cursor])
+            index = cursor + 1
+
+    @pytest.mark.parametrize("source", SOURCES, ids=lambda p: p.name)
+    def test_every_toast_names_its_kind(self, source):
+        """The default is 'info', which is never the right answer for a
+        message about something that just happened."""
+        text = re.sub(r"//.*", "", source.read_text())
+        unlabelled = [
+            call for call in self._calls(text)
+            if "kind" not in call
+            and not re.search(r"'(danger|success|warning|info)'", call)
+        ]
+        assert not unlabelled, f"{source.name}: {unlabelled}"
+
+    def test_problems_stay_on_screen(self):
+        """Five seconds is long enough for "saved" and not long enough for a
+        list of files that could not be deleted."""
+        body = Path("web/static/js/app.js").read_text()
+        autohide = re.search(r"autohide:\s*(.+)", body).group(1)
+        assert "'danger'" in autohide and "'warning'" in autohide
