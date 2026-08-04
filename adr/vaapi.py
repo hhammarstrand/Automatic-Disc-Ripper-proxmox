@@ -76,21 +76,92 @@ MP4_AUDIO = frozenset({"aac", "ac3", "eac3", "mp3", "alac", "opus", "flac"})
 FALLBACK_AUDIO = ["-c:a", "ac3", "-b:a", "640k"]
 
 
-def audio_streams(exe: str, path: Path) -> list[str]:
-    """The codec of each audio track in *path*, in order."""
+#: Two-letter language codes and the three-letter ones they mean. A disc tags
+#: its tracks with ISO 639-2 ("swe"), a person types ISO 639-1 ("sv"), and
+#: comparing them directly fails on exactly the pairs that matter — "sv" and
+#: "swe" share only one letter.
+_LANGUAGE_ALIASES = {
+    "sv": "swe", "en": "eng", "no": "nor", "nb": "nor", "da": "dan",
+    "fi": "fin", "is": "isl", "de": "deu", "fr": "fra", "es": "spa",
+    "it": "ita", "nl": "nld", "pt": "por", "pl": "pol", "ru": "rus",
+    "ja": "jpn", "zh": "zho", "ko": "kor",
+}
+
+#: The other three-letter spelling some discs use. German, French, Dutch and
+#: Chinese each have two ISO 639-2 codes, and discs are not consistent.
+_LANGUAGE_EQUIVALENTS = {
+    "deu": {"ger"}, "ger": {"deu"},
+    "fra": {"fre"}, "fre": {"fra"},
+    "nld": {"dut"}, "dut": {"nld"},
+    "zho": {"chi"}, "chi": {"zho"},
+    "isl": {"ice"}, "ice": {"isl"},
+}
+
+
+def normalise_language(value: str) -> str:
+    """A language code as a disc would spell it, or ""."""
+    code = (value or "").strip().lower()
+    return _LANGUAGE_ALIASES.get(code, code)
+
+
+def language_matches(tag: str, wanted: str) -> bool:
+    """Whether a track's language tag is the one asked for."""
+    tag = normalise_language(tag)
+    wanted = normalise_language(wanted)
+    if not tag or not wanted:
+        return False
+    return tag == wanted or tag in _LANGUAGE_EQUIVALENTS.get(wanted, set())
+
+
+def audio_streams(exe: str, path: Path) -> list[dict]:
+    """Every audio track in *path*: ``{"codec", "language"}``, in order.
+
+    The language comes along because it decides which track a person actually
+    wants to hear, and a rip of a Swedish disc that defaults to the English
+    track is wrong in a way no amount of encoding quality makes up for.
+
+    CSV rather than one value per line: a track with no language tag would
+    otherwise simply be missing a line, and every track after it would be
+    attributed to the wrong stream.
+    """
     ffprobe = re.sub(r"ffmpeg(\.exe)?$", "ffprobe", exe)
     if not (shutil.which(ffprobe) or os.path.isfile(ffprobe)):
         return []
     try:
         proc = subprocess.run(  # noqa: S603
             [ffprobe, "-v", "error", "-select_streams", "a",
-             "-show_entries", "stream=codec_name",
-             "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+             "-show_entries", "stream=codec_name:stream_tags=language",
+             "-of", "csv=p=0", str(path)],
             capture_output=True, text=True, timeout=60,
         )
     except (OSError, subprocess.SubprocessError):
         return []
-    return [line.strip().lower() for line in proc.stdout.splitlines() if line.strip()]
+
+    streams = []
+    for line in proc.stdout.splitlines():
+        if not line.strip():
+            continue
+        parts = [p.strip().lower() for p in line.split(",")]
+        streams.append({
+            "codec": parts[0],
+            "language": parts[1] if len(parts) > 1 else "",
+        })
+    return streams
+
+
+def preferred_track(streams: list[dict], wanted: str) -> int:
+    """Which track index to make the default one.
+
+    Falls back to the first track when the language is not asked for or not
+    present. Silently picking something else would be worse than the disc's
+    own order, which at least someone chose.
+    """
+    if not wanted:
+        return 0
+    for index, stream in enumerate(streams):
+        if language_matches(stream.get("language", ""), wanted):
+            return index
+    return 0
 
 
 #: The stereo track every player can decode, and its bitrate. 192k is what
@@ -99,7 +170,9 @@ STEREO_CODEC = "aac"
 STEREO_BITRATE = "192k"
 
 
-def audio_plan(exe: str, input_path: Path, output_path: Path) -> list[str]:
+def audio_plan(
+    exe: str, input_path: Path, output_path: Path, language: str = "",
+) -> list[str]:
     """The audio mapping and codecs for one encode.
 
     Modelled on what HandBrake's "Surround" presets produce, because that is
@@ -121,27 +194,41 @@ def audio_plan(exe: str, input_path: Path, output_path: Path) -> list[str]:
     if output_path.suffix.lower() != ".mp4":
         return ["-map", "0:a?", "-c:a", "copy"]
 
-    codecs = audio_streams(exe, input_path)
-    if not codecs:
+    streams = audio_streams(exe, input_path)
+    if not streams:
         # Nothing could be read about the audio. AC-3 for everything is the
         # safe guess: it costs quality on a track that might have copied
         # fine, where the other way round costs the entire encode.
         return ["-map", "0:a?", *FALLBACK_AUDIO]
 
-    # Output 0 is a stereo downmix of the first source track; outputs 1..n
-    # are the source tracks themselves, in order.
-    args = ["-map", "0:a:0", "-map", "0:a?"]
+    # Output 0 is a stereo downmix of the track the person wants to hear;
+    # outputs 1..n are the source tracks themselves, in order.
+    chosen = preferred_track(streams, language)
+    args = ["-map", f"0:a:{chosen}", "-map", "0:a?"]
     args += [
         "-c:a:0", STEREO_CODEC, "-ac:a:0", "2", "-b:a:0", STEREO_BITRATE,
     ]
-    for index, codec in enumerate(codecs):
+    # The downmix is a new stream and carries none of the original's tags, so
+    # a player would list it as "Undetermined" and a Plex library would file
+    # it as such. It is the same speech; it should say so.
+    tag = streams[chosen].get("language", "")
+    if tag:
+        args += ["-metadata:s:a:0", f"language={tag}"]
+
+    for index, stream in enumerate(streams):
         out = index + 1
-        if codec in MP4_AUDIO:
+        if stream["codec"] in MP4_AUDIO:
             args += [f"-c:a:{out}", "copy"]
         else:
             args += [f"-c:a:{out}", "ac3", f"-b:a:{out}", "640k"]
+
     # Without this the player picks whichever track the file happens to list
     # first, which on a multi-language disc is a coin toss over the language.
+    #
+    # Only this one. Flagging the matching surround track as well would let a
+    # player choose the AC-3 — which is the track some hardware cannot decode
+    # from an MP4, and the silent film this whole arrangement exists to
+    # prevent. Anything that genuinely prefers 5.1 can be told to, per file.
     args += ["-disposition:a:0", "default"]
     return args
 
@@ -314,7 +401,8 @@ class VaapiEncoder:
         duration = probe_duration(self._exe, input_path)
         cmd = build_command(
             self._exe, input_path, output_path, self._config,
-            audio_plan(self._exe, input_path, output_path),
+            audio_plan(self._exe, input_path, output_path,
+                       getattr(self._config, "audio_language", "") or ""),
         )
         # Progress on stdout in a parseable form, so stderr stays free for the
         # explanation when something goes wrong.

@@ -33,6 +33,10 @@ data_disc_path: ''
 #
 # HandBrake presets do not apply to the GPU path; these four settings are what
 # VA-API actually exposes.
+# The language you want to hear, as a disc spells it: swe, eng, sv, ''.
+# Only the ffmpeg/GPU encoder uses this — HandBrake takes its audio rules
+# from the preset. Empty keeps the disc's own track order.
+audio_language: ''
 encoder_backend: handbrake     # handbrake | vaapi
 # Which VA-API driver HandBrake's Quick Sync should load, via
 # LIBVA_DRIVER_NAME. Empty leaves libva to choose, which is right on a machine

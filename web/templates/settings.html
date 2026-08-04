@@ -251,6 +251,20 @@
             </div>
             <div id="vaapiSettings" class="{% if config.encoder_backend != 'vaapi' %}d-none{% endif %}">
                 <div class="mb-3">
+                    <label class="form-label">Spoken language / audio language</label>
+                    <input type="text" class="form-control" name="audio_language"
+                           value="{{ config.audio_language }}" placeholder="swe">
+                    <div class="form-text">
+                        The language you want to hear, as a disc spells it —
+                        <code>swe</code>, <code>eng</code>, <code>nor</code>. The
+                        track in this language becomes the default one; every
+                        other track is still kept. Empty leaves the disc's own
+                        order, which is a coin toss on a multi-language disc.
+                        HandBrake takes its audio rules from the preset instead,
+                        so this applies to the GPU encoder only.
+                    </div>
+                </div>
+                <div class="mb-3">
                     <label class="form-label">GPU codec</label>
                     <select class="form-select" name="vaapi_codec">
                         <option value="h264" {% if config.vaapi_codec == 'h264' %}selected{% endif %}>

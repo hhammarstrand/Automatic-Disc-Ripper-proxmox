@@ -104,9 +104,14 @@ class TestWhatHappensToTheAudio:
     and that is the shape mirrored here.
     """
 
-    def _plan(self, tmp_path, monkeypatch, codecs, suffix=".mp4"):
-        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: codecs)
-        return vaapi.audio_plan("ffmpeg", Path("in.mkv"), tmp_path / f"out{suffix}")
+    def _plan(self, tmp_path, monkeypatch, codecs, suffix=".mp4", language=""):
+        streams = [
+            c if isinstance(c, dict) else {"codec": c, "language": ""}
+            for c in codecs
+        ]
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: streams)
+        return vaapi.audio_plan(
+            "ffmpeg", Path("in.mkv"), tmp_path / f"out{suffix}", language)
 
     def test_a_stereo_track_comes_first(self, tmp_path, monkeypatch):
         """The guarantee that something comes out of the speakers."""
@@ -604,3 +609,99 @@ class TestWhenTheInputIsNotAVideo:
         result = self._encode(tmp_path, "Error while opening encoder - maybe incorrect parameters")
         assert "not a readable video file" not in result.error
         assert "incorrect parameters" in result.error
+
+
+class TestHearingTheRightLanguage:
+    """A rip of a Swedish disc that defaults to the English track is wrong in
+    a way no amount of encoding quality makes up for."""
+
+    def _plan(self, monkeypatch, tmp_path, streams, language):
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: streams)
+        return vaapi.audio_plan(
+            "ffmpeg", Path("in.mkv"), tmp_path / "out.mp4", language)
+
+    SWEDISH_DISC = [
+        {"codec": "ac3", "language": "eng"},
+        {"codec": "ac3", "language": "swe"},
+        {"codec": "ac3", "language": "fin"},
+    ]
+
+    def test_the_wanted_language_becomes_the_default_track(
+        self, monkeypatch, tmp_path,
+    ):
+        plan = self._plan(monkeypatch, tmp_path, self.SWEDISH_DISC, "swe")
+        assert plan[plan.index("-map") + 1] == "0:a:1", "the Swedish track"
+
+    def test_the_two_letter_code_works_too(self, monkeypatch, tmp_path):
+        """A disc tags "swe" and a person types "sv" — and those two share
+        exactly one letter, so comparing them directly fails."""
+        plan = self._plan(monkeypatch, tmp_path, self.SWEDISH_DISC, "sv")
+        assert plan[plan.index("-map") + 1] == "0:a:1"
+
+    def test_every_other_language_is_still_there(self, monkeypatch, tmp_path):
+        """Choosing a default is not the same as throwing the rest away."""
+        plan = self._plan(monkeypatch, tmp_path, self.SWEDISH_DISC, "swe")
+        assert "-c:a:1" in plan and "-c:a:2" in plan and "-c:a:3" in plan
+
+    def test_the_downmix_is_labelled_with_its_language(self, monkeypatch, tmp_path):
+        """A new stream carries none of the original's tags, so a player would
+        list it as "Undetermined" and Plex would file it as such."""
+        plan = self._plan(monkeypatch, tmp_path, self.SWEDISH_DISC, "swe")
+        assert plan[plan.index("-metadata:s:a:0") + 1] == "language=swe"
+
+    def test_a_language_the_disc_does_not_have_falls_back_quietly(
+        self, monkeypatch, tmp_path,
+    ):
+        """Silently picking something else would be worse than the disc's own
+        order, which at least someone chose."""
+        plan = self._plan(monkeypatch, tmp_path, self.SWEDISH_DISC, "jpn")
+        assert plan[plan.index("-map") + 1] == "0:a:0"
+
+    def test_no_preference_keeps_the_discs_own_order(self, monkeypatch, tmp_path):
+        plan = self._plan(monkeypatch, tmp_path, self.SWEDISH_DISC, "")
+        assert plan[plan.index("-map") + 1] == "0:a:0"
+
+    def test_only_one_track_is_flagged_default(self, monkeypatch, tmp_path):
+        """Flagging the surround track too would let a player choose the AC-3
+        — the track some hardware cannot decode from an MP4, which is the
+        silent film this whole arrangement exists to prevent."""
+        plan = self._plan(monkeypatch, tmp_path, self.SWEDISH_DISC, "swe")
+        assert len([a for a in plan if a.startswith("-disposition:")]) == 1
+
+    @pytest.mark.parametrize("tag,wanted", [
+        ("swe", "sv"), ("swe", "swe"), ("ger", "de"), ("deu", "ger"),
+        ("fre", "fr"), ("fra", "fre"), ("dut", "nl"), ("nor", "nb"),
+    ])
+    def test_the_spellings_a_disc_actually_uses(self, tag, wanted):
+        """German, French, Dutch and Chinese each have two ISO 639-2 codes,
+        and discs are not consistent about which."""
+        assert vaapi.language_matches(tag, wanted) is True
+
+    @pytest.mark.parametrize("tag,wanted", [
+        ("eng", "swe"), ("swe", "dan"), ("", "swe"), ("swe", ""),
+    ])
+    def test_what_does_not_match(self, tag, wanted):
+        assert vaapi.language_matches(tag, wanted) is False
+
+
+class TestReadingTheTrackList:
+    def test_a_track_with_no_language_does_not_shift_the_others(
+        self, tmp_path, monkeypatch,
+    ):
+        """One value per line would simply omit the missing tag, and every
+        track after it would be attributed to the wrong stream."""
+        import subprocess as sp
+
+        monkeypatch.setattr(vaapi.shutil, "which", lambda name: "/usr/bin/ffprobe")
+        monkeypatch.setattr(sp, "run", lambda *a, **k: types.SimpleNamespace(
+            returncode=0, stdout="ac3\nac3,swe\ndts,fin\n", stderr=""))
+        streams = vaapi.audio_streams("/usr/bin/ffmpeg", tmp_path / "in.mkv")
+        assert streams == [
+            {"codec": "ac3", "language": ""},
+            {"codec": "ac3", "language": "swe"},
+            {"codec": "dts", "language": "fin"},
+        ]
+
+    def test_no_ffprobe_answers_nothing_rather_than_raising(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(vaapi.shutil, "which", lambda name: None)
+        assert vaapi.audio_streams("/usr/bin/ffmpeg", tmp_path / "in.mkv") == []

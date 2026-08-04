@@ -42,6 +42,11 @@ _DEFAULTS: dict[str, Any] = {
     # through VA-API, and on current drivers that no longer initialises. The
     # Encoding page probes both and offers the switch when it applies.
     "encoder_backend": "handbrake",
+    # The language you want to hear, as a disc spells it: "swe", "eng", "sv".
+    # Only the ffmpeg/GPU encoder consults this — HandBrake takes its audio
+    # rules from the preset. Empty keeps the disc's own track order, which is
+    # right when there is only one language and a coin toss when there are two.
+    "audio_language": "",
     # Which VA-API driver HandBrake's Quick Sync should load, via
     # LIBVA_DRIVER_NAME. Empty leaves libva to choose, which is right on a
     # machine with one driver installed and can be wrong on a container that
@@ -270,6 +275,10 @@ class Config:
         """
         value = str(self._data.get("encoder_backend", "handbrake") or "").lower()
         return value if value in ("handbrake", "vaapi") else "handbrake"
+
+    @property
+    def audio_language(self) -> str:
+        return self._data.get("audio_language", "") or ""
 
     @property
     def libva_driver(self) -> str:

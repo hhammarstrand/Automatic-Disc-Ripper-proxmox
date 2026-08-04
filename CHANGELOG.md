@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.9.2
+
+**Choose the language you want to hear.** The GPU encoder took whatever track
+the disc listed first and made that the default. On a Swedish disc that is
+often the English one, and a rip you cannot understand is wrong in a way no
+amount of encoding quality makes up for.
+
+**Settings → Encoding → Spoken language** takes a code as a disc spells it —
+`swe`, `eng`, `nor`. Two-letter codes work too, which needs saying because
+"sv" and "swe" share exactly one letter and comparing them directly fails; so
+do the alternate spellings discs use for German, French, Dutch and Chinese.
+The chosen track becomes the stereo default and is tagged with its language,
+so a player does not list it as "Undetermined". **Every other track is still
+kept** — choosing a default is not the same as throwing the rest away. A
+language the disc does not carry falls back to the disc's own order rather
+than picking something at random.
+
+To be explicit, because it is a reasonable thing to assume otherwise: **the
+HandBrake preset does not apply to the ffmpeg path.** They are two different
+encoders. HandBrake takes its audio and language rules from the preset; the
+GPU path takes them from these settings.
+
 ## 1.9.1
 
 **Films encoded on the GPU played silently.** The ffmpeg path copied the
