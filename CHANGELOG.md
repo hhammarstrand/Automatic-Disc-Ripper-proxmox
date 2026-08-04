@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.15.1
+
+**Uninstalling now undoes installing, on both machines.** Installing touches
+the container *and* the host — two helper commands in `/usr/local/sbin`, a
+guest-startup drop-in, an `/etc/fstab` line, and a file in `/root` holding the
+NAS password. The uninstaller destroyed the container and left every bit of
+it, including a password for an application that no longer exists.
+
+Each is offered separately rather than as one "clean up the host?", because
+someone running two containers wants the shared helpers to stay while nobody
+wants the password to. `/etc/fstab` is copied before it is edited: getting
+that wrong shows up at the next boot, by which time the original is the only
+thing that would have helped.
+
+**And one that could have cost someone their films.** On installs made before
+1.0, `/opt/adr/completed` is a bind-mount of the media library — and the
+container-side uninstall offered `rm -rf /opt/adr`, which goes straight
+through it. It now looks for mounts under that directory first, and when it
+finds one it says which, says how to unmount it, and stops.
+
+It also removes `adr-update.path` and `adr-update.service`, which arrived with
+in-app updating and were missed by an uninstall that only knew about
+`adr.service`.
+
 ## 1.15.0
 
 **Settings were validated five out of forty-nine, and the shape was why.** The

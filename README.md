@@ -854,8 +854,26 @@ the host path.
 pct exec <CTID> -- systemctl status adr         # status
 pct exec <CTID> -- journalctl -u adr -f         # live logs
 pct exec <CTID> -- systemctl restart adr        # restart
-bash scripts/uninstall.sh <CTID>                # destroy the whole container (host)
+bash scripts/uninstall.sh <CTID>                # destroy the container (host)
 ```
+
+### Uninstalling
+
+Installing touches two machines, so uninstalling asks about both. Run it on
+the host with the container id and it destroys the container, then offers —
+separately, one question each — to take away what the installer left behind:
+`adr-doctor` and `adr-setup-nas`, the guest-startup drop-in, the `/etc/fstab`
+line for the share, and the file in `/root` holding the NAS password. Someone
+running two containers wants the shared helpers to stay; nobody wants the
+password to.
+
+Nothing on the NAS is touched, and a bind-mounted host directory is not on the
+container's disk, so your library survives either way.
+
+Run inside the container instead and it removes the services and offers to
+delete `/opt/adr` — unless something is mounted under it, which on installs
+made before 1.0 means `completed/` is the media library and a recursive delete
+would go straight through it. It says so and stops.
 
 ### Updating
 
