@@ -271,6 +271,32 @@ done
 msg_ok "Container is up"
 
 # ----------------------------------------------------------------------------- #
+# Give the container the host's clock
+#
+# A fresh LXC is Etc/UTC. Every timestamp the application writes then reads two
+# hours behind the wall clock of the person looking at it — job start times,
+# the log file, the per-job logs. Nothing is *broken* by that, which is why it
+# survives: it just makes every time on screen quietly wrong, and makes the log
+# impossible to line up against when something actually happened.
+#
+# The host already knows the right answer, so it is copied rather than asked
+# for. CT_TIMEZONE overrides it for anyone who wants the container elsewhere.
+# ----------------------------------------------------------------------------- #
+HOST_TZ="${CT_TIMEZONE:-$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || true)}"
+HOST_TZ="${HOST_TZ//[$'\t\r\n ']/}"
+if [[ -n "$HOST_TZ" && "$HOST_TZ" != "Etc/UTC" ]]; then
+    if pct exec "$CT_ID" -- test -f "/usr/share/zoneinfo/${HOST_TZ}" 2>/dev/null; then
+        pct exec "$CT_ID" -- ln -sf "/usr/share/zoneinfo/${HOST_TZ}" /etc/localtime
+        pct exec "$CT_ID" -- sh -c "echo '${HOST_TZ}' > /etc/timezone"
+        msg_ok "Container clock set to ${HOST_TZ} (from this host)"
+    else
+        msg_warn "The host's timezone (${HOST_TZ}) is not in the container's"
+        msg_warn "zoneinfo, so its clock stays on UTC. Times on screen will be"
+        msg_warn "correct anyway; the log file will read in UTC."
+    fi
+fi
+
+# ----------------------------------------------------------------------------- #
 # Transfer the application source into the container
 # ----------------------------------------------------------------------------- #
 # We fetch the repo on the HOST (so a private repo only needs one token here),

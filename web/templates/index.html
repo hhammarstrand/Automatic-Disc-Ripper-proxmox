@@ -406,7 +406,7 @@
                                         </span>
                                         {% endif %}
                                     </td>
-                                    <td class="small text-nowrap d-none d-sm-table-cell">{{ job.completed_at.strftime('%d %b %H:%M') if job.completed_at else '–' }}</td>
+                                    <td class="small text-nowrap d-none d-sm-table-cell">{% if job.completed_at %}<time data-iso="{{ job.completed_at | isotime }}" data-format="short">{{ job.completed_at.strftime('%d %b %H:%M') }}</time>{% else %}–{% endif %}</td>
                                     <td>
                                         <div class="d-flex gap-1">
                                         {% if job.status and job.status.value == 'done' and job.output_path %}

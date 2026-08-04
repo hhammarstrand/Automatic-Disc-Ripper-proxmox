@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.16.1
+
+**Every time on screen was in UTC.** A fresh LXC is `Etc/UTC` and nothing ever
+set it otherwise, so every timestamp the application wrote read two hours
+behind the wall clock of the person looking at it — job start times, the
+service log, the per-job logs.
+
+Nothing was *broken* by that, which is exactly why it survived a whole
+evening's troubleshooting: it simply made every time quietly wrong, and made
+the log impossible to line up against when something actually happened.
+
+Two fixes, and both are needed:
+
+- **The container gets the host's clock.** The installer copies it, and
+  `adr-doctor --fix` sets it on containers that already exist — then restarts
+  the service, because a running process holds its own idea of the zone and new
+  log lines would otherwise keep the old offset, making the fix look like it had
+  not worked. `CT_TIMEZONE` overrides it. Both check the zone exists before
+  linking it: a symlink to a missing zoneinfo file is worse than UTC.
+- **The browser renders each timestamp in its own zone.** Because the
+  container's clock and the reader's are not necessarily the same one — a phone
+  on holiday should still show the time the disc finished, in the zone the
+  person holding it is standing in. The server keeps rendering a value too, so
+  the page reads correctly with no JavaScript at all.
+
 ## 1.16.0
 
 **Updating from the web UI now refuses while a job is running, instead of

@@ -34,6 +34,36 @@ function reasonFrom(payload, fallback = 'the server did not say why') {
     return payload.error || payload.message || fallback;
 }
 
+// Times, in the zone of whoever is reading them.
+//
+// The server renders each timestamp too, so the page is readable with no
+// JavaScript at all — this rewrites it. Worth doing even once the container's
+// clock is right, because the container's clock and the reader's are not
+// necessarily the same one: a phone on holiday should still show the time the
+// disc actually finished, in the zone the person holding it is standing in.
+//
+// The offset comes from the server (see the isotime filter). Without it a
+// browser reads a zoneless date-time as its *own* local time, which is how a
+// job that had just started showed an elapsed time of two hours.
+function formatLocalTimes(root = document) {
+    root.querySelectorAll('time[data-iso]').forEach(element => {
+        const iso = element.getAttribute('data-iso');
+        if (!iso) return;
+        const when = new Date(iso);
+        if (isNaN(when)) return;              // leave the server's rendering
+        const short = element.getAttribute('data-format') === 'short';
+        element.textContent = when.toLocaleString(undefined, short ? {
+            day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit',
+        } : {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit',
+        });
+        element.title = when.toLocaleString();
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => formatLocalTimes());
+
 const TOAST_MILLISECONDS = 5000;
 
 function notify(message, kind = 'info') {

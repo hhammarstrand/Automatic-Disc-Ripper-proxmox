@@ -136,6 +136,7 @@ Open that URL and you're done. Insert a disc to start ripping.
 | `NAS_URL` | — | `nfs://host/export/path` or `smb://host/share` — mounts a NAS for the finished files |
 | `NAS_USERNAME` / `NAS_PASSWORD` | — | SMB credentials (SMB only) |
 | `NAS_MOUNTPOINT` | `/mnt/adr-media` | Where the share is mounted on the host |
+| `CT_TIMEZONE` | the host's | Container timezone — copied from this host unless set |
 | `TMDB_API_KEY` | — | TMDb API key |
 | `MAKEMKV_KEY` | `auto` | `auto` (fetch free beta key), a `T-…` key, or empty to skip |
 | `ADR_NONINTERACTIVE` | `0` | `1` = no prompts (use the `CT_*` defaults) |

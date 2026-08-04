@@ -144,8 +144,16 @@
                     </span>
                     {% endif %}
                 </td>
-                <td class="small">{{ job.started_at.strftime('%Y-%m-%d %H:%M') if job.started_at else '–' }}</td>
-                <td class="small">{{ job.completed_at.strftime('%Y-%m-%d %H:%M') if job.completed_at else '–' }}</td>
+                <td class="small">
+                    {% if job.started_at %}
+                    <time data-iso="{{ job.started_at | isotime }}">{{ job.started_at.strftime('%Y-%m-%d %H:%M') }}</time>
+                    {% else %}–{% endif %}
+                </td>
+                <td class="small">
+                    {% if job.completed_at %}
+                    <time data-iso="{{ job.completed_at | isotime }}">{{ job.completed_at.strftime('%Y-%m-%d %H:%M') }}</time>
+                    {% else %}–{% endif %}
+                </td>
                 <td>{{ job.tracks | length }}</td>
                 <td class="small">{{ job.rip_duration | duration }}</td>
                 <td class="small">{{ job.encode_duration | duration }}</td>

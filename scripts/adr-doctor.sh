@@ -32,7 +32,7 @@ set -euo pipefail
 # "nothing wrong found", which is worse than failing: it is a clean bill of
 # health from a script that never looked. Compared against the container's own
 # version below.
-ADR_DOCTOR_VERSION="1.16.0"
+ADR_DOCTOR_VERSION="1.16.1"
 
 CT_MEDIA_PATH="${CT_MEDIA_PATH:-/mnt/media}"
 # The user the service runs as inside the container.
@@ -443,6 +443,48 @@ print(state["detail"])
     fi
 else
     msg_ok "No GPU on the host — software encoding is the only option, which is fine"
+fi
+
+# ----------------------------------------------------------------------------- #
+# 3c. The container's clock
+#
+# A fresh LXC is Etc/UTC, and nothing before this release set it otherwise. So
+# every timestamp the application writes reads two hours behind the wall clock
+# of the person looking at it — job start times, the service log, the per-job
+# logs. Nothing is broken by that, which is exactly why it survives: it just
+# makes every time on screen quietly wrong, and makes the log impossible to
+# line up against when something actually happened.
+#
+# The host knows the right answer, so it is copied rather than asked for.
+# ----------------------------------------------------------------------------- #
+HOST_TZ="$(timedatectl show -p Timezone --value 2>/dev/null || cat /etc/timezone 2>/dev/null || true)"
+HOST_TZ="${HOST_TZ//[$'\t\r\n ']/}"
+if [[ -n "$HOST_TZ" ]] && pct status "$CTID" 2>/dev/null | grep -q running; then
+    CT_TZ="$(pct exec "$CTID" -- sh -c 'cat /etc/timezone 2>/dev/null' 2>/dev/null || true)"
+    CT_TZ="${CT_TZ//[$'\t\r\n ']/}"
+
+    if [[ -z "$CT_TZ" || "$CT_TZ" == "$HOST_TZ" ]]; then
+        msg_ok "Container clock matches this host (${HOST_TZ})"
+    else
+        note_problem "The container's clock is ${CT_TZ}; this host is ${HOST_TZ}."
+        msg_warn "        Every timestamp in the UI and the logs is off by the"
+        msg_warn "        difference, which makes the log impossible to line up"
+        msg_warn "        against when something actually happened."
+        if [[ "$FIX" -eq 1 ]]; then
+            if pct exec "$CTID" -- test -f "/usr/share/zoneinfo/${HOST_TZ}" 2>/dev/null; then
+                pct exec "$CTID" -- ln -sf "/usr/share/zoneinfo/${HOST_TZ}" /etc/localtime
+                pct exec "$CTID" -- sh -c "echo '${HOST_TZ}' > /etc/timezone"
+                # The running service holds its own idea of the zone until it
+                # is restarted, so new log lines would keep the old offset.
+                pct exec "$CTID" -- systemctl restart adr >/dev/null 2>&1 || true
+                note_fixed "set the container clock to ${HOST_TZ}"
+            else
+                msg_warn "        ${HOST_TZ} is not in the container's zoneinfo; leaving it."
+            fi
+        else
+            would_fix "set the container clock to ${HOST_TZ}"
+        fi
+    fi
 fi
 
 # ----------------------------------------------------------------------------- #
