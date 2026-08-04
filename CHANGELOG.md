@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.7.6
+
+**The driver check from 1.7.5 was itself a false green.** It asked "is any
+VA-API driver installed?" and a container with Mesa on it answered yes — while
+the GPU was Intel and `radeonsi_drv_video.so` could not encode a single frame
+on it. `adr-doctor` reported the stack installed and skipped the install; the
+web UI went on blaming the HandBrake build. One layer down, the same mistake.
+
+Both halves are now checked against the PCI vendor of the render node, read
+from `/sys`. Intel needs `iHD` or `i965` *and* the Media SDK / oneVPL runtime
+Quick Sync loads on top of it — the second thing is Quick Sync's alone, so an
+AMD card is not asked for it. When drivers are installed but none of them
+drives this GPU, the message says so rather than claiming none exist, because
+otherwise it contradicts the first `ls` anyone runs to check.
+
+`adr-doctor` no longer carries its own opinion about this. It asks the
+container's own `gpu.runtime_state()` and prints what that says. A second,
+looser implementation on the host is precisely how 1.7.5 went wrong.
+
+**And HandBrake is now asked whether it has the encoder at all.** `--help`
+lists every encoder the build was compiled with, which settles the one
+question that was previously inferred: `qsv is not available on the system`
+means either the build has no Quick Sync or the system has no runtime for it,
+and those have opposite fixes. A build with no hardware encoder is told to
+encode in software immediately, with no detour through GPU passthrough that
+could never have helped. Encoder *names* are matched, not the substring `qsv`
+— `--help` documents `--qsv-async-depth` whether or not the encoder is there.
+
 ## 1.7.5
 
 **Passing the GPU through is only half of it.** 1.7.3 got the render node into

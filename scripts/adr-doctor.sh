@@ -32,7 +32,7 @@ set -euo pipefail
 # "nothing wrong found", which is worse than failing: it is a clean bill of
 # health from a script that never looked. Compared against the container's own
 # version below.
-ADR_DOCTOR_VERSION="1.7.5"
+ADR_DOCTOR_VERSION="1.7.6"
 
 CT_MEDIA_PATH="${CT_MEDIA_PATH:-/mnt/media}"
 # The user the service runs as inside the container.
@@ -331,19 +331,47 @@ if [[ -d /dev/dri ]] && compgen -G "/dev/dri/renderD*" >/dev/null; then
     # Installing Intel's media stack on an AMD box would be pure noise.
     # ------------------------------------------------------------------- #
     # Asked twice — before and after the install — so it lives in one place.
-    # shellcheck disable=SC2016  # $d belongs to the container's shell
+    #
+    # The container answers with the application's own check rather than a
+    # shell probe of its own. A second, looser implementation here is exactly
+    # how this went wrong once already: the script accepted any VA driver at
+    # all, reported the stack installed, and the web UI then told the user the
+    # encoder was missing from their HandBrake build. One answer, one place.
+    CT_RUNTIME_DETAIL=""
     ct_has_va_driver() {
-        pct exec "$CTID" -- sh -c '
-            for d in /usr/lib/x86_64-linux-gnu/dri /usr/lib/dri /usr/lib64/dri; do
-                ls "$d"/*_drv_video.so >/dev/null 2>&1 && exit 0
-            done
-            exit 1
-        ' >/dev/null 2>&1
+        local out
+        out="$(pct exec "$CTID" -- /opt/adr/.venv/bin/python -c '
+import sys
+sys.path.insert(0, "/opt/adr")
+from adr import gpu
+state = gpu.runtime_state()
+print("OK" if state["ok"] else "MISSING")
+print(state["detail"])
+' 2>/dev/null)" || out=""
+
+        if [[ -z "$out" ]]; then
+            # An older container has no runtime_state(). Fall back to the
+            # crude probe rather than refusing to answer — and say so, so a
+            # pass here is not mistaken for the real check.
+            CT_RUNTIME_DETAIL="(checked without the container's own test — it is too old to ask)"
+            # shellcheck disable=SC2016  # $d belongs to the container's shell
+            pct exec "$CTID" -- sh -c '
+                for d in /usr/lib/x86_64-linux-gnu/dri /usr/lib/dri /usr/lib64/dri; do
+                    ls "$d"/*_drv_video.so >/dev/null 2>&1 && exit 0
+                done
+                exit 1
+            ' >/dev/null 2>&1
+            return
+        fi
+
+        CT_RUNTIME_DETAIL="$(printf '%s\n' "$out" | tail -n +2)"
+        [[ "$(printf '%s\n' "$out" | head -1)" == "OK" ]]
     }
 
     if pct status "$CTID" 2>/dev/null | grep -q running; then
         if ct_has_va_driver; then
             msg_ok "The GPU driver stack is installed in the container"
+            [[ -n "$CT_RUNTIME_DETAIL" ]] && msg_info "  ${CT_RUNTIME_DETAIL}"
         else
             # 0x8086 Intel, 0x1002 AMD. Read from the first render node,
             # which is the one HandBrake would use.
@@ -361,14 +389,20 @@ if [[ -d /dev/dri ]] && compgen -G "/dev/dri/renderD*" >/dev/null; then
             esac
 
             if [[ -z "$VA_PACKAGES" ]]; then
-                msg_warn "A GPU is passed through, but no VA-API driver is installed in the"
-                msg_warn "        container and its vendor (${gpu_vendor:-unknown}) is not one this"
+                msg_warn "A GPU is passed through, but the driver stack it needs is not"
+                msg_warn "        installed and its vendor (${gpu_vendor:-unknown}) is not one this"
                 msg_warn "        script knows how to install for. Hardware presets will fail;"
                 msg_warn "        a software preset (x264/x265) works regardless."
+                [[ -n "$CT_RUNTIME_DETAIL" ]] && msg_warn "        ${CT_RUNTIME_DETAIL}"
             else
                 note_problem "The GPU is passed through but the container cannot use it:"
-                msg_warn "        no VA-API driver is installed, so HandBrake reports the"
-                msg_warn "        hardware as unavailable even though the render node is there."
+                if [[ -n "$CT_RUNTIME_DETAIL" ]]; then
+                    msg_warn "        ${CT_RUNTIME_DETAIL}"
+                else
+                    msg_warn "        the driver stack it needs is not installed, so HandBrake"
+                    msg_warn "        reports the hardware as unavailable even though the render"
+                    msg_warn "        node is there."
+                fi
                 if [[ "$FIX" -eq 1 ]]; then
                     msg_info "Installing the GPU driver stack in CT ${CTID} — this downloads a few MB…"
                     # Each package separately and best-effort on purpose. The
@@ -389,9 +423,11 @@ if [[ -d /dev/dri ]] && compgen -G "/dev/dri/renderD*" >/dev/null; then
                     if ct_has_va_driver; then
                         note_fixed "installed the GPU driver stack in the container"
                     else
-                        msg_error "        Could not install a VA-API driver. On Debian the best one"
-                        msg_error "        lives in non-free; enable it in the container's"
-                        msg_error "        /etc/apt/sources.list, or use a software preset."
+                        msg_error "        The driver stack is still incomplete after installing."
+                        [[ -n "$CT_RUNTIME_DETAIL" ]] && msg_error "        ${CT_RUNTIME_DETAIL}"
+                        msg_error "        On Debian the best Intel driver lives in non-free —"
+                        msg_error "        enable it in the container's /etc/apt/sources.list, or"
+                        msg_error "        use a software preset."
                     fi
                 else
                     would_fix "install ${VA_PACKAGES%% *} and friends in the container"

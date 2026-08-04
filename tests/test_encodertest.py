@@ -284,11 +284,14 @@ class TestAdviceWhenThePresetWantsAGPU:
         """
         self._gpu(
             monkeypatch, available=True, nodes=["/dev/dri/renderD128"],
-            runtime={"ok": False, "drivers": [], "detail": "",
-                     "fix": "Run on the Proxmox host: adr-doctor --fix {ctid}"},
+            runtime={
+                "ok": False, "drivers": [],
+                "detail": "the driver stack this GPU needs is not installed.",
+                "fix": "Run on the Proxmox host: adr-doctor --fix {ctid}",
+            },
         )
         advice = encodertest._hardware_advice()
-        assert "driver" in advice
+        assert "driver stack" in advice, "it must name the half that is missing"
         assert "adr-doctor --fix" in advice
         assert "missing from this HandBrake build" not in advice
 
@@ -303,3 +306,68 @@ class TestAdviceWhenThePresetWantsAGPU:
         advice = encodertest._hardware_advice()
         assert "HandBrake build" in advice
         assert "x264" in advice
+
+    def test_a_build_with_no_hardware_encoder_is_answered_first(
+        self, monkeypatch, tmp_path,
+    ):
+        """The only one of the three that cannot be fixed. Sending someone to
+        pass a GPU through, when their HandBrake could never have used it, is
+        an evening spent on a config file for nothing."""
+        exe = _script(tmp_path / "hb", """
+            echo '   -e, --encoder <string>  Select video encoder:'
+            echo '                               x264'
+            echo '                               x265'
+        """)
+        self._gpu(monkeypatch, available=False, detail="No GPU here.",
+                  fix="Run on the Proxmox host: adr-doctor --fix {ctid}")
+        advice = encodertest._hardware_advice(exe)
+        assert "no hardware encoder compiled in" in advice
+        assert "adr-doctor" not in advice, "there is nothing the host can do"
+
+    def test_a_build_that_does_have_qsv_is_not_blamed(self, monkeypatch, tmp_path):
+        exe = _script(tmp_path / "hb", """
+            echo '   -e, --encoder <string>  Select video encoder:'
+            echo '                               x264'
+            echo '                               qsv_h264'
+            echo '                               nvenc_h265'
+        """)
+        self._gpu(monkeypatch, available=False, detail="No GPU here.",
+                  fix="Run on the Proxmox host: adr-doctor --fix {ctid}")
+        advice = encodertest._hardware_advice(exe)
+        assert "compiled in" not in advice
+        assert "adr-doctor --fix" in advice
+
+
+class TestAskingTheBuildWhatItHas:
+    def test_it_finds_the_hardware_encoders(self, tmp_path):
+        exe = _script(tmp_path / "hb", """
+            echo '                               x264'
+            echo '                               qsv_h264'
+            echo '                               qsv_h265'
+            echo '                               nvenc_h264'
+            echo '                               vce_h265'
+        """)
+        assert encodertest.build_hardware_encoders(exe) == [
+            "nvenc_h264", "qsv_h264", "qsv_h265", "vce_h265",
+        ]
+
+    def test_a_software_only_build_lists_none(self, tmp_path):
+        exe = _script(tmp_path / "hb", """
+            echo '                               x264'
+            echo '                               x265_10bit'
+            echo '                               mpeg2'
+        """)
+        assert encodertest.build_hardware_encoders(exe) == []
+
+    def test_an_option_that_merely_mentions_qsv_is_not_an_encoder(self, tmp_path):
+        """--help documents --qsv-async-depth whether or not the build has the
+        encoder. Reading that as one hands back the wrong answer of three."""
+        exe = _script(tmp_path / "hb", """
+            echo '   --qsv-async-depth <number>   Set the number of frames'
+            echo '   --enable-qsv-decoding        Use Quick Sync for decoding'
+            echo '                               x264'
+        """)
+        assert encodertest.build_hardware_encoders(exe) == []
+
+    def test_a_handbrake_that_will_not_run_answers_nothing(self, tmp_path):
+        assert encodertest.build_hardware_encoders(str(tmp_path / "gone")) == []

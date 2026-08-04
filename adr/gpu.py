@@ -44,9 +44,42 @@ VA_DRIVER_DIRS = (
     Path("/usr/lib64/dri"),
 )
 
+#: Where shared libraries land, for the runtime that sits above the driver.
+LIB_DIRS = (
+    Path("/usr/lib/x86_64-linux-gnu"),
+    Path("/usr/lib64"),
+    Path("/usr/lib"),
+)
+
 #: The VA driver Quick Sync and VAAPI both go through. iHD covers Broadwell
 #: and later, i965 the older parts; either one means the stack is installed.
 INTEL_VA_DRIVERS = ("iHD_drv_video.so", "i965_drv_video.so")
+AMD_VA_DRIVERS = ("radeonsi_drv_video.so", "r600_drv_video.so")
+NVIDIA_VA_DRIVERS = ("nvidia_drv_video.so",)
+
+#: PCI vendor ids, as /sys spells them.
+VENDOR_INTEL = "0x8086"
+VENDOR_AMD = "0x1002"
+VENDOR_NVIDIA = "0x10de"
+
+#: Which VA driver each vendor's hardware actually needs. A driver for
+#: somebody else's GPU is not a substitute: a container with Mesa installed
+#: has radeonsi_drv_video.so and cannot encode a frame on an Intel chip.
+VENDOR_DRIVERS = {
+    VENDOR_INTEL: INTEL_VA_DRIVERS,
+    VENDOR_AMD: AMD_VA_DRIVERS,
+    VENDOR_NVIDIA: NVIDIA_VA_DRIVERS,
+}
+
+#: Where the DRM class lives, for reading a node's PCI vendor.
+DRM_CLASS_DIR = Path("/sys/class/drm")
+
+#: Quick Sync needs a second thing above the VA driver: the Media SDK or
+#: oneVPL runtime that HandBrake's dispatcher loads at encode time. Present as
+#: libmfxhw64 (the old MSDK), libmfx-gen (oneVPL for Gen11 and later) or
+#: libvpl. Any one of them is enough; none of them is why encqsvInit fails
+#: on a container that has the VA driver and nothing else.
+QSV_RUNTIME_LIBS = ("libmfxhw64.so", "libmfx-gen.so", "libvpl.so", "libmfx.so")
 
 
 def render_nodes() -> list[str]:
@@ -85,6 +118,36 @@ def va_drivers() -> list[str]:
     return sorted(set(found))
 
 
+def gpu_vendor() -> str:
+    """The PCI vendor id of the first render node, or "".
+
+    Which driver is the right one depends entirely on whose GPU it is, and
+    the node itself is the only thing that knows.
+    """
+    for node in render_nodes():
+        path = DRM_CLASS_DIR / os.path.basename(node) / "device" / "vendor"
+        try:
+            return path.read_text().strip().lower()
+        except OSError:
+            continue
+    return ""
+
+
+def qsv_runtime_libs() -> list[str]:
+    """The Media SDK / oneVPL runtime libraries installed, by file name."""
+    found: list[str] = []
+    for directory in LIB_DIRS:
+        try:
+            entries = sorted(p.name for p in directory.iterdir())
+        except OSError:
+            continue
+        found += [
+            name for name in entries
+            if any(name.startswith(lib) for lib in QSV_RUNTIME_LIBS)
+        ]
+    return sorted(set(found))
+
+
 def runtime_state() -> dict:
     """Is the userspace half of hardware encoding installed?
 
@@ -92,8 +155,8 @@ def runtime_state() -> dict:
     that looks finished. ``/dev/dri/renderD128`` present and openable, and
     HandBrake still says ``encqsvInit: qsv is not available on the system`` —
     because Quick Sync does not talk to the kernel directly. It goes through a
-    VA-API driver (``iHD_drv_video.so``) and a Media SDK / oneVPL runtime, and
-    a minimal container image ships neither.
+    VA-API driver (``iHD_drv_video.so``) and then a Media SDK / oneVPL
+    runtime, and a minimal container image ships neither.
 
     That distinction is the whole point of this function. "The build has no
     QSV encoder" and "the QSV runtime is not installed" produce the same
@@ -102,20 +165,59 @@ def runtime_state() -> dict:
     someone to abandon the GPU they just finished passing through, because a
     driver is missing, is the worst answer available.
 
-    ``{"ok", "drivers": [...], "detail", "fix"}``.
+    Both halves are checked *against the vendor of the actual GPU*. Asking
+    only "is any VA driver installed?" is the same false green one level up:
+    a container with Mesa has ``radeonsi_drv_video.so`` and still cannot
+    encode a single frame on an Intel chip.
+
+    ``{"ok", "vendor", "drivers", "libs", "missing", "detail", "fix"}``.
     """
+    vendor = gpu_vendor()
     drivers = va_drivers()
-    state = {"ok": bool(drivers), "drivers": drivers, "detail": "", "fix": ""}
-    if drivers:
-        state["detail"] = "VA-API driver(s) installed: " + ", ".join(drivers) + "."
+    libs = qsv_runtime_libs()
+    state = {
+        "ok": False, "vendor": vendor, "drivers": drivers, "libs": libs,
+        "missing": [], "detail": "", "fix": "",
+    }
+
+    wanted = VENDOR_DRIVERS.get(vendor, ())
+    if wanted:
+        have_driver = any(name in wanted for name in drivers)
+        driver_names = " or ".join(wanted)
+    else:
+        # An unrecognised vendor: any VA driver is the best guess available,
+        # and guessing quietly beats a confident wrong answer about hardware
+        # this code has never heard of.
+        have_driver = bool(drivers)
+        driver_names = "a VA-API driver"
+
+    if not have_driver:
+        state["missing"].append(driver_names)
+
+    # The second library is Quick Sync's alone. VAAPI and NVENC do not load
+    # it, so demanding it on an AMD box would invent a problem.
+    if vendor == VENDOR_INTEL and not libs:
+        state["missing"].append(" or ".join(QSV_RUNTIME_LIBS[:3]))
+
+    if not state["missing"]:
+        state["ok"] = True
+        installed = ", ".join(drivers + libs) or "none found"
+        state["detail"] = f"The GPU driver stack is installed: {installed}."
         return state
-    state["detail"] = (
-        "No VA-API driver is installed in this container, so the GPU cannot "
-        "actually be used for encoding even though the render node is there. "
-        "Quick Sync and VAAPI both reach the hardware through one of "
-        + " or ".join(INTEL_VA_DRIVERS)
-        + ", and a minimal container image ships neither."
+
+    detail = (
+        "The driver stack this GPU needs is not installed in the container, so "
+        "it cannot encode anything even though the render node is there. "
+        f"Missing: {'; '.join(state['missing'])}."
     )
+    if drivers and not have_driver:
+        # Worth naming: it is why a looser check called this fine, and it is
+        # what makes the situation confusing to look at from inside.
+        detail += (
+            f" There are VA-API drivers installed ({', '.join(drivers)}), but "
+            "none of them drives this GPU."
+        )
+    state["detail"] = detail
     state["fix"] = "Run on the Proxmox host: adr-doctor --fix {ctid}"
     return state
 

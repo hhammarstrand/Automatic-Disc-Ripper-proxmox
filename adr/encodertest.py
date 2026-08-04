@@ -45,6 +45,10 @@ ENCODE_TIMEOUT = 120
 #: Lines that are noise on the way past.
 _NOISE = ("hb_display", "Compile-time hardening", "libhb: ")
 
+#: The prefix every hardware encoder name carries, before the underscore:
+#: qsv_h264, nvenc_h265, vce_av1, vaapi_h264, vt_h264, mf_h264.
+_HARDWARE_FAMILIES = frozenset({"qsv", "nvenc", "vce", "vaapi", "vt", "mf"})
+
 #: What HandBrake's own words mean, in the order a human would check them.
 #: Matching its text rather than the exit code because the code is always 3.
 _EXPLANATIONS = (
@@ -66,12 +70,12 @@ def _step(name: str, status: str, detail: str, fix: str = "") -> dict:
     return {"name": name, "status": status, "detail": detail, "fix": fix}
 
 
-def _explain(output: str) -> str:
+def _explain(output: str, exe: str = "") -> str:
     """Turn HandBrake's complaint into something to do about it."""
     from adr import gpu
 
     if gpu.mentions_hardware(output):
-        return _hardware_advice()
+        return _hardware_advice(exe)
     lowered = output.lower()
     for pattern, advice in _EXPLANATIONS:
         if re.search(pattern, lowered):
@@ -79,28 +83,72 @@ def _explain(output: str) -> str:
     return ""
 
 
-def _hardware_advice() -> str:
+def build_hardware_encoders(exe: str) -> list[str]:
+    """The hardware encoders this build of HandBrake was compiled with.
+
+    ``--help`` lists every encoder ``--encoder`` will accept, and a build
+    without Quick Sync simply does not name it. That answers, on its own and
+    without a disc, the question that otherwise has to be inferred: whether
+    "qsv is not available on the system" means the build has no QSV or the
+    system has no runtime for it. Those have opposite fixes.
+    """
+    code, output = _run([exe, "--help"], PRESET_TIMEOUT)
+    if code == -1:
+        return []
+    # Matched as whole encoder names — family, underscore, codec — rather than
+    # by looking for "qsv" anywhere. --help also documents --qsv-async-depth
+    # and --enable-qsv-decoding, and a substring search would read those as an
+    # encoder and hand back the wrong one of three answers.
+    return sorted({
+        name for name in re.findall(r"\b[a-z][a-z0-9]*_[a-z0-9_]+\b", output.lower())
+        if name.split("_", 1)[0] in _HARDWARE_FAMILIES
+    })
+
+
+def _hardware_advice(exe: str = "") -> str:
     """What to do when the preset wants a GPU.
 
-    Two different answers, and which one is right depends on whether the
-    container has a render node. Telling someone to "use a software preset"
-    when the hardware is one config line away throws away the reason they
-    chose that preset; telling them to pass a GPU through when the host has
-    none wastes their evening.
+    Three different situations produce the same HandBrake error and have
+    completely different fixes:
+
+    * the build has no hardware encoder at all — nothing to do but encode in
+      software, and no amount of host-side work will change that;
+    * the build has one but the container has no render node — pass the GPU
+      through, which is one config line;
+    * both are there and the driver stack on top is not — install two
+      packages.
+
+    Telling someone to "use a software preset" when the hardware is one line
+    away throws away the reason they chose that preset. Telling them to pass a
+    GPU through when their HandBrake could never have used it wastes their
+    evening. So the build is asked first, because it is the only one of the
+    three that cannot be fixed.
     """
     from adr import gpu
 
     state = gpu.describe()
+
+    if exe:
+        encoders = build_hardware_encoders(exe)
+        if not encoders:
+            return (
+                "This build of HandBrake has no hardware encoder compiled in — "
+                "it lists none under --help — so no amount of GPU passthrough "
+                "will make this preset work. Encode in software (x264 or x265) "
+                "instead; the button below switches the preset for you."
+            )
+
     if state["available"] and not state["runtime"]["ok"]:
         # The case that looks solved and is not: the node is passed through,
         # so every check about the GPU passes, and the encode still fails
         # because nothing above the kernel is installed. Do not send someone
         # who has just finished passing a GPU through back to software.
+        runtime = state["runtime"]
         return (
             f"The preset asks for a hardware encoder and {state['nodes'][0]} is "
-            "passed through correctly — but the driver that sits on top of it "
-            "is not installed, which is why HandBrake still says the hardware "
-            "is not available. " + (state["fix"] or "adr-doctor --fix {ctid}")
+            f"passed through correctly — but {runtime['detail']} That is why "
+            "HandBrake says the hardware is not available. "
+            + (runtime["fix"] or state["fix"] or "adr-doctor --fix {ctid}")
             + " installs it. Until then, 'Encode in software instead' below "
             "will get the disc finished."
         )
@@ -264,7 +312,7 @@ def _encode_step(exe: str, preset_file: str, config) -> dict:
         return _step(
             "Test encode", "fail",
             f"HandBrake could not encode with this preset (exit {code}).\n{said}",
-            _explain(text)
+            _explain(text, exe)
             or "Try a built-in preset such as 'Fast 1080p30' under Settings.",
         )
     finally:

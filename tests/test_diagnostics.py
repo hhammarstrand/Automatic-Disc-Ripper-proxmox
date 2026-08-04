@@ -307,12 +307,15 @@ class TestHardwareEncoding:
         monkeypatch.setattr("adr.gpu.describe", lambda: {
             "available": True, "nodes": ["/dev/dri/renderD128"],
             "detail": "present", "fix": "",
-            "runtime": {"ok": False, "drivers": [], "detail": "",
-                        "fix": "Run on the Proxmox host: adr-doctor --fix {ctid}"},
+            "runtime": {
+                "ok": False, "drivers": [],
+                "detail": "the driver stack this GPU needs is not installed.",
+                "fix": "Run on the Proxmox host: adr-doctor --fix {ctid}",
+            },
         })
         check = diagnostics.check_hardware_encoding(_config(tmp_path))
         assert check["status"] == "fail"
-        assert "VA-API" in check["detail"]
+        assert "driver stack" in check["detail"], "it must say which half is missing"
         assert "adr-doctor --fix" in check["fix"]
 
     def test_a_gpu_nobody_asked_for_is_not_a_problem(self, tmp_path, monkeypatch):

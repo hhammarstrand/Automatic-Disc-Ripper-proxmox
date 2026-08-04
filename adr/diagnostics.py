@@ -128,10 +128,10 @@ def check_hardware_encoding(config) -> dict:
         return _check(
             "hardware_encoding", "Hardware encoding", "fail",
             f"The preset uses '{wanted}'. {state['nodes'][0]} is passed through "
-            "correctly, but no VA-API driver is installed, so the GPU cannot "
-            "encode anything. Every encode fails at initialisation until this "
-            "is fixed.",
-            state["fix"] or "Run on the Proxmox host: adr-doctor --fix {ctid}",
+            f"correctly, but {state['runtime']['detail']} Every encode fails at "
+            "initialisation until this is fixed.",
+            state["runtime"]["fix"] or state["fix"]
+            or "Run on the Proxmox host: adr-doctor --fix {ctid}",
         )
     return _check(
         "hardware_encoding", "Hardware encoding", "fail",
