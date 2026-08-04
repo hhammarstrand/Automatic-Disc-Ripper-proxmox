@@ -219,10 +219,11 @@
                             <code>nor</code>; <code>sv</code> works too. Set it and
                             you get that language and nothing else: an AAC stereo
                             track and the surround track, which is the shape a
-                            HandBrake "Surround" preset produces. Empty keeps every
-                            track the disc has, in its own order — right when you
-                            have not said which language you want, a coin toss when
-                            the disc carries two.
+                            HandBrake "Surround" preset produces. Empty falls back
+                            to the language the HandBrake preset names, so both
+                            encoders agree; if the preset names none either, the
+                            disc's own track order decides — a coin toss when the
+                            disc carries two.
                         </div>
                     </div>
                     <div class="mb-3">

@@ -27,7 +27,6 @@ from adr.naming import (
 )
 from adr.ripper import MakeMKVRipper
 
-
 # ------------------------------------------------------------------ #
 # Which title is the film
 # ------------------------------------------------------------------ #

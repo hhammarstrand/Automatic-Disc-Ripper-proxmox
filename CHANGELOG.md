@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.16.5
+
+**"Och den blev på engelska."** The spoken language was set — in the HandBrake
+preset, which names `swe` and always has. Then HandBrake turned out to be
+unable to reach the GPU, the encoder was switched to ffmpeg, and ffmpeg read
+only the *setting*, which was blank. Blank meant "keep every track in the
+disc's own order", so the English track led and the player picked it.
+
+The setting now falls back to the language the preset names. Someone who typed
+one still wins, because they typed it; someone who never touched the field gets
+what their preset asks for, which is the only reading of "use my preset as the
+template" that survives changing encoder. The job log says which of the two
+the language came from, because "Swedish, from a preset nobody remembers
+writing" is otherwise indistinguishable from a guess.
+
 ## 1.16.4
 
 **A film that came off the disc as sixteen parts.** "Main feature only" was

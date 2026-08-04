@@ -77,9 +77,17 @@ class TestHandBrakeExplainsItselfToo:
         said = describe_audio_request(self._config(audio_language="sv"))
         assert "'swe'" in said
 
-    def test_with_no_language_it_names_the_preset_as_the_decider(self):
+    def test_with_no_setting_the_preset_s_own_language_is_used(self):
+        """The shipped preset asks for Swedish. Leaving the setting blank must
+        not mean English — the preset is the template, and it named one."""
         said = describe_audio_request(self._config())
+        assert "'swe'" in said
         assert "Super HQ 1080p30 Surround (Svenska)" in said
+        assert "Settings" in said
+
+    def test_with_nothing_named_anywhere_the_disc_decides(self):
+        said = describe_audio_request(self._config(handbrake_preset="Fast 1080p30"))
+        assert "the disc's own track order" in said
         assert "Settings" in said
 
     def test_it_says_the_preset_still_decides_how_many_tracks(self):

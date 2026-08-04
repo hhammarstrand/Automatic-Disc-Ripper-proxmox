@@ -226,3 +226,89 @@ class TestTheStatusLineDescribesTheRightProgram:
             said = encodingsettings.describe(
                 _config(encoder_backend=backend, video_quality=20))
             assert "quality 20" in said
+
+
+class TestThePresetIsTheTemplate:
+    """The report: "Och den blev på engelska."
+
+    The spoken language was set in the HandBrake preset, HandBrake could not
+    reach the GPU, so the encoder was switched to ffmpeg — and ffmpeg read only
+    the (empty) setting. The preset said Swedish and nothing was listening.
+    """
+
+    def _preset(self, tmp_path, name, languages, filename="P.json"):
+        import json
+
+        path = tmp_path / filename
+        path.write_text(json.dumps({"PresetList": [{
+            "PresetName": name, "AudioLanguageList": languages,
+        }]}))
+        return types.SimpleNamespace(
+            audio_language="", video_quality=0, max_height=0,
+            handbrake_preset=name, handbrake_preset_file=str(path),
+        )
+
+    def test_the_preset_s_language_is_used_when_the_setting_is_blank(self, tmp_path):
+        config = self._preset(tmp_path, "Svenska", ["swe"])
+        assert encodingsettings.preset_language(config) == "swe"
+        assert encodingsettings.language(config) == "swe"
+
+    def test_it_reaches_handbrake_s_arguments_too(self, tmp_path):
+        """Redundant for HandBrake, which reads its own preset — but the two
+        encoders now answer the same question the same way, which is the
+        whole point of this module."""
+        config = self._preset(tmp_path, "Svenska", ["swe"])
+        assert "--audio-lang-list" in encodingsettings.handbrake_overrides(config)
+
+    def test_the_setting_still_wins(self, tmp_path):
+        """Someone typed it."""
+        config = self._preset(tmp_path, "Svenska", ["swe"])
+        config.audio_language = "nor"
+        assert encodingsettings.language(config) == "nor"
+
+    def test_a_two_letter_code_in_a_preset_is_translated(self, tmp_path):
+        config = self._preset(tmp_path, "Svenska", ["sv"])
+        assert encodingsettings.preset_language(config) == "swe"
+
+    def test_any_and_und_are_not_languages(self, tmp_path):
+        for placeholder in (["und"], ["any"], [""], []):
+            config = self._preset(tmp_path, "P", placeholder)
+            assert encodingsettings.preset_language(config) == ""
+
+    def test_the_first_named_language_leads(self, tmp_path):
+        config = self._preset(tmp_path, "P", ["swe", "eng"])
+        assert encodingsettings.preset_language(config) == "swe"
+
+    def test_a_preset_name_that_is_not_in_the_file_is_not_read(self, tmp_path):
+        """HandBrake resolves a built-in name from its own list even with a
+        file imported alongside. Reading a language out of that file would
+        apply a setting from a preset that never runs."""
+        config = self._preset(tmp_path, "Svenska", ["swe"])
+        config.handbrake_preset = "Fast 1080p30"
+        assert encodingsettings.preset_language(config) == ""
+
+    def test_a_missing_file_is_not_an_error(self, tmp_path):
+        config = self._preset(tmp_path, "Svenska", ["swe"])
+        config.handbrake_preset_file = str(tmp_path / "gone.json")
+        assert encodingsettings.preset_language(config) == ""
+
+    def test_broken_json_is_not_an_error(self, tmp_path):
+        path = tmp_path / "bad.json"
+        path.write_text("{not json")
+        config = types.SimpleNamespace(
+            audio_language="", video_quality=0, max_height=0,
+            handbrake_preset="Svenska", handbrake_preset_file=str(path),
+        )
+        assert encodingsettings.preset_language(config) == ""
+
+    def test_the_shipped_preset_asks_for_swedish(self):
+        """The preset this repository installs. If this ever stops being true
+        the fallback above is silently doing nothing."""
+        import json
+        from pathlib import Path
+
+        files = sorted(Path("presets").glob("*.json"))
+        assert files, "the shipped preset is gone"
+        data = json.loads(files[0].read_text())
+        entry = encodingsettings._find_preset(data, data["PresetList"][0]["PresetName"])
+        assert entry["AudioLanguageList"] == ["swe"]

@@ -61,25 +61,33 @@ def describe_audio_request(config) -> str:
     gone wrong (the setting, the preset, the disc) and no way to tell them
     apart.
     """
-    from adr.encodingsettings import handbrake_overrides
+    from adr.encodingsettings import handbrake_overrides, language
     from adr.vaapi import normalise_language
 
-    wanted = normalise_language(getattr(config, "audio_language", "") or "")
+    preset = getattr(config, "handbrake_preset", "") or "the preset"
+    wanted = language(config)
     if not wanted:
-        preset = getattr(config, "handbrake_preset", "") or "the preset"
         return (
-            f"Audio: no spoken language is set, so '{preset}' decides which "
-            "tracks to keep, using the rules inside it. "
-            "Settings → Encoding → Spoken language overrides that."
+            f"Audio: no spoken language is set, and '{preset}' does not name "
+            "one either, so the disc's own track order decides. "
+            "Settings → Encoding → Spoken language sets it."
         )
 
+    # Where the answer came from matters as much as what it is. "Swedish"
+    # coming from a preset nobody remembers writing reads as a mystery unless
+    # the line says which of the two settings produced it.
+    explicit = normalise_language(getattr(config, "audio_language", "") or "")
+    source = (
+        "Settings → Encoding → Spoken language" if explicit
+        else f"the preset '{preset}', since Settings → Encoding leaves it blank"
+    )
     overrides = handbrake_overrides(config)
     flags = " ".join(overrides) if overrides else "(none)"
     return (
-        f"Audio: asking HandBrake for '{wanted}' — {flags}. How many matching "
-        "tracks it keeps is the preset's AudioTrackSelectionBehavior; if the "
-        "disc has no track in that language the preset falls back to its own "
-        "rules."
+        f"Audio: asking HandBrake for '{wanted}' (from {source}) — {flags}. "
+        "How many matching tracks it keeps is the preset's "
+        "AudioTrackSelectionBehavior; if the disc has no track in that "
+        "language the preset falls back to its own rules."
     )
 
 

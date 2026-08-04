@@ -507,7 +507,13 @@ class VaapiEncoder:
         result.output_path = output_path
 
         duration = probe_duration(self._exe, input_path)
-        wanted = getattr(self._config, "audio_language", "") or ""
+        # The setting first, then the HandBrake preset behind it. Someone who
+        # set Swedish in the preset and switched to the GPU encoder because
+        # HandBrake could not use the GPU meant Swedish either way; reading
+        # only the setting is how that turned back into English.
+        from adr.encodingsettings import language as wanted_language
+
+        wanted = wanted_language(self._config)
         streams = audio_streams(self._exe, input_path)
 
         # Say which track was chosen and why, in the job's own log.
