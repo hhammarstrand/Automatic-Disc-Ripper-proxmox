@@ -435,3 +435,83 @@ class TestSwitchingWhileRunning:
         config, worker = self._worker(tmp_path)
         config.encoder_backend = "vaapi"
         assert worker._current_encoder()._process_registry is not None
+
+
+class TestTestingWhatWillActuallyRun:
+    """A red cross about a HandBrake preset that nothing is going to use —
+    because encoding moved to the GPU — is the same class of wrong answer
+    this page exists to prevent."""
+
+    def _config(self, tmp_path, **overrides):
+        base = {
+            "encoder_backend": "vaapi",
+            "handbrake_path": str(tmp_path / "no-handbrake"),
+            "handbrake_preset": "Super HQ 1080p30 Surround (Svenska)",
+            "handbrake_preset_file": "", "handbrake_extra_args": "",
+            "ffmpeg_path": "/bin/true", "completed_path": tmp_path,
+            "vaapi_device": "/dev/dri/renderD128", "vaapi_codec": "h264",
+            "vaapi_quality": 22, "vaapi_max_height": 0,
+        }
+        base.update(overrides)
+        return types.SimpleNamespace(**base)
+
+    def test_the_gpu_backend_is_not_judged_by_handbrake(self, tmp_path, monkeypatch):
+        from adr import encodertest
+
+        monkeypatch.setattr(vaapi, "probe", lambda config: {
+            "ok": True, "codecs": ["h264"], "detail": "ffmpeg encoded a clip."})
+        result = encodertest.test_encoder(self._config(tmp_path))
+        names = [s["name"] for s in result["steps"]]
+        assert "Preset" not in names, "HandBrake's preset is irrelevant here"
+        assert "Encoder" in names and "GPU" in names
+
+    def test_a_missing_handbrake_does_not_fail_a_gpu_setup(self, tmp_path, monkeypatch):
+        """HandBrake could be uninstalled entirely and ripping would work."""
+        from adr import encodertest
+
+        monkeypatch.setattr(vaapi, "probe", lambda config: {
+            "ok": True, "codecs": ["h264"], "detail": "ffmpeg encoded a clip."})
+        ffmpeg = _script(tmp_path / "ffmpeg", 'for last; do :; done\nprintf v > "$last"\n')
+        result = encodertest.test_encoder(self._config(tmp_path, ffmpeg_path=ffmpeg))
+        assert result["ok"] is True, [s["detail"] for s in result["steps"]]
+
+    def test_a_gpu_that_stops_working_is_reported(self, tmp_path, monkeypatch):
+        from adr import encodertest
+
+        monkeypatch.setattr(vaapi, "probe", lambda config: {
+            "ok": False, "codecs": [], "detail": "ffmpeg could not encode on it."})
+        result = encodertest.test_encoder(self._config(tmp_path))
+        assert result["ok"] is False
+        assert "could not encode" in result["summary"]
+
+    def test_the_summary_names_the_encoder_that_was_tested(self, tmp_path, monkeypatch):
+        """"HandBrake encoded a sample" after the GPU passed reads as a stale
+        result from the previous configuration."""
+        from adr import encodertest
+
+        monkeypatch.setattr(vaapi, "probe", lambda config: {
+            "ok": True, "codecs": ["h264"], "detail": "ok"})
+        ffmpeg = _script(tmp_path / "ffmpeg", 'for last; do :; done\nprintf v > "$last"\n')
+        result = encodertest.test_encoder(self._config(tmp_path, ffmpeg_path=ffmpeg))
+        assert "HandBrake" not in result["summary"]
+        assert "GPU" in result["summary"]
+
+    def test_the_doctor_page_asks_the_same_question(self, tmp_path, monkeypatch):
+        from adr import diagnostics
+
+        monkeypatch.setattr(vaapi, "probe", lambda config: {
+            "ok": True, "codecs": ["h264"], "detail": "ffmpeg encoded a clip."})
+        check = diagnostics.check_hardware_encoding(self._config(tmp_path))
+        assert check["status"] == "ok"
+        assert "ffmpeg" in check["detail"]
+
+    def test_the_missing_handbrake_preset_is_not_held_against_it(
+        self, tmp_path, monkeypatch,
+    ):
+        from adr import diagnostics
+
+        monkeypatch.setattr(vaapi, "probe", lambda config: {
+            "ok": False, "codecs": [], "detail": "no GPU here."})
+        check = diagnostics.check_hardware_encoding(self._config(tmp_path))
+        assert check["status"] == "fail"
+        assert "qsv" not in check["detail"], "the preset is not the subject"

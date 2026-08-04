@@ -1411,7 +1411,11 @@ def _register_api_routes(app: Flask) -> None:
             }), 400
 
         previous = _config.handbrake_preset
-        _config.update({"handbrake_preset": wanted})
+        previous_backend = _config.encoder_backend
+        # Switching to a software preset means switching back to HandBrake:
+        # otherwise the preset is written, the GPU keeps encoding, and the
+        # test that follows reports on something the setting did not touch.
+        _config.update({"handbrake_preset": wanted, "encoder_backend": "handbrake"})
         result = encodertest.with_ctid(
             encodertest.test_encoder(_config),
             os.environ.get("ADR_CTID", "").strip() or None,
@@ -1419,7 +1423,9 @@ def _register_api_routes(app: Flask) -> None:
         if not result["ok"]:
             # Put it back. Leaving a preset in place that has just been shown
             # not to work would be a worse state than the one we started in.
-            _config.update({"handbrake_preset": previous})
+            _config.update({
+                "handbrake_preset": previous, "encoder_backend": previous_backend,
+            })
             return jsonify({
                 "ok": False,
                 "preset": wanted,

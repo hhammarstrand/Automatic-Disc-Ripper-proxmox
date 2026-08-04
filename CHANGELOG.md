@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.8.1
+
+**The encoder test was still testing HandBrake after the switch.** 1.8.0 let
+you move encoding to the GPU and then, if you pressed the test button, showed
+a red cross about a HandBrake preset nothing was going to use. The same class
+of wrong answer this page exists to prevent, introduced by the release that
+fixed the last one.
+
+The test now tests whatever will actually run: with the GPU backend it probes
+ffmpeg and VA-API and encodes a sample through the real `VaapiEncoder` —
+including the audio decision, which is the part that fails at the end of a
+two-hour encode rather than at the start. HandBrake could be uninstalled
+entirely and it would pass. The Doctor page's hardware check asks the same
+question, and the summary names whichever encoder was tested rather than
+always saying "HandBrake".
+
+Switching to a software preset now switches the backend back to HandBrake too.
+Otherwise the preset was written, the GPU kept encoding, and the test that
+followed reported on something the setting had not touched.
+
 ## 1.8.0
 
 **Encode on the GPU with ffmpeg, when HandBrake cannot.**

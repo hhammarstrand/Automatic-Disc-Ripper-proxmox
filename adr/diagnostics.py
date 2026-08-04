@@ -100,8 +100,22 @@ def check_hardware_encoding(config) -> dict:
     from adr import gpu
     from adr.encodertest import _preset_file
 
-    wanted = gpu.preset_wants_hardware(_preset_file(config), config.handbrake_preset)
     state = gpu.describe()
+
+    # With the GPU backend the HandBrake preset is not consulted at all, so
+    # judging this by what that preset asks for would report a problem with
+    # something nothing is going to run.
+    if getattr(config, "encoder_backend", "handbrake") == "vaapi":
+        from adr import vaapi
+
+        probe = vaapi.probe(config)
+        return _check(
+            "hardware_encoding", "Hardware encoding",
+            "ok" if probe["ok"] else "fail", probe["detail"],
+            "" if probe["ok"] else "Settings → Encoding → Encoder",
+        )
+
+    wanted = gpu.preset_wants_hardware(_preset_file(config), config.handbrake_preset)
 
     if not wanted:
         if state["available"]:

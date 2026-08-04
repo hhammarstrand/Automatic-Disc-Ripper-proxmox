@@ -232,6 +232,13 @@ def _run(cmd: list[str], timeout: int) -> tuple[int, str]:
 def test_encoder(config) -> dict:
     """Run the probes. Returns ``{"ok", "summary", "steps": [...]}``."""
     steps: list[dict] = []
+
+    # Test what will actually run. Reporting a red cross about a HandBrake
+    # preset that nothing is going to use — because encoding moved to the GPU
+    # — is the same class of wrong answer this whole page exists to prevent.
+    if getattr(config, "encoder_backend", "handbrake") == "vaapi":
+        return _finish(_vaapi_steps(config))
+
     exe = config.handbrake_path
 
     if not (shutil.which(exe) or os.path.isfile(exe)):
@@ -263,6 +270,65 @@ def test_encoder(config) -> dict:
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
     return _finish(steps)
+
+
+def _vaapi_steps(config) -> list[dict]:
+    """The same question, asked of the GPU: will it encode with these settings?
+
+    Deliberately the real encoder rather than a hand-built ffmpeg line. A test
+    that passes while the thing it stands in for fails is worse than no test,
+    and the only way to be sure they agree is for them to be the same code.
+    """
+    from adr import vaapi
+    from adr.encoderfactory import describe_backend
+
+    steps = [_step("Encoder", "ok", describe_backend(config))]
+
+    ffmpeg = getattr(config, "ffmpeg_path", "") or "ffmpeg"
+    if not (shutil.which(ffmpeg) or os.path.isfile(ffmpeg)):
+        steps.append(_step(
+            "ffmpeg", "fail", f"{ffmpeg} is not installed.",
+            "pct exec {ctid} -- apt-get install -y ffmpeg",
+        ))
+        return steps
+
+    state = vaapi.probe(config)
+    steps.append(_step(
+        "GPU", "ok" if state["ok"] else "fail", state["detail"],
+        "" if state["ok"] else
+        "Settings → Encoding → Encoder, or run adr-doctor --fix {ctid} on the host",
+    ))
+    if not state["ok"]:
+        return steps
+
+    workdir = Path(tempfile.mkdtemp(prefix="adr-encodertest-"))
+    try:
+        sample, problem = _make_sample(config, workdir)
+        if sample is None:
+            steps.append(_step("Test encode", "warn", problem))
+            return steps
+
+        # The encoder the pipeline would use, on a real file, writing a real
+        # output — including the audio decision, which is the part that fails
+        # at the very end of a two-hour encode rather than at the start.
+        encoder = vaapi.VaapiEncoder(config)
+        said: list[str] = []
+        encoder.log_sink = said.append
+        result = encoder.encode(sample, output_dir=workdir / "out")
+        if result.success:
+            steps.append(_step(
+                "Test encode", "ok",
+                "ffmpeg encoded a two-second sample on the GPU with these "
+                "settings, audio and all. Ripping will work.",
+            ))
+        else:
+            steps.append(_step(
+                "Test encode", "fail", result.error or "The encode failed.",
+                "Settings → Encoding, or 'Encode in software instead'",
+            ))
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    return steps
 
 
 def _make_sample(config, workdir: Path) -> tuple[Path | None, str]:
@@ -503,9 +569,12 @@ def _finish(steps: list[dict]) -> dict:
     if failed:
         summary = failed[0]["detail"].splitlines()[0]
     elif any(s["status"] == "warn" for s in steps):
-        summary = "HandBrake works, with one thing worth reading."
+        summary = "Encoding works, with one thing worth reading."
     else:
-        summary = "HandBrake encoded a sample with your settings. Encoding works."
+        # Names whichever encoder was actually tested, because a summary that
+        # says "HandBrake" after the GPU passed reads as a stale result.
+        who = steps[0]["detail"] if steps and steps[0]["name"] == "Encoder" else "HandBrake"
+        summary = f"{who.rstrip('.')} encoded a sample with your settings. Encoding works."
     return {"ok": not failed, "summary": summary, "steps": steps}
 
 
