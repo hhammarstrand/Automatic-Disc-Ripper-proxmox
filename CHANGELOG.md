@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.7.4
+
+**`adr-doctor` refreshes itself.** 1.7.3 taught it to notice it was an old
+copy; it then left you to paste a `pct pull` command, which is the friction
+that produced the stale copy to begin with.
+
+Now it offers, fetches, and re-runs — carrying the arguments you gave it, so
+`--fix` is still `--fix` on the second pass. It re-executes from a copy in
+`/tmp` and lets that copy install itself, rather than overwriting the file it
+is running from: bash reads a script incrementally by byte offset, and one
+that replaces itself mid-run carries on reading at its old offset inside
+different bytes. `update.sh` learned that the hard way, and the same pattern
+is used here.
+
+A refreshed run cannot decide it is stale and refresh again, and a fetch that
+fails carries on with the old version rather than refusing to diagnose —
+having no route to the container is not a reason to stop looking at the host.
+
+---
+
 ## 1.7.3
 
 **`adr-doctor` gave a clean bill of health from a script that never looked.**

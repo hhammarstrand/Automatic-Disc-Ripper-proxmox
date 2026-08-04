@@ -32,11 +32,14 @@ set -euo pipefail
 # "nothing wrong found", which is worse than failing: it is a clean bill of
 # health from a script that never looked. Compared against the container's own
 # version below.
-ADR_DOCTOR_VERSION="1.7.3"
+ADR_DOCTOR_VERSION="1.7.4"
 
 CT_MEDIA_PATH="${CT_MEDIA_PATH:-/mnt/media}"
 # The user the service runs as inside the container.
 RUN_USER="${RUN_USER:-adr}"
+
+# Kept so a refreshed copy can be re-executed with exactly what was asked for.
+ORIGINAL_ARGS=("$@")
 
 FIX=0
 ASSUME_YES=0
@@ -88,9 +91,24 @@ echo
 # found" — a clean bill of health from a script that never looked for the
 # problem. Better to say so before running anything.
 # ----------------------------------------------------------------------------- #
+# A copy that has just re-executed itself puts itself in place, from /tmp
+# where nothing is rewriting it, and then gets on with the job.
+if [[ "${ADR_DOCTOR_REFRESHED:-}" == "1" ]]; then
+    if [[ "$0" == /tmp/adr-doctor-* ]]; then
+        if install -m 0755 "$0" /usr/local/sbin/adr-doctor 2>/dev/null; then
+            msg_ok "Updated /usr/local/sbin/adr-doctor to ${ADR_DOCTOR_VERSION}"
+        else
+            msg_warn "Running ${ADR_DOCTOR_VERSION}, but could not replace"
+            msg_warn "        /usr/local/sbin/adr-doctor — it will still be old next time."
+        fi
+        rm -f "$0"
+    fi
+    CT_VERSION=""      # already reconciled; do not ask again
+else
 CT_VERSION="$(pct exec "$CTID" -- /opt/adr/.venv/bin/python -c \
     'import sys; sys.path.insert(0, "/opt/adr"); import adr; print(adr.__version__)' \
     2>/dev/null | tr -d "[:space:]")" || CT_VERSION=""
+fi
 
 if [[ -n "$CT_VERSION" && "$CT_VERSION" != "$ADR_DOCTOR_VERSION" ]]; then
     msg_warn "This adr-doctor is ${ADR_DOCTOR_VERSION}; container ${CTID} runs ${CT_VERSION}."
@@ -99,9 +117,31 @@ if [[ -n "$CT_VERSION" && "$CT_VERSION" != "$ADR_DOCTOR_VERSION" ]]; then
     echo
     echo "    pct pull ${CTID} /opt/adr/scripts/adr-doctor.sh /usr/local/sbin/adr-doctor && chmod +x /usr/local/sbin/adr-doctor"
     echo
-    if [[ "$ASSUME_YES" -eq 0 ]]; then
-        read -r -p "  Carry on with the old version anyway? [y/N] " reply
-        [[ "$reply" =~ ^[Yy]$ ]] || exit 1
+    refresh="n"
+    if [[ "$ASSUME_YES" -eq 1 ]]; then
+        refresh="y"
+    else
+        read -r -p "  Refresh this copy from the container and re-run? [Y/n] " reply
+        [[ "$reply" =~ ^[Nn]$ ]] || refresh="y"
+    fi
+
+    if [[ "$refresh" == "y" ]]; then
+        # Re-exec from a copy in /tmp rather than overwriting this file and
+        # carrying on. Bash reads a script incrementally by byte offset; a
+        # script that replaces itself mid-run continues reading at its old
+        # offset inside different bytes, which is a syntax error on an
+        # arbitrary line. The new copy installs itself, below.
+        _new="$(mktemp /tmp/adr-doctor-XXXXXX.sh)"
+        if pct pull "$CTID" /opt/adr/scripts/adr-doctor.sh "$_new" >/dev/null 2>&1 \
+                && [[ -s "$_new" ]]; then
+            chmod 0755 "$_new"
+            msg_ok "Fetched ${CT_VERSION} from the container; re-running."
+            echo
+            export ADR_DOCTOR_REFRESHED=1
+            exec bash "$_new" "${ORIGINAL_ARGS[@]}"
+        fi
+        rm -f "$_new"
+        msg_warn "Could not fetch a newer copy. Carrying on with ${ADR_DOCTOR_VERSION}."
         echo
     fi
 fi

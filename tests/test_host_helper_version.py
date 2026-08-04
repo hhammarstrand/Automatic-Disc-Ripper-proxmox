@@ -63,3 +63,44 @@ def test_a_container_that_will_not_answer_does_not_block_the_run():
 def test_the_gpu_section_is_present(marker):
     """The section whose absence from a stale copy started all this."""
     assert marker in DOCTOR.read_text()
+
+
+class TestItRefreshesItself:
+    """Copying the script out of the container by hand is the friction that
+    caused the stale copy in the first place. Detecting staleness and then
+    leaving someone to paste a command only moves the problem."""
+
+    def test_it_offers_to_refresh_rather_than_only_warning(self):
+        text = DOCTOR.read_text()
+        assert "Refresh this copy from the container and re-run?" in text
+
+    def test_it_re_executes_from_a_copy_rather_than_overwriting_itself(self):
+        """Bash reads a script incrementally by byte offset. One that replaces
+        itself mid-run carries on reading at its old offset inside different
+        bytes — a syntax error on an arbitrary line. update.sh learned this
+        the hard way."""
+        text = DOCTOR.read_text()
+        assert 'mktemp /tmp/adr-doctor-' in text
+        assert 'exec bash "$_new"' in text
+
+    def test_the_refreshed_copy_installs_itself(self):
+        text = DOCTOR.read_text()
+        assert "ADR_DOCTOR_REFRESHED" in text
+        assert "install -m 0755" in text
+
+    def test_it_cannot_loop(self):
+        """A refreshed run must not decide it is stale and refresh again."""
+        text = DOCTOR.read_text()
+        assert 'CT_VERSION=""      # already reconciled' in text
+
+    def test_the_original_arguments_survive_the_re_exec(self):
+        """--fix has to still be --fix after the refresh, or the second run
+        reports the same problems and repairs none of them."""
+        text = DOCTOR.read_text()
+        assert 'ORIGINAL_ARGS=("$@")' in text
+        assert '"${ORIGINAL_ARGS[@]}"' in text
+
+    def test_a_failed_fetch_carries_on_rather_than_stopping(self):
+        """No network to the container is not a reason to refuse to diagnose."""
+        text = DOCTOR.read_text()
+        assert "Could not fetch a newer copy" in text
