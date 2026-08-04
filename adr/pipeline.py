@@ -34,7 +34,7 @@ from adr import (
 from adr.audiocd import AudioCDRipper
 from adr.config import Config
 from adr.disc import DiscWatcher, eject_drive
-from adr.encoder import HandBrakeEncoder
+from adr.encoderfactory import build_encoder
 from adr.identify import identify_disc
 from adr.joblog import JobLog
 from adr.models import Job, JobStatus, Track, TrackStatus, get_session, init_db
@@ -437,12 +437,30 @@ class EncoderWorker(threading.Thread):
         super().__init__(daemon=True, name=name)
         self._config = config
         self._queue = task_queue
-        self._encoder = HandBrakeEncoder(config)
+        self._encoder = build_encoder(config)
+        self._encoder._backend = config.encoder_backend
         self._encoder._process_registry = process_registry
         self._stop_event = threading.Event()
 
     def stop(self) -> None:
         self._stop_event.set()
+
+    def _current_encoder(self):
+        """The encoder the *current* settings ask for.
+
+        Built once and kept, but re-built when the backend setting changes
+        underneath us. Switching from HandBrake to the GPU otherwise did
+        nothing until the service was restarted — a setting that appears to
+        take effect and does not is worse than one that refuses to change,
+        and this application has spent long enough on exactly that failure.
+        """
+        wanted = self._config.encoder_backend
+        if getattr(self._encoder, "_backend", None) != wanted:
+            logger.info("Encoder backend changed to %r; rebuilding", wanted)
+            self._encoder = build_encoder(self._config)
+            self._encoder._backend = wanted
+            self._encoder._process_registry = process_registry
+        return self._encoder
 
     def run(self) -> None:
         logger.info("%s started", self.name)
@@ -612,9 +630,10 @@ class EncoderWorker(threading.Thread):
                 job_log.append(
                     "encode", f"Encoding {task.input_path.name} -> {task.output_filename}",
                 )
-                self._encoder.log_sink = job_log.sink("encode")
+                encoder = self._current_encoder()
+                encoder.log_sink = job_log.sink("encode")
                 try:
-                    result = self._encoder.encode(
+                    result = encoder.encode(
                         input_path=task.input_path,
                         output_dir=task.output_dir,
                         output_filename=task.output_filename,
@@ -624,7 +643,7 @@ class EncoderWorker(threading.Thread):
                 finally:
                     # Workers are shared between jobs; a stale sink would write
                     # one job's output into another job's log.
-                    self._encoder.log_sink = None
+                    encoder.log_sink = None
                 job_log.append(
                     "encode",
                     "Encode finished." if result.success else f"Encode failed: {result.error}",

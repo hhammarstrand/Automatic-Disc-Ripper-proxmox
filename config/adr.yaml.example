@@ -21,6 +21,24 @@ music_path: ''
 data_disc_enabled: true
 data_disc_path: ''
 
+# --- Which program does the encoding ---------------------------------------
+# "handbrake" is the default and the one with the presets.
+#
+# "vaapi" hands the job to ffmpeg and the GPU instead. It exists because a
+# container can have a perfectly working Intel GPU that HandBrake cannot reach:
+# HandBrake's Quick Sync path goes through the Intel Media SDK, which is
+# deprecated and no longer starts on current drivers, while VA-API — the same
+# hardware by a different road — works fine. The Doctor page's encoder test
+# tries both and offers the switch when it applies.
+#
+# HandBrake presets do not apply to the GPU path; these four settings are what
+# VA-API actually exposes.
+encoder_backend: handbrake     # handbrake | vaapi
+vaapi_codec: h264              # h264 | hevc
+vaapi_device: ''               # empty means the first render node found
+vaapi_max_height: 0            # 0 leaves the source alone; 1080 shrinks a 4K rip
+vaapi_quality: 22              # a quantiser: lower is better and bigger
+
 auto_move_to_plex: true
 completed_path: /opt/adr/completed
 disabled_drives: []

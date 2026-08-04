@@ -193,11 +193,13 @@ def _hardware(config) -> str:
     can authenticate anything, so it belongs in the bundle rather than in a
     conversation.
     """
-    from adr import gpu
+    from adr import gpu, vaapi
+    from adr.encoderfactory import describe_backend
     from adr.encodertest import _preset_file, build_hardware_encoders
 
     state = gpu.describe()
     lines = [
+        f"encoder      {describe_backend(config)}",
         f"vendor       {state['runtime'].get('vendor') or 'unknown'}",
         f"nodes        {', '.join(state['nodes']) or 'none'}",
         f"openable     {'yes' if state['available'] else 'NO'}",
@@ -221,6 +223,12 @@ def _hardware(config) -> str:
         )
     else:
         lines.append(f"vainfo       {probe['output']}")
+
+    # Asked because HandBrake failing to reach the GPU says nothing about
+    # whether the GPU can be reached — and the answer decides whether someone
+    # gets hardware speed or an hour per film.
+    elsewhere = vaapi.probe(config)
+    lines.append(f"ffmpeg gpu   {elsewhere['detail']}")
     return "\n".join(lines)
 
 

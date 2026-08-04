@@ -1438,6 +1438,77 @@ def _register_api_routes(app: Flask) -> None:
             "test": result,
         })
 
+    @app.route("/api/encoder/gpu-option")
+    def api_encoder_gpu_option():
+        """Can ffmpeg encode on the GPU, when HandBrake cannot?
+
+        The interesting case, and the reason this exists: a container whose
+        Intel GPU works perfectly — the driver loads, vainfo lists encode
+        profiles — and whose HandBrake still cannot reach it, because its
+        Quick Sync path goes through the deprecated Media SDK rather than
+        through VA-API. The hardware is there the whole time.
+        """
+        from adr import vaapi
+
+        state = vaapi.probe(_config)
+        return jsonify({
+            "ok": state["ok"],
+            "detail": state["detail"],
+            "codecs": state["codecs"],
+            "current": _config.encoder_backend,
+        })
+
+    @app.route("/api/encoder/use-gpu", methods=["POST"])
+    def api_encoder_use_gpu():
+        """Switch encoding to ffmpeg on the GPU, having proved it first.
+
+        Proved rather than assumed, for the same reason the software switch
+        re-runs its test: this whole page exists because an encoder that
+        cannot encode looks exactly like one that can until something tries.
+        """
+        from adr import vaapi
+
+        state = vaapi.probe(_config)
+        if not state["ok"]:
+            return jsonify({
+                "ok": False,
+                "message": "ffmpeg could not encode on the GPU, so nothing was "
+                           "changed. " + state["detail"],
+            }), 409
+
+        data = request.get_json(silent=True) or {}
+        codec = str(data.get("codec", "")).strip().lower()
+        if codec not in state["codecs"]:
+            # Prefer HEVC when the hardware has it: same quality in a
+            # noticeably smaller file, and every 10th-generation Intel chip
+            # and later can do it.
+            codec = "hevc" if "hevc" in state["codecs"] else state["codecs"][0]
+
+        previous = _config.encoder_backend
+        _config.update({"encoder_backend": "vaapi", "vaapi_codec": codec})
+        logger.info("Encoder backend changed from %r to vaapi (%s)", previous, codec)
+        return jsonify({
+            "ok": True,
+            "codec": codec,
+            "previous": previous,
+            "message": (
+                f"Now encoding on the GPU with {codec.upper()} via ffmpeg. "
+                "It encoded a test clip, so ripping will work — and it will be "
+                "much faster than the CPU."
+            ),
+        })
+
+    @app.route("/api/encoder/use-handbrake", methods=["POST"])
+    def api_encoder_use_handbrake():
+        """Go back to HandBrake — the way out of a choice made here."""
+        previous = _config.encoder_backend
+        _config.update({"encoder_backend": "handbrake"})
+        return jsonify({
+            "ok": True,
+            "previous": previous,
+            "message": f"Back to HandBrake, preset '{_config.handbrake_preset}'.",
+        })
+
     @app.route("/api/preflight")
     def api_preflight():
         """Whether a rip started right now would finish.
@@ -1586,6 +1657,8 @@ def _register_api_routes(app: Flask) -> None:
         "makemkv_path", "handbrake_path", "raw_path", "completed_path",
         "min_title_length", "handbrake_preset", "handbrake_preset_file",
         "handbrake_extra_args", "max_encode_jobs", "transcode_enabled",
+        "encoder_backend", "vaapi_device", "vaapi_codec", "vaapi_quality",
+        "vaapi_max_height",
         "drives", "tmdb_api_key",
         "watch_path", "watch_output_path", "watch_interval", "web_host",
         "web_port", "log_level", "log_path", "disabled_drives", "eject_after_rip",

@@ -33,6 +33,22 @@ _DEFAULTS: dict[str, Any] = {
     "handbrake_preset": "Fast 1080p30",
     "handbrake_preset_file": "",
     "handbrake_extra_args": "",
+    # Which program does the transcoding.
+    #
+    # "handbrake" is the default and the one with the presets. "vaapi" hands
+    # the job to ffmpeg and the GPU instead, which exists because a container
+    # can have a perfectly working Intel GPU that HandBrake cannot reach: its
+    # Quick Sync path goes through the deprecated Intel Media SDK rather than
+    # through VA-API, and on current drivers that no longer initialises. The
+    # Encoding page probes both and offers the switch when it applies.
+    "encoder_backend": "handbrake",
+    # Empty means the first render node found.
+    "vaapi_device": "",
+    "vaapi_codec": "h264",
+    # A quantiser: lower is better quality and a bigger file.
+    "vaapi_quality": 22,
+    # 0 means "whatever the source is". 1080 halves the size of a 4K rip.
+    "vaapi_max_height": 0,
     "max_encode_jobs": 1,
     # Transcoding can be turned off entirely: the MKV MakeMKV produced is kept
     # as it is. Lossless and minutes instead of hours, at several times the
@@ -237,6 +253,38 @@ class Config:
     @property
     def handbrake_extra_args(self) -> str:
         return self._data["handbrake_extra_args"]
+
+    @property
+    def encoder_backend(self) -> str:
+        """"handbrake" or "vaapi". Anything unrecognised means HandBrake.
+
+        An unknown value must not stop encoding: a typo in the config file is
+        a reason to fall back to the default, not to leave every disc stuck.
+        """
+        value = str(self._data.get("encoder_backend", "handbrake") or "").lower()
+        return value if value in ("handbrake", "vaapi") else "handbrake"
+
+    @property
+    def vaapi_device(self) -> str:
+        return self._data.get("vaapi_device", "") or ""
+
+    @property
+    def vaapi_codec(self) -> str:
+        return self._data.get("vaapi_codec", "h264") or "h264"
+
+    @property
+    def vaapi_quality(self) -> int:
+        try:
+            return int(self._data.get("vaapi_quality", 22))
+        except (TypeError, ValueError):
+            return 22
+
+    @property
+    def vaapi_max_height(self) -> int:
+        try:
+            return int(self._data.get("vaapi_max_height", 0) or 0)
+        except (TypeError, ValueError):
+            return 0
 
     @property
     def max_encode_jobs(self) -> int:

@@ -232,6 +232,61 @@
                 </div>
             </div>
             <div class="mb-3">
+                <label class="form-label">Encoder</label>
+                <select class="form-select" id="encoderBackend" name="encoder_backend">
+                    <option value="handbrake" {% if config.encoder_backend != 'vaapi' %}selected{% endif %}>
+                        HandBrake — presets, CPU or its own hardware support
+                    </option>
+                    <option value="vaapi" {% if config.encoder_backend == 'vaapi' %}selected{% endif %}>
+                        ffmpeg on the GPU (VA-API) — much faster, no presets
+                    </option>
+                </select>
+                <div class="form-text">
+                    HandBrake reaches Intel graphics through the Media SDK, which is
+                    deprecated and no longer starts on current drivers — so a container
+                    can have a working GPU that HandBrake cannot use. ffmpeg reaches the
+                    same hardware through VA-API. The Doctor page's encoder test tries
+                    both and tells you which works here.
+                </div>
+            </div>
+            <div id="vaapiSettings" class="{% if config.encoder_backend != 'vaapi' %}d-none{% endif %}">
+                <div class="mb-3">
+                    <label class="form-label">GPU codec</label>
+                    <select class="form-select" name="vaapi_codec">
+                        <option value="h264" {% if config.vaapi_codec == 'h264' %}selected{% endif %}>
+                            H.264 — plays on everything
+                        </option>
+                        <option value="hevc" {% if config.vaapi_codec == 'hevc' %}selected{% endif %}>
+                            HEVC / H.265 — same quality, noticeably smaller files
+                        </option>
+                    </select>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">GPU quality</label>
+                    <input type="number" class="form-control" name="vaapi_quality"
+                           value="{{ config.vaapi_quality }}" min="15" max="35">
+                    <div class="form-text">
+                        A quantiser: lower is better and bigger. 22 is close to
+                        HandBrake's RF 20. Fixed-function encoders need a lower
+                        number than x264 for the same perceived quality.
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Cap height (0 = leave the source alone)</label>
+                    <input type="number" class="form-control" name="vaapi_max_height"
+                           value="{{ config.vaapi_max_height }}" min="0" max="2160">
+                    <div class="form-text">
+                        1080 halves the size of a 4K rip. Never upscales.
+                    </div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Render node (optional)</label>
+                    <input type="text" class="form-control" name="vaapi_device"
+                           value="{{ config.vaapi_device }}" placeholder="/dev/dri/renderD128">
+                    <div class="form-text">Empty means the first one found.</div>
+                </div>
+            </div>
+            <div class="mb-3">
                 <label class="form-label">HandBrake preset</label>
                 <div class="input-group">
                     <select class="form-select" id="presetSelect" name="handbrake_preset">
@@ -641,7 +696,8 @@ function saveSettings(e) {
     for (const [key, value] of formData.entries()) {
         // Try to convert numbers
         if (['min_title_length', 'max_encode_jobs', 'web_port', 'watch_interval',
-             'series_min_minutes', 'series_max_minutes', 'series_min_episodes'].includes(key)) {
+             'series_min_minutes', 'series_max_minutes', 'series_min_episodes',
+             'vaapi_quality', 'vaapi_max_height'].includes(key)) {
             data[key] = parseInt(value, 10);
         } else {
             data[key] = value;
@@ -764,6 +820,17 @@ refreshBtn.addEventListener('click', loadPresets);
 
 // Auto-load presets on page load
 loadPresets();
+
+// ---- Encoder backend: show only the settings that apply ----
+// A page that shows HandBrake preset fields while ffmpeg is doing the
+// encoding invites someone to change a setting that has no effect.
+const encoderBackend = document.getElementById('encoderBackend');
+if (encoderBackend) {
+    encoderBackend.addEventListener('change', () => {
+        document.getElementById('vaapiSettings')
+                .classList.toggle('d-none', encoderBackend.value !== 'vaapi');
+    });
+}
 
 // ---- Hidden drives management ----
 function unhideDrive(driveLetter) {

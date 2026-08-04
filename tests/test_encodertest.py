@@ -473,7 +473,7 @@ class TestShowingTheHardwareEvidence:
         step = next(s for s in encodertest.test_encoder(config)["steps"]
                     if s["name"] == "Hardware")
         assert step["status"] == "warn"
-        assert "no hardware encoder on this machine would start" in step["detail"]
+        assert "no hardware encoder in HandBrake would start" in step["detail"]
         assert step["working"] == []
 
     def test_an_alternative_that_works_is_found(self, tmp_path, monkeypatch):

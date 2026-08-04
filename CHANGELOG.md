@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.8.0
+
+**Encode on the GPU with ffmpeg, when HandBrake cannot.**
+
+The last four releases chased a container whose Intel GPU worked perfectly and
+whose HandBrake could not use it. Everything about the passthrough turned out
+to be right: the render node is there, the service user can open it, the
+driver stack is installed, and `vainfo` loads the driver and lists encode
+profiles. HandBrake still would not start a single hardware encoder, its own
+or any other — because its Quick Sync path goes through the Intel Media SDK,
+which Intel deprecated in favour of oneVPL and which no longer initialises on
+current drivers.
+
+Giving up the hardware over that is the wrong answer when the hardware works.
+VA-API is the same silicon by a different road, and ffmpeg drives it directly
+— and ffmpeg is already installed, for audio CDs.
+
+**Settings → Encoding → Encoder** now offers `ffmpeg on the GPU (VA-API)`
+beside HandBrake, and the encoder test offers the switch when it applies —
+having first encoded a test clip on the GPU, because a page that promises
+hardware encoding and hands back a failed job would be the same mistake in a
+new place. The change takes effect on the next job; the worker rebuilds its
+encoder when the setting moves underneath it, rather than quietly waiting for
+a service restart.
+
+What the GPU path gives up is presets. HandBrake's are a large body of tuning
+and none of it transfers, so this offers what VA-API actually exposes: a codec
+(H.264 or HEVC), a quality number, a resolution cap, and the render node.
+
+Two details worth knowing, both of which fail an hour into an encode rather
+than at the start:
+
+- **Audio** is copied when the container can hold it and re-encoded to AC-3 at
+  640 kb/s when it cannot. MP4 cannot carry the TrueHD or DTS-HD MA a Blu-ray
+  rip arrives with, and ffmpeg only discovers that when it writes the trailer.
+  The fallback keeps 5.1 rather than downmixing — surround is usually the
+  reason the disc was kept.
+- **Disc subtitles** are bitmap (PGS, VOBSUB) and MP4 holds neither, so they
+  are left out of an MP4 and copied into an MKV.
+
+The diagnostics bundle now reports which encoder is configured and whether
+ffmpeg can reach the GPU, because that single line is what four rounds of
+troubleshooting were converging on.
+
 ## 1.7.8
 
 **`--help` is not a list of what HandBrake was built with.** 1.7.7 read it as

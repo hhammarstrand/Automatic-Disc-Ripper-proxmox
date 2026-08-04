@@ -141,6 +141,22 @@ def _hardware_advice(exe: str = "", hardware: dict | None = None) -> str:
             "the preset."
         )
 
+    # The GPU is not lost just because HandBrake cannot reach it. ffmpeg goes
+    # through VA-API rather than the Media SDK, and where that works this is
+    # the answer someone actually wants — the hardware they have, at the speed
+    # they expected, instead of an hour per film on the CPU.
+    elsewhere = (hardware or {}).get("ffmpeg_gpu") or {}
+    if elsewhere.get("ok"):
+        return (
+            "HandBrake cannot reach this GPU — its Quick Sync path goes "
+            "through the Intel Media SDK, which is deprecated and no longer "
+            "starts on current drivers. ffmpeg reaches the same hardware "
+            "through VA-API and encoded a test clip here ("
+            + ", ".join(elsewhere.get("codecs") or []) + "). "
+            "'Encode on the GPU with ffmpeg' below switches to it and keeps "
+            "your hardware speed."
+        )
+
     if hardware is not None and state["available"] and state["runtime"]["ok"]:
         probe = gpu.vainfo()
         if probe["ran"] and probe["ok"]:
@@ -353,9 +369,27 @@ def _hardware_step(
         )
     else:
         lines.append(
-            "Tried on two seconds of video, no hardware encoder on this "
-            "machine would start."
+            "Tried on two seconds of video, no hardware encoder in HandBrake "
+            "would start."
         )
+
+    # HandBrake failing to reach the GPU says nothing about whether the GPU
+    # can be reached. ffmpeg goes through VA-API instead of the Media SDK, and
+    # on an Intel container that is very often the difference between hardware
+    # encoding and an hour per film on the CPU.
+    if not working:
+        from adr import vaapi
+
+        elsewhere = vaapi.probe(config)
+        if elsewhere["ok"]:
+            lines.append(
+                "ffmpeg, however, did encode on this GPU ("
+                + ", ".join(elsewhere["codecs"]) + "). The hardware is fine; it "
+                "is HandBrake that cannot reach it."
+            )
+        step_extra = elsewhere
+    else:
+        step_extra = {"ok": False, "codecs": [], "detail": ""}
 
     ok = bool(working)
     step = _step(
@@ -363,6 +397,7 @@ def _hardware_step(
         "" if ok else (state["runtime"]["fix"] or state["fix"]),
     )
     step["working"] = working
+    step["ffmpeg_gpu"] = step_extra
     return step
 
 

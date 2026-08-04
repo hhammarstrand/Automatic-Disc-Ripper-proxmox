@@ -34,6 +34,7 @@ def config(tmp_path):
         stage_locally=True,
         require_completed_mount=False,
         transcode_enabled=False,
+        encoder_backend="handbrake",
         handbrake_path="/usr/bin/HandBrakeCLI",
         handbrake_preset="Fast 1080p30",
         handbrake_preset_file="",
@@ -231,8 +232,10 @@ def test_a_passthrough_task_finishes_the_job(tmp_path, config, monkeypatch):
     monkeypatch.setattr(pipeline_mod.Notifier, "job_done", lambda *a, **k: True)
     monkeypatch.setattr(pipeline_mod.Notifier, "job_failed", lambda *a, **k: True)
     monkeypatch.setattr(pipeline_mod.PlexNotifier, "refresh_for", lambda *a, **k: True)
+    from adr.encoder import HandBrakeEncoder
+
     monkeypatch.setattr(
-        pipeline_mod.HandBrakeEncoder, "encode",
+        HandBrakeEncoder, "encode",
         lambda *a, **k: pytest.fail("transcoding is off; HandBrake must not run"),
     )
 

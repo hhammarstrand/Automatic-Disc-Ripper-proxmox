@@ -87,6 +87,26 @@
       video with it.
     </p>
     <div id="encoderResult"></div>
+    <div id="encoderGpu" class="d-none mt-3 p-3 rounded border border-success">
+      <div class="fw-semibold mb-1">
+        <i class="bi bi-gpu-card me-1"></i>Encode on the GPU with ffmpeg
+      </div>
+      <div class="small text-secondary mb-2">
+        HandBrake reaches Intel graphics through the Media SDK, which is
+        deprecated and no longer starts on current drivers. ffmpeg reaches the
+        same hardware through VA-API — and it just encoded a test clip here, so
+        the GPU is fine. This keeps your hardware speed instead of falling back
+        to the CPU. HandBrake presets do not apply; pick a codec and a quality
+        on the Settings page.
+      </div>
+      <div class="d-flex flex-wrap gap-2 align-items-center">
+        <select class="form-select form-select-sm w-auto" id="gpuCodec"></select>
+        <button class="btn btn-sm btn-success" id="useGpuBtn" onclick="useGpu()">
+          Switch to the GPU
+        </button>
+      </div>
+      <div id="gpuStatus" class="small mt-2"></div>
+    </div>
     <div id="encoderRescue" class="d-none mt-3 p-3 rounded border border-info">
       <div class="fw-semibold mb-1">
         <i class="bi bi-cpu me-1"></i>Encode in software instead
@@ -372,7 +392,14 @@ function testEncoder() {
       // apply is worse than no button.
       const hardware = d.steps.some(s =>
         s.status === 'fail' && /hardware encoder|qsv|nvenc|vaapi|quick sync/i.test(s.detail + s.fix));
-      if (hardware) offerSoftware();
+      if (hardware) {
+        // The GPU first when it is genuinely available. Someone who chose a
+        // hardware preset wanted the hardware; offering software before the
+        // GPU that has just been shown to work would bury the better answer.
+        const gpu = d.steps.map(s => s.ffmpeg_gpu).find(x => x && x.ok);
+        if (gpu) offerGpu(gpu);
+        offerSoftware();
+      }
     })
     .catch(err => {
       btn.disabled = false;
@@ -393,6 +420,55 @@ function offerSoftware() {
       document.getElementById('encoderRescue').classList.remove('d-none');
     })
     .catch(() => {});
+}
+
+const CODEC_LABELS = {
+  hevc: 'HEVC / H.265 — smaller files, same quality',
+  h264: 'H.264 — plays on everything',
+};
+
+function offerGpu(gpu) {
+  const select = document.getElementById('gpuCodec');
+  // HEVC first where the hardware has it: the same picture in a noticeably
+  // smaller file, and every Intel chip that can do it can also do H.264.
+  const codecs = gpu.codecs.slice().sort(a => (a === 'hevc' ? -1 : 1));
+  select.innerHTML = codecs
+    .map(c => `<option value="${escapeHtml(c)}">${escapeHtml(CODEC_LABELS[c] || c)}</option>`)
+    .join('');
+  document.getElementById('encoderGpu').classList.remove('d-none');
+}
+
+function useGpu() {
+  const btn = document.getElementById('useGpuBtn');
+  const status = document.getElementById('gpuStatus');
+  const codec = document.getElementById('gpuCodec').value;
+  const original = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testing…';
+  status.className = 'small mt-2 text-secondary';
+  status.textContent = 'Encoding a test clip on the GPU…';
+
+  fetch('/api/encoder/use-gpu', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({codec}),
+  })
+    .then(r => r.json().then(d => ({ok: r.ok, d})))
+    .then(({ok, d}) => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      status.className = 'small mt-2 ' + (ok ? 'text-success' : 'text-danger');
+      status.textContent = d.message || (ok ? 'Done.' : 'It did not work.');
+      if (ok) {
+        document.getElementById('encoderRescue').classList.add('d-none');
+      }
+    })
+    .catch(err => {
+      btn.disabled = false;
+      btn.innerHTML = original;
+      status.className = 'small mt-2 text-danger';
+      status.textContent = 'Could not switch: ' + err.message;
+    });
 }
 
 function useSoftware() {

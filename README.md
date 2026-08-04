@@ -444,8 +444,42 @@ number system groups differently. So the group is matched **by number**, which
 is the only thing the kernel checks; advice to `usermod -aG render adr` would
 look right and change nothing.
 
-**No access to the host right now?** The encode test offers a second button:
-*Encode in software instead*. It lists the software presets HandBrake actually
+And it installs the driver stack, which is the third thing and the one that
+looks solved. The render node passed through and the group right, and
+HandBrake still says `qsv is not available` — because Quick Sync does not talk
+to the kernel directly. It reaches the hardware through a VA-API driver and a
+Media SDK / oneVPL runtime, and a minimal container image ships neither. The
+driver is checked against the PCI vendor of the actual card, and the runtime
+is told apart from the *dispatcher* (`libvpl.so`), which loads a runtime and
+encodes nothing itself.
+
+### When HandBrake cannot reach a GPU that works
+
+There is a case where everything above is correct and hardware encoding still
+does not happen: the node is passed through, `vainfo` loads the driver and
+lists encode profiles — and no hardware encoder in HandBrake will start.
+HandBrake's Quick Sync path goes through the Intel Media SDK, which Intel has
+deprecated in favour of oneVPL and which no longer initialises on current
+drivers. The GPU is fine the whole time.
+
+**Settings → Encoding → Encoder** offers the way round it: `ffmpeg on the GPU
+(VA-API)`. Same hardware, different road, and ffmpeg is already installed for
+audio CDs. The encode test probes both and offers the switch when it applies —
+having first encoded a test clip, because a page that promises hardware
+encoding and delivers a failed job would be the same mistake in a new place.
+
+What it gives up is presets: HandBrake's are a large body of tuning and none
+of it transfers, so this offers what VA-API actually exposes — a codec, a
+quality number and a resolution cap. Audio is copied when the container can
+hold it and re-encoded to AC-3 640k when it cannot, because MP4 cannot carry
+the TrueHD or DTS-HD a Blu-ray rip arrives with, and ffmpeg only discovers
+that when it writes the trailer — after the entire encode.
+
+Changing the encoder takes effect on the next job, without restarting the
+service.
+
+**No access to the host right now, and no working GPU either?** The encode
+test offers a third button: *Encode in software instead*. It lists the software presets HandBrake actually
 has, ordered by resemblance to the one configured — someone who chose "Super
 HQ 1080p30 Surround (Svenska)" wanted that quality, so the stock "Super HQ
 1080p30 Surround" is offered first — then switches and **re-runs the test to
