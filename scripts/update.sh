@@ -112,6 +112,37 @@ if [[ -n "$NEW_COMMIT" && "$NEW_COMMIT" == "$OLD_COMMIT" ]]; then
     msg_ok "Already at the latest commit — reinstalling anyway to be sure."
 fi
 
+# --------------------------------------------------------------------------- #
+# Never stop the service on top of a running rip.
+#
+# 'systemctl stop adr' kills the whole control group, and MakeMKV is in it.
+# MakeMKV writes each title as it goes, so the rip dies with 'exited with code
+# -15' and leaves MKVs in raw/ that look perfectly ordinary in a directory
+# listing and are truncated in the middle of a frame. What that costs is an
+# hour of ripping, silently, and it is easy to do: updating in the middle of a
+# film is exactly when someone is sitting there waiting for it.
+# --------------------------------------------------------------------------- #
+if [[ "${ADR_UPDATE_FORCE:-}" != "1" ]]; then
+    # Whitespace-tolerant: whether the JSON is pretty-printed depends on the
+    # Flask version and on debug mode, and a pattern that only matches one of
+    # them would silently never fire — which is the same as not checking.
+    busy="$(curl -fsS --max-time 5 http://127.0.0.1:8080/api/status 2>/dev/null \
+        | grep -oE '"status"[[:space:]]*:[[:space:]]*"(ripping|encoding|identifying)"' \
+        | grep -oE '(ripping|encoding|identifying)' | head -1 || true)"
+    if [[ -n "$busy" ]]; then
+        msg_error "A job is in progress (${busy}) — not updating."
+        msg_warn "Stopping the service now would kill it. MakeMKV writes titles as"
+        msg_warn "it goes, so the rip would die part-way and leave files that look"
+        msg_warn "fine and are truncated; you would lose the hour and have to re-rip."
+        echo
+        msg_info "Wait for it to finish, then run this again. To update anyway:"
+        echo
+        echo "    ADR_UPDATE_FORCE=1 $SELF_NAME"
+        echo
+        exit 1
+    fi
+fi
+
 msg_info "Stopping service…"
 systemctl stop adr || true
 SERVICE_STOPPED=1

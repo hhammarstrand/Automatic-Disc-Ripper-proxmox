@@ -60,12 +60,20 @@ def _make_encoded(config, job, tmp_path, count=1):
     return out
 
 
-def _make_raw(config, job, count=1):
-    """Raw MKVs from a completed rip, as after a failed encode."""
+def _make_raw(config, job, count=1, rip_finished=True):
+    """Raw MKVs from a rip, as after a failed encode.
+
+    ``rip_finished`` is what tells a complete file from a truncated one, and
+    it is the job's own record rather than anything on disk: MakeMKV writes
+    each title as it goes, so a rip killed part-way leaves MKVs that look
+    perfectly ordinary in a directory listing.
+    """
     raw_dir = config.raw_path / str(job.id)
     raw_dir.mkdir(parents=True, exist_ok=True)
     for i in range(count):
         (raw_dir / f"title_t{i:02d}.mkv").write_bytes(b"M" * 4096)
+    if rip_finished:
+        job.rip_completed_at = utcnow()
     return raw_dir
 
 
@@ -101,6 +109,53 @@ class TestPlan:
         assert result["can_retry"] is True
         assert "disc is not needed" in result["reason"]
         assert len(result["files"]) == 2
+
+    def test_a_rip_that_never_finished_leaves_nothing_to_encode(
+        self, failed_job, config,
+    ):
+        """The hour-losing case.
+
+        MakeMKV writes each title as it goes, so a rip killed part-way — a
+        service restart, a cancel, a crash — leaves MKVs that look perfectly
+        ordinary in a directory listing and are truncated mid-frame. Offering
+        to "re-encode them, the disc is not needed" spends an hour and ends in
+        "Invalid data found when processing input", which reads as an encoder
+        fault and is nothing of the kind.
+        """
+        session, job = failed_job
+        _make_raw(config, job, count=2, rip_finished=False)
+        session.commit()
+
+        result = retry.plan(job, config)
+        assert result["can_retry"] is False
+        assert result["resume"] == retry.RESUME_IMPOSSIBLE
+        assert "did not finish" in result["reason"]
+        assert "press Rip" in result["reason"], "it must say what to do instead"
+
+    def test_the_incomplete_files_are_still_named(self, failed_job, config):
+        """So the reason can be checked rather than taken on trust."""
+        session, job = failed_job
+        _make_raw(config, job, count=2, rip_finished=False)
+        session.commit()
+        assert len(retry.plan(job, config)["files"]) == 2
+
+    def test_a_finished_rip_is_still_resumable(self, failed_job, config):
+        """The distinction has to cut one way only: a job that ripped fine and
+        failed in the encoder must not be sent back to the disc."""
+        session, job = failed_job
+        _make_raw(config, job, count=2, rip_finished=True)
+        session.commit()
+        assert retry.plan(job, config)["resume"] == retry.RESUME_ENCODE
+
+    def test_encoded_files_survive_an_unfinished_rip(self, failed_job, config, tmp_path):
+        """If the encode is already done, how the rip ended stopped mattering
+        a long time ago."""
+        session, job = failed_job
+        job.output_path = str(config.staging_path / "The Matrix (1999)")
+        _make_encoded(config, job, tmp_path)
+        _make_raw(config, job, rip_finished=False)
+        session.commit()
+        assert retry.plan(job, config)["resume"] == retry.RESUME_TRANSFER
 
     def test_encoded_files_win_over_raw_files(self, failed_job, config, tmp_path):
         """Both present: resume from the furthest point, not the earliest."""

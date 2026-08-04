@@ -36,6 +36,12 @@ SAFE_KEYS = frozenset({
     "watch_path", "watch_output_path", "watch_interval",
     "min_title_length", "handbrake_preset", "handbrake_preset_file",
     "handbrake_extra_args", "max_encode_jobs", "transcode_enabled",
+    # Which encoder and how it is tuned. A device path and a quantiser
+    # authenticate nothing, and redacting them makes the section about
+    # hardware encoding unreadable in exactly the bundle someone pastes when
+    # hardware encoding is what has gone wrong.
+    "encoder_backend", "vaapi_device", "vaapi_codec", "vaapi_quality",
+    "vaapi_max_height",
     "drives", "disabled_drives", "no_eject_drives", "drive_labels",
     "eject_after_rip", "main_feature_only", "log_level",
     "require_completed_mount", "stage_locally", "auto_move_to_plex",

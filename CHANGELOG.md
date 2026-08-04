@@ -1,5 +1,40 @@
 # Changelog
 
+## 1.8.2
+
+**Updating in the middle of a rip destroyed the rip, quietly.** `update.sh`
+runs `systemctl stop adr`, which kills the whole control group — MakeMKV
+included. MakeMKV writes each title as it goes, so the rip died with `exited
+with code -15` and left MKVs in `raw/` that look perfectly ordinary in a
+directory listing and are truncated mid-frame. An hour of ripping, gone, at
+exactly the moment someone is sitting there waiting for it.
+
+The updater now refuses to stop the service while a job is ripping, encoding
+or identifying, and says why. `ADR_UPDATE_FORCE=1` overrides it.
+
+**And Retry then offered to encode the wreckage.** "2 raw MKV(s) from the rip
+are still on disk. Retrying re-encodes them — the disc is not needed" is a
+reasonable thing to say about files from a *finished* rip. It was being said
+about files from a rip that never finished, and the encode ended in `Invalid
+data found when processing input` — which reads as an encoder fault and is
+nothing of the kind. Retry now checks whether the rip actually completed, and
+sends you back to the disc when it did not.
+
+The encoder says the same thing in its own words rather than passing ffmpeg's
+message straight through: the file is named, its size is given, and the
+sentence explains that this is what a half-finished rip leaves behind. The
+rewrite is narrow — a genuine encoder failure is still reported as one, or
+someone re-rips a disc for nothing.
+
+**Smaller things.** `blkid` blocks for its full timeout on a busy optical
+drive, and the dashboard polls every few seconds — so a working drive produced
+a five-second stall and a full traceback in the log on a loop. It now backs off
+for two minutes after a timeout and logs one line instead of a stack trace. And
+the diagnostics bundle no longer redacts the encoder settings: a device path
+and a quantiser authenticate nothing, and hiding them made the hardware section
+unreadable in exactly the bundle someone pastes when hardware encoding is what
+has gone wrong.
+
 ## 1.8.1
 
 **The encoder test was still testing HandBrake after the switch.** 1.8.0 let

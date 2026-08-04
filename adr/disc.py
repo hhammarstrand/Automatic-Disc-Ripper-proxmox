@@ -140,22 +140,48 @@ def _has_media(device: str) -> bool:
     return err is None       # open() succeeded outright → media present
 
 
+#: Devices whose blkid call has already timed out, and when.
+#:
+#: blkid on an optical drive that is busy — mid-rip, or spinning up — blocks
+#: for the whole timeout and answers nothing. The dashboard polls every few
+#: seconds, so that is five seconds of a blocked worker and a full traceback
+#: in the log, over and over, for a drive that is working perfectly. Once it
+#: has timed out, stop asking for a while.
+_BLKID_BACKOFF_SECONDS = 120
+_blkid_timed_out: dict[str, float] = {}
+
+
 def _blkid_label(device: str) -> str | None:
     """Return the volume label of a device via blkid, or None.
 
     Returns None for audio CDs and label-less discs; callers fall back to the
     disc-label parser, so this is best-effort only.
     """
+    last = _blkid_timed_out.get(device)
+    if last is not None and (time.monotonic() - last) < _BLKID_BACKOFF_SECONDS:
+        return None
+
     try:
         result = subprocess.run(
             ["blkid", "-s", "LABEL", "-o", "value", device],
             capture_output=True, text=True, timeout=5,
         )
         label = result.stdout.strip()
-        return label or None
+    except subprocess.TimeoutExpired:
+        # Logged without the traceback: it says nothing a reader does not
+        # already know from the message, and this happens on a loop.
+        _blkid_timed_out[device] = time.monotonic()
+        logger.debug(
+            "blkid timed out on %s (busy drive); not asking again for %ds",
+            device, _BLKID_BACKOFF_SECONDS,
+        )
+        return None
     except (subprocess.SubprocessError, OSError, FileNotFoundError):
         logger.debug("blkid failed for %s", device, exc_info=True)
         return None
+
+    _blkid_timed_out.pop(device, None)
+    return label or None
 
 
 def _drive_model(device: str) -> str:

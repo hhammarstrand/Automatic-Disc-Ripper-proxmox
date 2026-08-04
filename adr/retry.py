@@ -82,6 +82,25 @@ def plan(job, config) -> dict:
         }
 
     raw = _raw_files(job, config)
+    if raw and job.rip_completed_at is None:
+        # Files on disk from a rip that never finished. MakeMKV writes each
+        # title as it goes, so a rip killed part-way leaves MKVs that look
+        # perfectly ordinary in a directory listing and are truncated in the
+        # middle of a frame. Re-encoding those wastes an hour and ends in
+        # "Invalid data found when processing input", which reads as an
+        # encoder fault and is nothing of the kind.
+        return {
+            "resume": RESUME_IMPOSSIBLE,
+            "reason": (
+                f"The rip did not finish, so the {len(raw)} file(s) in "
+                f"{Path(config.raw_path) / str(job.id)} are incomplete — "
+                "MakeMKV writes titles as it goes and was stopped part-way. "
+                "They cannot be encoded. Put the disc back in and press Rip."
+            ),
+            "files": [str(p) for p in raw],
+            "can_retry": False,
+        }
+
     if raw:
         return {
             "resume": RESUME_ENCODE,

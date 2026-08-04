@@ -515,3 +515,50 @@ class TestTestingWhatWillActuallyRun:
         check = diagnostics.check_hardware_encoding(self._config(tmp_path))
         assert check["status"] == "fail"
         assert "qsv" not in check["detail"], "the preset is not the subject"
+
+
+class TestWhenTheInputIsNotAVideo:
+    """The failure that cost an hour and read as an encoder fault.
+
+    MakeMKV writes each title as it goes. A rip killed part-way — a service
+    restart during an update, a cancel, a crash — leaves an MKV that looks
+    perfectly ordinary in a directory listing and is truncated mid-frame.
+    ffmpeg then says "Invalid data found when processing input", which sounds
+    like the encoder and is nothing of the kind.
+    """
+
+    def _encode(self, tmp_path, stderr):
+        exe = _script(tmp_path / "ffmpeg", f"""
+            echo "{stderr}" >&2
+            exit 183
+        """)
+        source = tmp_path / "B1_t00.mkv"
+        source.write_bytes(b"M" * 5_000_000)
+        encoder = vaapi.VaapiEncoder(_config(tmp_path, ffmpeg_path=exe))
+        return encoder.encode(source, output_dir=tmp_path / "out")
+
+    def test_it_names_the_file_rather_than_the_encoder(self, tmp_path):
+        result = self._encode(
+            tmp_path, "Error opening input files: Invalid data found when processing input")
+        assert result.success is False
+        assert "B1_t00.mkv" in result.error
+        assert "not a readable video file" in result.error
+
+    def test_it_says_what_actually_happened(self, tmp_path):
+        result = self._encode(
+            tmp_path, "Error opening input files: Invalid data found when processing input")
+        assert "rip that was stopped part-way" in result.error
+        assert "rip it again" in result.error, "it must say what to do"
+
+    def test_it_keeps_ffmpegs_own_words(self, tmp_path):
+        """Rewriting the cause is a claim; the original is the evidence."""
+        result = self._encode(
+            tmp_path, "Error opening input files: Invalid data found when processing input")
+        assert "Invalid data found" in result.error
+
+    def test_a_real_encoder_failure_is_not_blamed_on_the_input(self, tmp_path):
+        """The rewrite has to be narrow, or a genuine encoder problem gets
+        misdiagnosed as a bad file and someone re-rips for nothing."""
+        result = self._encode(tmp_path, "Error while opening encoder - maybe incorrect parameters")
+        assert "not a readable video file" not in result.error
+        assert "incorrect parameters" in result.error

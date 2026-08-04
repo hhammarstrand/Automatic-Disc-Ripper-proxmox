@@ -31,6 +31,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from adr.encoder import EncodeResult
+from adr.utils import BYTES_PER_MB
 
 logger = logging.getLogger(__name__)
 
@@ -328,6 +329,20 @@ class VaapiEncoder:
             f"ffmpeg exited with code {proc.returncode}"
             + (f": {said}" if said else " (no output file created)")
         )
+        if _cannot_read_input(said):
+            # "Invalid data found when processing input" reads as an encoder
+            # fault and is not one: the file it was handed is not a playable
+            # video. Almost always a rip that was stopped part-way, because
+            # MakeMKV writes titles as it goes and a truncated MKV looks
+            # perfectly ordinary in a directory listing.
+            size = input_path.stat().st_size if input_path.exists() else 0
+            result.error = (
+                f"{input_path.name} is not a readable video file "
+                f"({size / BYTES_PER_MB:.0f} MB on disk), so nothing could be "
+                "encoded from it. This is what a rip that was stopped part-way "
+                "leaves behind — MakeMKV writes each title as it goes. Put the "
+                f"disc back in and rip it again. ffmpeg said: {said}"
+            )
         logger.error("VA-API encode failed: %s", result.error)
         return result
 
@@ -432,6 +447,16 @@ def _number(value: object) -> float:
         return float(str(value))
     except (TypeError, ValueError):
         return 0.0
+
+
+def _cannot_read_input(said: str) -> bool:
+    """Whether ffmpeg's complaint is about the input rather than the encode."""
+    lowered = (said or "").lower()
+    return (
+        "invalid data found" in lowered
+        or "error opening input" in lowered
+        or "moov atom not found" in lowered
+    )
 
 
 def _last_meaningful(lines: list[str]) -> str:
