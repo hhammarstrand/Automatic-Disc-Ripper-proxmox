@@ -672,3 +672,52 @@ class TestTheEnvironmentHandBrakeRunsIn:
 
         env = encode_env(types.SimpleNamespace(libva_driver="iHD"))
         assert env.get("PATH") == os.environ.get("PATH")
+
+
+class TestTheProbeRunsWhatARealEncodeRuns:
+    """The button's whole claim is "this is what will actually happen".
+
+    encoder.encode() runs HandBrake with LIBVA_DRIVER_NAME from the config;
+    the test encode did not. So on the machines where the driver name is the
+    entire reason Quick Sync starts — which is the case this application has a
+    setting for — the probe exercised a different setup from the one it
+    vouches for. Worse, "Use HandBrake with the GPU" pins a driver and then
+    re-runs this test to prove it: the test ran without the thing just pinned,
+    failed, and every setting was put back.
+    """
+
+    def test_the_environment_carries_the_configured_driver(self, monkeypatch):
+        import types
+
+        from adr import encodertest
+
+        seen = {}
+
+        def record(cmd, timeout, env=None):
+            seen["env"] = env
+            return 0, ""
+
+        monkeypatch.setattr(encodertest, "_run", record)
+        from adr.encoder import encode_env
+
+        config = types.SimpleNamespace(libva_driver="iHD")
+        assert encode_env(config)["LIBVA_DRIVER_NAME"] == "iHD"
+
+    def test_the_encode_step_passes_it_through(self):
+        import inspect
+
+        from adr import encodertest
+
+        source = inspect.getsource(encodertest._encode_step)
+        assert "env=encode_env(config)" in source, (
+            "the probe runs HandBrake in a different environment again"
+        )
+
+    def test_no_driver_configured_means_inherit(self):
+        """None, not an empty override — clearing LIBVA_DRIVER_NAME would be a
+        decision, and the point is to make none."""
+        import types
+
+        from adr.encoder import encode_env
+
+        assert encode_env(types.SimpleNamespace(libva_driver="")) is None

@@ -43,14 +43,28 @@ def drive(config, monkeypatch):
     return pipeline_mod.DrivePipeline("/dev/sr0", config, queue.Queue())
 
 
-def _log_of_last_job(config) -> str:
+def _log_of_last_job(config, allow_error: bool = False) -> str:
+    """The job's log — and a check that the pipeline did not simply crash.
+
+    Every test here asserts that some line *appears* in the log, and the lines
+    they look for are written early. So a pipeline that blew up a moment later
+    still satisfied them: a stub whose signature had drifted from the real
+    method raised TypeError, the outer handler recorded "Pipeline error", and
+    the test went green over a run that had failed completely. Asserting the
+    absence of that line costs nothing and closes the whole class.
+    """
     session = get_session()
     try:
         job = session.query(Job).order_by(Job.id.desc()).first()
         assert job is not None, "no job was created"
-        return joblog.read(config, job.id)
+        text = joblog.read(config, job.id)
     finally:
         session.close()
+    if not allow_error:
+        assert "Pipeline error" not in text, (
+            f"the pipeline raised rather than ran:\n{text}"
+        )
+    return text
 
 
 def _last_job():
@@ -67,7 +81,7 @@ class TestTheDecisionIsRecorded:
             disctype, "classify",
             lambda d: DiscInfo(kind=disctype.KIND_VIDEO, detail="Video disc: found VIDEO_TS."),
         )
-        monkeypatch.setattr(drive._ripper, "scan_disc", lambda d: {})
+        monkeypatch.setattr(drive._ripper, "scan_disc", lambda d, job_id=None: {})
         monkeypatch.setattr(drive._ripper, "rip", lambda **kw: _rip_failure())
         drive._run_pipeline("HAPPY_FEET_TWO")
         assert "found VIDEO_TS" in _log_of_last_job(config)
@@ -109,7 +123,7 @@ class TestFailuresAreDiagnosable:
         monkeypatch.setattr(disctype, "classify", boom)
         drive._run_pipeline("HAPPY_FEET_TWO")
 
-        log = _log_of_last_job(config)
+        log = _log_of_last_job(config, allow_error=True)
         assert "the drive fell off the bus" in log
         assert "Traceback" in log, "the traceback is the useful part"
 

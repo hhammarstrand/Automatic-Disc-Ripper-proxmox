@@ -610,7 +610,16 @@ def _encode_step(
     if extra:
         cmd += extra.split()
 
-    code, text = _run(cmd, ENCODE_TIMEOUT)
+    # The same environment a real encode gets.
+    #
+    # encoder.encode() runs HandBrake with LIBVA_DRIVER_NAME from the config;
+    # this probe did not, so it exercised a different setup from the one it
+    # exists to vouch for — and on the machines where the driver name is the
+    # whole reason Quick Sync starts, the button that just pinned that name
+    # then failed its own re-test and put every setting back.
+    from adr.encoder import encode_env
+
+    code, text = _run(cmd, ENCODE_TIMEOUT, env=encode_env(config))
     if code == 0 and output.exists() and output.stat().st_size > 0:
         return _step(
             "Test encode", "ok",

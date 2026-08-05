@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.20.1
+
+The rest of the review finished — 63 agents, 32 findings that survived a
+skeptic. Both criticals are fixed here; the remaining thirty are triaged in
+the commit message and will be worked through in order.
+
+**The guard that stops an update killing a running rip had never once fired.**
+It grepped `/api/status` for a `"status"` field. That endpoint returns drives,
+queue size, worker count and watch-folder state — a job status has never been
+among them — so the pattern could not match, and every update since the guard
+was written was free to stop the service on top of a rip. Which is what kept
+happening: `MakeMKV exited with code -15`, twice, on the same disc.
+
+It now asks `updater._job_in_progress()`, the same check the Update button uses
+to withhold itself. One question, one answer, no serialisation format in
+between. When the check cannot run it still proceeds — a broken venv is itself
+a reason to update — but it says so, because failing open in silence is the
+bug being fixed.
+
+**And the encoder test ran HandBrake in a different environment from a real
+encode.** `encoder.encode()` sets `LIBVA_DRIVER_NAME` from the config; the
+probe did not. So on the machines where the driver name is the entire reason
+Quick Sync starts — the case this application has a setting for — the test
+vouched for a setup it had not run. Worse: *Use HandBrake with the GPU* pins a
+driver and then re-runs this test to prove it, so the test ran without the
+thing just pinned, failed, and put every setting back.
+
+**One test was passing over a run that had crashed.** A stub whose signature
+had drifted from the real method raised `TypeError`; the pipeline recorded
+"Pipeline error" and the test, which only asserted that an early line appeared
+in the log, went green. The helper every test in that file uses now asserts
+that line's absence, which closes the class rather than the instance.
+
 ## 1.20.0
 
 A second critical review, this time by nine independent reviewers with a

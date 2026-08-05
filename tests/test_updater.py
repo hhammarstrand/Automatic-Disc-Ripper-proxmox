@@ -6,6 +6,7 @@ here is what the module refuses to do.
 """
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -259,3 +260,59 @@ class TestItWillNotUpdateOnTopOfARunningJob:
             adr.models, "get_session",
             lambda: (_ for _ in ()).throw(RuntimeError("gone")))
         assert updater._job_in_progress() == ""
+
+
+class TestTheShellGuardAsksSomethingThatCanAnswer:
+    """The guard that stops an update killing a running rip had never fired.
+
+    It grepped `/api/status` for a `"status"` field. That endpoint returns
+    drives, queue size, worker count and watch-folder state — a job status has
+    never been among them — so the pattern could not match, `busy` was always
+    empty, and every update was free to stop the service on top of a rip.
+    Which is what kept happening, and what the guard was written to prevent.
+
+    The lesson is narrower than "test your shell": the check asked a *different
+    question* from the one the button asks, in a different language, and
+    nothing compared the two.
+    """
+
+    SCRIPT = Path("scripts/update.sh")
+
+    def _code(self) -> str:
+        return "\n".join(
+            line for line in self.SCRIPT.read_text().splitlines()
+            if not line.lstrip().startswith("#")
+        )
+
+    def _guard_block(self) -> str:
+        """The busy check only — /api/status is still the right thing to poll
+        further down, where the question is "is the web UI back up"."""
+        code = self._code()
+        start = code.index("ADR_UPDATE_FORCE")
+        end = code.index("Stopping service", start)
+        return code[start:end]
+
+    def test_it_no_longer_greps_an_endpoint_that_cannot_answer(self):
+        assert "/api/status" not in self._guard_block(), (
+            "the guard is asking an endpoint with no job status in it again"
+        )
+
+    def test_it_uses_the_same_check_the_button_uses(self):
+        assert "_job_in_progress" in self._code()
+
+    def test_api_status_really_does_not_carry_a_job_status(self):
+        """The premise, asserted rather than assumed. If someone adds one
+        later, this test says so and the shell guard can be simplified."""
+        import inspect
+
+        from adr.pipeline import PipelineManager
+
+        source = inspect.getsource(PipelineManager.get_status)
+        assert '"status"' not in source
+
+    def test_a_check_that_cannot_run_says_so_out_loud(self):
+        """It deliberately fails open — a broken venv is itself a reason to
+        update — but silently failing open is the bug being fixed."""
+        code = self._code()
+        assert "__check_failed__" in code
+        assert "Could not ask the application" in self.SCRIPT.read_text()

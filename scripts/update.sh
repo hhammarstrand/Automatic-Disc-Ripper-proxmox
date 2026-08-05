@@ -123,12 +123,34 @@ fi
 # film is exactly when someone is sitting there waiting for it.
 # --------------------------------------------------------------------------- #
 if [[ "${ADR_UPDATE_FORCE:-}" != "1" ]]; then
-    # Whitespace-tolerant: whether the JSON is pretty-printed depends on the
-    # Flask version and on debug mode, and a pattern that only matches one of
-    # them would silently never fire — which is the same as not checking.
-    busy="$(curl -fsS --max-time 5 http://127.0.0.1:8080/api/status 2>/dev/null \
-        | grep -oE '"status"[[:space:]]*:[[:space:]]*"(ripping|encoding|identifying)"' \
-        | grep -oE '(ripping|encoding|identifying)' | head -1 || true)"
+    # Ask the application, not an HTTP endpoint that never carried the answer.
+    #
+    # This used to grep /api/status for a "status" field. That endpoint returns
+    # drives, queue size, worker count and watch-folder state — and has never
+    # contained a job status at all, so the pattern could not match and the
+    # guard never once fired. Every update since it was written was free to
+    # stop the service on top of a running rip, which is exactly what it exists
+    # to prevent and exactly what kept happening.
+    #
+    # updater._job_in_progress reads the database directly and is the same
+    # check the Update button uses to withhold itself. One question, one
+    # answer, no serialisation format in between.
+    busy="$("$INSTALL_DIR/.venv/bin/python" -c '
+import sys
+sys.path.insert(0, "'"$INSTALL_DIR"'")
+from adr.updater import _job_in_progress
+sys.stdout.write(_job_in_progress())
+' 2>/dev/null || echo "__check_failed__")"
+
+    if [[ "$busy" == "__check_failed__" ]]; then
+        # A broken venv is itself a reason to update, so this does not block.
+        # It is said out loud because the alternative — a guard that fails
+        # open in silence — is the bug being fixed here.
+        msg_warn "Could not ask the application whether a job is running."
+        msg_warn "Continuing; if a rip is in progress it will be interrupted."
+        busy=""
+    fi
+
     if [[ -n "$busy" ]]; then
         msg_error "A job is in progress (${busy}) — not updating."
         msg_warn "Stopping the service now would kill it. MakeMKV writes titles as"
