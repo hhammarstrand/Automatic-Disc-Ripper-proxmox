@@ -89,10 +89,25 @@ fi
 # live in components a given container has not enabled, and any one of them
 # missing must not take the others with it. The Doctor page checks the result
 # and the encoder test proves it by encoding two seconds of video.
+#
+# The VA-API driver is a choice between alternatives, not a list.
+# intel-media-va-driver-non-free and intel-media-va-driver Conflict with and
+# Replace one another, so installing both in sequence leaves the *worse* one:
+# the free build has no HEVC encode, no MPEG-2, no VP8 and no Quick Sync. So
+# the first one that installs wins and the rest are not attempted. i965 is
+# last because it is for pre-Broadwell hardware, and beside iHD it only gives
+# libva two drivers to choose between for the same chip.
 msg_info "Installing the GPU media stack (hardware encoding)…"
 GPU_INSTALLED=""
-for pkg in intel-media-va-driver-non-free intel-media-va-driver i965-va-driver \
-           libmfx1 libmfxgen1 libvpl2 mesa-va-drivers vainfo; do
+for pkg in intel-media-va-driver-non-free intel-media-va-driver i965-va-driver; do
+    if apt-get install -y -qq "$pkg" >/dev/null 2>&1; then
+        GPU_INSTALLED="${GPU_INSTALLED} ${pkg}"
+        break
+    fi
+done
+# The runtimes are a genuine list: libmfx1 covers Gen 9 to Gen 11, libmfxgen1
+# Alder Lake and later, and they do not conflict.
+for pkg in libmfx1 libmfxgen1 libvpl2 mesa-va-drivers vainfo; do
     if apt-get install -y -qq "$pkg" >/dev/null 2>&1; then
         GPU_INSTALLED="${GPU_INSTALLED} ${pkg}"
     fi

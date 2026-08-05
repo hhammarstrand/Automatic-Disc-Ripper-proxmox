@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.18.3
+
+**The update took the GPU away again, and it was the update's fault.**
+
+`intel-media-va-driver-non-free` and `intel-media-va-driver` Conflict with and
+Replace one another: installing the second removes the first. The GPU install
+added in 1.17.2 listed both and installed whatever `dpkg` reported missing —
+so on a container that already had the non-free driver, the free one counted
+as absent, apt swapped them, and the update silently downgraded the machine.
+
+What that cost, visible in one diagnostics bundle before and after:
+
+    hb encoders  qsv_h264, qsv_h265, qsv_h265_10bit   ->  none (software-only build)
+    encode profs H264 x3, HEVC Main, HEVC Main10,     ->  H264 x3, JPEG
+                 JPEG, MPEG2 x2, VP8
+    ffmpeg gpu   h264, hevc                           ->  h264
+
+Quick Sync stopped starting, HEVC encode disappeared, and the next encode
+failed with `encqsvInit: qsv is not available on the system` — on a machine
+where it had been working the day before.
+
+The driver is now a choice satisfied by any one member, tried best first and
+stopped at the first that installs, in all three places that install it: the
+container installer, the update, and `adr-doctor --fix`. `i965-va-driver` is
+last and only reached when neither iHD build exists; beside iHD it gives libva
+two drivers to choose between for the same chip. The Quick Sync runtimes stay
+a genuine list — `libmfx1` and `libmfxgen1` cover different silicon and do not
+conflict.
+
+**To recover a container this already hit**, reinstall the good driver:
+
+    pct exec <CTID> -- apt-get install -y intel-media-va-driver-non-free
+
 ## 1.18.2
 
 Two ways the naming could still land on `Unknown - pt1.mp4`, closed.

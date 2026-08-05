@@ -220,51 +220,79 @@ if compgen -G "/dev/dri/renderD*" >/dev/null 2>&1; then
         gpu_vendor="$(cat "/sys/class/drm/$(basename "$node")/device/vendor" 2>/dev/null || true)"
         break
     done
-    # Both Quick Sync runtimes on Intel. They cover different silicon —
-    # libmfx1 is Gen 9 to Gen 11, libmfxgen1 is Alder Lake and later — and
-    # which one a given processor needs is not something anyone should have
-    # to look up. Install both, let the dispatcher choose.
+    # The VA-API driver is a choice between alternatives, not a list.
+    #
+    # intel-media-va-driver-non-free and intel-media-va-driver Conflict with
+    # and Replace one another, and installing the second removes the first.
+    # Listing both and installing whatever dpkg reported missing did exactly
+    # that: the non-free driver was already there, the free one counted as
+    # absent, apt swapped them, and a routine update took away HEVC encode,
+    # MPEG-2, VP8 and Quick Sync — leaving HandBrake with no hardware encoder
+    # on a machine where it had just started working.
+    #
+    # So the driver is a group, satisfied by *any* member, tried best first.
+    # i965 is last and only reached if neither iHD build exists: it is for
+    # pre-Broadwell hardware, and installing it beside iHD gives libva two
+    # drivers to choose between for the same chip.
+    #
+    # The runtimes below are a genuine list — libmfx1 (Gen 9 to Gen 11) and
+    # libmfxgen1 (Alder Lake and later) cover different silicon, do not
+    # conflict, and which one a processor needs is not something anyone
+    # should have to look up.
     case "$gpu_vendor" in
-        0x8086) gpu_packages=(intel-media-va-driver-non-free intel-media-va-driver
-                              i965-va-driver libmfx1 libmfxgen1 libvpl2 vainfo) ;;
-        0x1002) gpu_packages=(mesa-va-drivers vainfo) ;;
-        *)      gpu_packages=() ;;
+        0x8086) gpu_driver_choices=(intel-media-va-driver-non-free
+                                    intel-media-va-driver i965-va-driver)
+                gpu_packages=(libmfx1 libmfxgen1 libvpl2 vainfo) ;;
+        0x1002) gpu_driver_choices=(mesa-va-drivers)
+                gpu_packages=(vainfo) ;;
+        *)      gpu_driver_choices=()
+                gpu_packages=() ;;
     esac
 
-    # Package by package, and *not* gated on gpu.runtime_state().
-    #
-    # Gating on it was a bug, and exactly the one this file warns about
-    # elsewhere. runtime_state() answers "is a Quick Sync runtime installed",
-    # which is true the moment either one is — so a container that had
-    # libmfxgen1 from an earlier repair, on a processor that needs libmfx1,
-    # reported the stack fine and skipped the install that would have fixed
-    # it. The question here is not "is a runtime installed" but "is *this*
-    # package installed", and dpkg-query answers that without opinion.
-    gpu_missing=()
-    for pkg in "${gpu_packages[@]}"; do
-        if ! dpkg-query -W -f='${Status}' "$pkg" 2>/dev/null | grep -q "^install ok installed$"; then
-            gpu_missing+=("$pkg")
+    _adr_installed() {
+        dpkg-query -W -f='${Status}' "$1" 2>/dev/null \
+            | grep -q "^install ok installed$"
+    }
+
+    gpu_installed=()
+
+    # The driver group: nothing to do if any member is already present.
+    gpu_have_driver=0
+    for pkg in "${gpu_driver_choices[@]}"; do
+        if _adr_installed "$pkg"; then
+            gpu_have_driver=1
+            break
         fi
     done
-
-    if [[ ${#gpu_missing[@]} -gt 0 ]]; then
-        msg_info "Installing GPU media packages: ${gpu_missing[*]}…"
-        gpu_installed=()
-        for pkg in "${gpu_missing[@]}"; do
-            # One at a time and best-effort: the names differ across releases
-            # and some live in components a container may not have enabled.
-            # One unavailable name must not take the rest with it.
+    if [[ ${#gpu_driver_choices[@]} -gt 0 && "$gpu_have_driver" -eq 0 ]]; then
+        for pkg in "${gpu_driver_choices[@]}"; do
             if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$pkg" \
                     >/dev/null 2>&1; then
                 gpu_installed+=("$pkg")
+                break
             fi
         done
-        if [[ ${#gpu_installed[@]} -gt 0 ]]; then
-            msg_ok "GPU media stack installed: ${gpu_installed[*]}"
-            msg_info "  Settings → Encoding → Test encoder proves it by encoding two seconds."
-        else
-            msg_warn "Could not install ${gpu_missing[*]} — encoding stays on the CPU."
+    fi
+
+    # The rest, package by package, and not gated on gpu.runtime_state().
+    # Gating on that was a bug of the same family: it answers "is a Quick Sync
+    # runtime installed", true the moment either one is, so a container with
+    # libmfxgen1 on a processor needing libmfx1 reported the stack fine and
+    # skipped the install that would have fixed it.
+    for pkg in "${gpu_packages[@]}"; do
+        _adr_installed "$pkg" && continue
+        # One at a time and best-effort: the names differ across releases and
+        # some live in components a container may not have enabled. One
+        # unavailable name must not take the rest with it.
+        if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$pkg" \
+                >/dev/null 2>&1; then
+            gpu_installed+=("$pkg")
         fi
+    done
+
+    if [[ ${#gpu_installed[@]} -gt 0 ]]; then
+        msg_ok "GPU media stack installed: ${gpu_installed[*]}"
+        msg_info "  Settings → Encoding → Test encoder proves it by encoding two seconds."
     fi
 fi
 

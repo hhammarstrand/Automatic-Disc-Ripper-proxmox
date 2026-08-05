@@ -199,3 +199,67 @@ class TestTheMediaStackIsInstalledEverywhere:
     def test_amd_is_not_given_intels_media_stack(self, update):
         assert "mesa-va-drivers" in update
         assert "0x1002" in update
+
+
+class TestTheDriverIsAChoiceNotAList:
+    """intel-media-va-driver-non-free and intel-media-va-driver Conflict with
+    and Replace one another.
+
+    Listing both and installing whatever dpkg reported missing left the
+    *worse* one: the non-free driver was already present, the free one counted
+    as absent, apt swapped them, and a routine update took HEVC encode,
+    MPEG-2, VP8 and Quick Sync off a container where HandBrake had just
+    started using the GPU. vainfo went from nine encode profiles to four.
+    """
+
+    SCRIPTS = ("scripts/update.sh", "scripts/install-container.sh",
+               "scripts/adr-doctor.sh")
+
+    def _code(self, path: str) -> str:
+        """The script with its comments stripped — they name the packages at
+        length, and a comment is not an install."""
+        return "\n".join(
+            line for line in Path(path).read_text().splitlines()
+            if not line.lstrip().startswith("#")
+        )
+
+    def _after_the_drivers(self, code: str, lines: int = 25) -> str:
+        """The window of code that decides which VA-API driver gets installed.
+
+        Crude on purpose. The three scripts express the same choice three
+        ways — a bash array, a plain word list, and a quoted `sh -c` body —
+        and a parser clever enough for all three would be a third thing to
+        keep correct.
+        """
+        rows = code.splitlines()
+        # The *last* mention, not the first: adr-doctor names the packages in
+        # a variable well above the loop that installs them.
+        first = max(
+            i for i, row in enumerate(rows)
+            if "intel-media-va-driver-non-free" in row
+            or 'in $1' in row or "gpu_driver_choices" in row
+        )
+        return "\n".join(rows[first:first + lines])
+
+    def test_the_driver_choice_stops_at_the_first_that_installs(self):
+        """Without a break the second install removes the first — and the
+        second is the stripped-down build."""
+        for path in self.SCRIPTS:
+            window = self._after_the_drivers(self._code(path))
+            assert "break" in window, f"{path}: the driver choice runs to the end"
+
+    def test_i965_is_the_last_choice_not_the_first(self):
+        """It is for pre-Broadwell hardware. Beside iHD it only gives libva
+        two drivers to choose between for the same chip."""
+        for path in self.SCRIPTS:
+            code = self._code(path)
+            if "i965-va-driver" not in code:
+                continue
+            assert code.index("intel-media-va-driver-non-free") < code.index("i965-va-driver")
+
+    def test_the_runtimes_are_still_a_list(self):
+        """libmfx1 and libmfxgen1 cover different silicon and do not conflict;
+        installing only the first would be the opposite mistake."""
+        for path in self.SCRIPTS:
+            code = self._code(path)
+            assert "libmfx1" in code and "libmfxgen1" in code, path

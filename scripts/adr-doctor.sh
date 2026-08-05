@@ -32,7 +32,7 @@ set -euo pipefail
 # "nothing wrong found", which is worse than failing: it is a clean bill of
 # health from a script that never looked. Compared against the container's own
 # version below.
-ADR_DOCTOR_VERSION="1.18.2"
+ADR_DOCTOR_VERSION="1.18.3"
 
 CT_MEDIA_PATH="${CT_MEDIA_PATH:-/mnt/media}"
 # The user the service runs as inside the container.
@@ -389,12 +389,20 @@ print(state["detail"])
             # libmfx1 the older Media SDK — which one applies depends on the
             # chip, so both are attempted and either is enough.
             case "$gpu_vendor" in
-                0x8086) VA_PACKAGES="libmfxgen1 libmfx1 intel-media-va-driver-non-free intel-media-va-driver i965-va-driver libvpl2 vainfo" ;;
-                0x1002) VA_PACKAGES="mesa-va-drivers vainfo" ;;
-                *)      VA_PACKAGES="" ;;
+                # VA_DRIVERS is a choice, VA_PACKAGES a list. The two iHD
+                # builds Conflict with and Replace one another, so installing
+                # both in sequence leaves the *worse* one: the free build has
+                # no HEVC encode, no MPEG-2, no VP8 and no Quick Sync. That
+                # took a working container's hardware encoding away once.
+                0x8086) VA_DRIVERS="intel-media-va-driver-non-free intel-media-va-driver i965-va-driver"
+                        VA_PACKAGES="libmfxgen1 libmfx1 libvpl2 vainfo" ;;
+                0x1002) VA_DRIVERS="mesa-va-drivers"
+                        VA_PACKAGES="vainfo" ;;
+                *)      VA_DRIVERS=""
+                        VA_PACKAGES="" ;;
             esac
 
-            if [[ -z "$VA_PACKAGES" ]]; then
+            if [[ -z "$VA_DRIVERS" ]]; then
                 msg_warn "A GPU is passed through, but the driver stack it needs is not"
                 msg_warn "        installed and its vendor (${gpu_vendor:-unknown}) is not one this"
                 msg_warn "        script knows how to install for. Hardware presets will fail;"
@@ -416,15 +424,26 @@ print(state["detail"])
                     # live in non-free, which not every container has enabled.
                     # One unavailable name must not take the others with it,
                     # and any single VA driver is enough to succeed.
-                    # shellcheck disable=SC2016  # $1 belongs to the inner shell
+                    # shellcheck disable=SC2016  # $1/$2 belong to the inner shell
                     pct exec "$CTID" -- sh -c '
                         export DEBIAN_FRONTEND=noninteractive
                         apt-get update -qq >/dev/null 2>&1 || true
+                        have=""
                         for pkg in $1; do
+                            dpkg-query -W -f="${Status}" "$pkg" 2>/dev/null \
+                                | grep -q "^install ok installed$" && have=$pkg && break
+                        done
+                        if [ -z "$have" ]; then
+                            for pkg in $1; do
+                                apt-get install -y -qq "$pkg" >/dev/null 2>&1 \
+                                    && echo "  installed: $pkg" && break
+                            done
+                        fi
+                        for pkg in $2; do
                             apt-get install -y -qq "$pkg" >/dev/null 2>&1 \
                                 && echo "  installed: $pkg"
                         done
-                    ' _ "$VA_PACKAGES" || true
+                    ' _ "$VA_DRIVERS" "$VA_PACKAGES" || true
 
                     if ct_has_va_driver; then
                         note_fixed "installed the GPU driver stack in the container"
@@ -436,7 +455,7 @@ print(state["detail"])
                         msg_error "        use a software preset."
                     fi
                 else
-                    would_fix "install ${VA_PACKAGES%% *} and friends in the container"
+                    would_fix "install ${VA_DRIVERS%% *} and friends in the container"
                 fi
             fi
         fi
