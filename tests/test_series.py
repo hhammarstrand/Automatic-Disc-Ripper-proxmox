@@ -308,3 +308,78 @@ class TestTheVerdictIsDiagnosable:
         result = series.looks_like_series(_titles("2:16:00", "0:04:30"))
         assert "2:16:00" in result["observed"]
         assert "136:00" not in result["observed"]
+
+
+class TestABoxSetIsNeverReducedToOneEpisode:
+    """The worst bug this repository has had, and it lived for six versions.
+
+    "Main feature only" is on by default. A box-set disc is detected as a
+    series and every episode is ripped — correctly. Then, after the rip, the
+    main-feature choice ran anyway: six titles of 42 minutes have no 1.5× gap,
+    so the timid rule declined, and every fallback added after it picked the
+    longest episode and called the other five extras. only_the_feature then
+    dropped them, plan_output named the survivor ``S02E01``, and five episodes
+    were silently gone.
+
+    plan_output has guarded this since it was written. The two functions in
+    front of it did not, and nothing checked that the guard was reached.
+    """
+
+    EPISODES = [2520, 2530, 2515, 2540, 2505, 2600]      # six of ~42 minutes
+
+    def test_the_naming_rule_would_pick_one(self):
+        """The precondition. If this ever stops being true the guard below is
+        no longer load-bearing and this file should say so."""
+        from adr.naming import resolve_main_feature
+
+        assert resolve_main_feature(self.EPISODES, True) is not None
+
+    def test_the_guard_lives_where_the_rule_does(self):
+        """Behaviour, not source: feature_index is the one place that knows
+        the whole rule, and it declines outright for a series."""
+        import types
+
+        from adr.naming import feature_index
+
+        show = types.SimpleNamespace(content_type="series")
+        film = types.SimpleNamespace(content_type="movie")
+        sizes = [900] * len(self.EPISODES)
+        assert feature_index(show, self.EPISODES, sizes, True) is None
+        assert feature_index(film, self.EPISODES, sizes, True) is not None
+
+    def test_every_caller_goes_through_it(self):
+        """Three now — a fresh rip, a retry, and an encode-again — and the
+        part that is easy to leave out is the series guard."""
+        import inspect
+
+        from adr import reencode, retry
+        from adr.pipeline import DrivePipeline
+
+        for source in (inspect.getsource(DrivePipeline._run_pipeline),
+                       inspect.getsource(retry.requeue_encode),
+                       inspect.getsource(reencode._requeue_finished)):
+            assert "feature_index(" in source
+
+    def test_and_never_drops_episodes(self):
+        import inspect
+
+        from adr.pipeline import DrivePipeline
+
+        source = inspect.getsource(DrivePipeline._run_pipeline)
+        assert "main_feature_only and not is_series" in source, (
+            "only_the_feature can reduce a box set to one episode again"
+        )
+
+    def test_plan_output_still_refuses_to_call_an_episode_an_extra(self):
+        """The last line of defence, and the one that always worked."""
+        import types
+
+        from adr.naming import EXTRAS_FOLDER, plan_output
+
+        show = types.SimpleNamespace(
+            title="The Show", year=2019, content_type="series",
+            series_season=2, series_first_episode=1,
+        )
+        plan = plan_output(show, len(self.EPISODES), main_index=0)
+        assert len(plan.filenames) == len(self.EPISODES)
+        assert all(EXTRAS_FOLDER not in name for name in plan.filenames)

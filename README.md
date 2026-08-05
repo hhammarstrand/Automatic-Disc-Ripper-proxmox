@@ -27,7 +27,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Doctor page** that self-diagnoses drives, tools, keys and storage — and updates the app from GitHub with one button.
 - **Logs page** with the service's own log, filterable by level and text — no `pct exec`, no journald, no shell.
 - **Test encoding** without a disc: encodes two seconds of video with whatever is actually configured, and says what the encoder objected to.
-- **Hardware encoding, and the three ways it goes wrong**: the installer passes the host's GPU through and installs the driver stack; when Quick Sync still will not start, the encoder test finds out whether a VA-API driver name fixes it, whether ffmpeg can reach the same GPU, or whether software is the honest answer — by trying each, not by guessing.
+- **Hardware encoding, and the ways it goes wrong**: the installer passes the host's GPU through and installs the driver stack — the right VA-API driver, and both Quick Sync runtimes, because they cover different processor generations. When Quick Sync still will not start, the encoder test finds out whether a driver name fixes it, whether ffmpeg can reach the same GPU, or whether software is the honest answer — by trying each, not by guessing — and the diagnostics bundle asks the oneVPL dispatcher which library it turned down.
 - **One set of encoding settings** — spoken language, quality, height cap — told to whichever encoder runs, so switching encoder does not silently change the result.
 - **Copy diagnostics**: one button produces everything needed to diagnose the install as a single paste, with keys and tokens removed.
 - **Television discs**: box sets are recognised from title durations and named `Show (Year)/Season 02/Show (Year) - S02E05.mp4`.
@@ -45,7 +45,9 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Notices a drive that has stopped answering** instead of waiting on it for the rest of the service's life.
 - **Multi-drive** support and a **watch folder** for batch encoding of existing video files.
 - **Transcoding is optional** — keep the lossless MKV straight off the disc instead, if size is cheaper than time.
-- **Extras kept apart** from the film, in a folder Plex actually recognises, so a trailer never becomes the second half of the movie.
+- **Extras kept apart** from the film, in a folder Plex actually recognises, so a trailer never becomes the second half of the movie — including when the disc carries a commentary version exactly as long as the film.
+- **Main feature only**, honoured even when the pre-rip scan cannot read the disc: the rest is ripped but not encoded, and stays on disk rather than filling the library.
+- **An empty drive is an empty drive**: no job is created for one, and each way of having no disc — empty tray, open tray, missing passthrough, denied cgroup — says what to do about it in a sentence.
 - **Install via Claude for Chrome** — paste one prompt and it does the whole thing for you.
 
 ---
@@ -253,6 +255,24 @@ times the size. Nothing else changes — same folder, same name, same move into
 the library, same notifications. The watch folder still transcodes, since
 transcoding is the only reason it exists.
 
+### The main feature, and everything else on the disc
+
+**Main feature only** (on by default) scans the disc before ripping and takes
+the longest title. That scan is the whole of the feature, and when it fails —
+a protected DVD with hundreds of dummy titles, a drive still settling — there
+is nothing to pick from. What used to happen then was a silent fallback to
+ripping all sixteen titles, and nothing anywhere said why.
+
+Now every branch of that decision is written to the job's own log, in
+MakeMKV's words where it gave any, and the scan is retried once before it
+gives up. It is also allowed fifteen minutes, because five was a guess that a
+Disney DVD disproved twice over.
+
+If the scan still cannot run, the disc is ripped whole and the setting is
+honoured at the one point left: **only the feature is encoded.** The other
+titles stay in the job's raw directory as MKV, so nothing is lost and nothing
+is re-ripped, and the job log names them and says where they are.
+
 ### Extras
 
 With main-feature selection off, a disc's trailers and featurettes are ripped
@@ -268,6 +288,20 @@ know what the extra *is* — MakeMKV reports a duration and nothing else.
 Titles of similar length are left as numbered parts, because that is what a
 genuinely two-part film looks like, and calling half a film an extra is the
 worse of the two mistakes.
+
+Two things defeat that rule on real discs, and both used to end in sixteen
+numbered parts:
+
+- **A commentary version of the film** is exactly as long as the film, so
+  nothing stands 1.5× clear of anything.
+- **A title with no duration** — the durations come from MakeMKV's records
+  matched to files by name, and every step of that can come back empty.
+
+So the rule now applies only where the question is genuinely open. Past three
+titles there is no multi-part release left to protect, and someone who asked
+for the main feature has already said which title they want; in both cases the
+longest one is the film. If no duration is known at all, size decides — a
+968 MB file beside fifteen between 9 and 83 MB is not ambiguous.
 
 ### Discs that are not films
 
@@ -463,6 +497,40 @@ driver is checked against the PCI vendor of the actual card, and the runtime
 is told apart from the *dispatcher* (`libvpl.so`), which loads a runtime and
 encodes nothing itself.
 
+### The three packages, and why each one is chosen the way it is
+
+Ubuntu's `handbrake-cli` **is** built with Quick Sync — the source package
+build-depends on `libvpl-dev`, the oneVPL dispatcher. What it ships is a
+loader, and a loader needs something to load. Without a runtime it reports
+exactly what a machine with no GPU reports, which is why this went undiagnosed
+for a long time.
+
+**The driver is a choice, not a list.** `intel-media-va-driver-non-free` and
+`intel-media-va-driver` Conflict with and Replace one another, so installing
+both in sequence leaves the *worse* one: the free build has no HEVC encode, no
+MPEG-2, no VP8 and no Quick Sync. The installer, the in-app update and
+`adr-doctor --fix` all try them in order and stop at the first that installs.
+`i965-va-driver` is last and only reached when neither iHD build exists —
+beside iHD it gives libva two drivers to choose between for the same chip.
+
+**The runtimes are a genuine list**, and there are two because they cover
+different silicon:
+
+| Package | Library | Covers |
+|---|---|---|
+| `libmfx1` | `libmfxhw64.so` | Gen 9–11: Skylake through Comet Lake and Ice Lake |
+| `libmfxgen1` | `libmfx-gen.so` | Alder Lake and later, including Xe and Arc |
+
+They do not conflict, so both are installed and the dispatcher picks. Having
+*one* of them is not the same as having the right one: the oneVPL GPU runtime
+refuses a Gen 9.5 chip outright and the Media SDK stops at Gen 11, and
+HandBrake reports both cases identically. The Doctor page names which one is
+installed and what it covers.
+
+`libmfx1` is the deprecated Intel Media SDK, and deprecated is not the same as
+broken — it still starts on Gen 9.5 hardware with the non-free iHD driver.
+HandBrake's own minimum is Media SDK API 1.3, for Sandy Bridge.
+
 ### The variable that connects Quick Sync to the GPU
 
 Quick Sync does not open the GPU itself. It goes through whichever VA-API
@@ -487,16 +555,34 @@ trying, and they are what the probe tries.
 
 There is a case where everything above is correct and hardware encoding still
 does not happen: the node is passed through, `vainfo` loads the driver and
-lists encode profiles — and no hardware encoder in HandBrake will start.
-HandBrake's Quick Sync path goes through the Intel Media SDK, which Intel has
-deprecated in favour of oneVPL and which no longer initialises on current
-drivers. The GPU is fine the whole time.
+lists encode profiles — and no hardware encoder in HandBrake will start. The
+GPU is fine the whole time.
 
-**Settings → Encoding → Encoder** offers the way round it: `ffmpeg on the GPU
-(VA-API)`. Same hardware, different road, and ffmpeg is already installed for
-audio CDs. The encode test probes both and offers the switch when it applies —
-having first encoded a test clip, because a page that promises hardware
-encoding and delivers a failed job would be the same mistake in a new place.
+Usually the answer is a missing package from the table above, and the Doctor
+page says which. But three different problems produce the same sentence —
+`qsv is not available on the system` — and nothing that reads a directory
+listing can tell them apart: no runtime, a runtime that refuses the chip, and
+a runtime the driver will not talk to.
+
+So the diagnostics bundle asks the dispatcher directly. `ONEVPL_DISPATCHER_LOG`
+makes it name every library it opened and why it turned each one down, and
+HandBrake builds its encoder list at startup, so `--help` is enough to trigger
+the attempt. The bundle carries a one-line verdict and the log's tail — only
+when a hardware preset has no hardware encoder, because a working setup should
+not be made to run a post-mortem on itself.
+
+**Settings → Encoding → Encoder** offers the way round it regardless: `ffmpeg
+on the GPU (VA-API)`. Same hardware, different road, and ffmpeg is already
+installed for audio CDs. It stays as a supported backend rather than a
+stopgap, for three reasons: HandBrake has no VA-API encoder on any platform,
+so on an AMD GPU it is the only hardware path; the Media SDK is deprecated and
+one day will stop starting for real; and it is the probe that proves the
+*hardware* works while HandBrake is failing, which is what separates "the GPU
+is broken" from "HandBrake cannot reach it".
+
+The encode test probes both and offers the switch when it applies — having
+first encoded a test clip, because a page that promises hardware encoding and
+delivers a failed job would be the same mistake in a new place.
 
 ### Settings that mean the same thing either way
 
@@ -507,13 +593,23 @@ setting in the other, and switching encoders silently changed the result.
 
 Three settings describe the *result*, and both encoders are told about them:
 **spoken language**, **quality**, and a **height cap**. For HandBrake they
-become `--audio-lang-list … --all-audio`, `-q` and `--maxHeight`, applied
-after the preset so each replaces one value and leaves the rest of it intact.
+become `--audio-lang-list`, `-q` and `--maxHeight`, applied after the preset so
+each replaces one value and leaves the rest of it intact. The language list
+only — *how many* matching tracks to keep is the preset's
+`AudioTrackSelectionBehavior`, and forcing `--all-audio` alongside it would
+override a deliberate choice with one nobody made.
 
 Every one has a "leave it alone" default, and that is what ships: an
 installation that never touches this page produces exactly the command it
 produced before. A preset someone spent an evening tuning is not overridden
 by a setting they never set.
+
+**Spoken language left blank falls back to the preset's own.** HandBrake keeps
+it in `AudioLanguageList`, and the ffmpeg backend used to read only the
+setting — so someone who had chosen Swedish in the preset, and then switched
+encoders because HandBrake could not reach the GPU, got English again with
+nothing saying why. A language typed into Settings still wins, because someone
+typed it; the job log names which of the two the answer came from.
 
 The encoder test runs the same overrides a real encode would, so a flag
 HandBrake rejects shows up in two seconds instead of forty minutes into a rip.
@@ -521,16 +617,27 @@ HandBrake rejects shows up in two seconds instead of forty minutes into a rip.
 What is left backend-specific is genuinely specific: the render node and the
 GPU codec on one side, the preset file on the other.
 
-Audio follows the shape of HandBrake's "Surround" presets, because that is
-what someone coming from one expects and because the shape is right: **an AAC
-stereo track first, then every source track behind it.** Copying the disc's
+Audio on the ffmpeg side follows the shape of HandBrake's "Surround" presets,
+read out of one rather than guessed at. With a language chosen that means
+**two tracks from one source track**: an AAC stereo downmix at 160k, then the
+same audio as it came — copied when the container allows it, re-encoded when
+it does not. Other languages on the disc are *not* carried, because the preset
+says `AudioTrackSelectionBehavior: "first"` and someone who asked for Swedish
+has said what they want out.
+
+With no language chosen and none in the preset, nothing is thrown away: the
+stereo downmix leads and every source track follows it.
+
+Either way the stereo track exists and is marked default. Copying the disc's
 AC-3 straight through and stopping there is legal, and it is a track plenty of
 hardware will not decode from an MP4 — a TV, a phone, a browser — so the film
-plays silently and nothing says why. The stereo track is the guarantee that
-something comes out of the speakers, and it is marked default so the player
-does not choose a language by coin toss. Anything MP4 cannot hold at all
-(TrueHD, DTS-HD) becomes AC-3 at 640k, decided up front rather than
-discovered when ffmpeg writes the trailer after the entire encode.
+plays silently and nothing says why. Anything MP4 cannot hold at all (TrueHD,
+DTS-HD) is re-encoded, decided up front rather than discovered when ffmpeg
+writes the trailer after the entire encode.
+
+The job log says which track was chosen and why, because "still in English"
+has three causes that look identical from outside: nothing was asked for, the
+disc tags no languages, or the language asked for is not on this disc.
 
 Changing the encoder takes effect on the next job, without restarting the
 service.

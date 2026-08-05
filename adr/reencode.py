@@ -118,7 +118,7 @@ def _requeue_finished(job, session, config, encode_queue, sources: list[Path]) -
     other encode — this is not a special case once the input is chosen.
     """
     from adr.models import JobStatus, Track, TrackStatus
-    from adr.naming import plan_output
+    from adr.naming import feature_index, plan_output
     from adr.pipeline import EncodeTask, final_destination
     from adr.storage import should_stage
     from adr.utils import BYTES_PER_MB, unique_output_dir
@@ -127,8 +127,21 @@ def _requeue_finished(job, session, config, encode_queue, sources: list[Path]) -
         session.delete(track)
     session.commit()
 
-    naming = plan_output(job, len(sources),
-                         fallback_title=job.disc_label or f"Job {job.id}")
+    # Same rule as a fresh rip and a retry: one place decides which file is
+    # the film, so encoding again does not rename the extras back into parts.
+    # main_feature_only is not consulted here either — it decides what gets
+    # ripped, and these files exist already.
+    sizes = []
+    for path in sources:
+        try:
+            sizes.append(path.stat().st_size)
+        except OSError:
+            sizes.append(0)
+    naming = plan_output(
+        job, len(sources), fallback_title=job.disc_label or f"Job {job.id}",
+        main_index=feature_index(job, [None] * len(sources), sizes,
+                                 main_feature_only=False),
+    )
     dest_parent, _ = final_destination(job, config)
     staging = should_stage(dest_parent, config.stage_locally)
     if staging:

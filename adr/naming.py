@@ -202,6 +202,25 @@ def resolve_main_feature(durations, main_feature_only: bool, sizes=None) -> int 
     return largest_file(sizes or [])
 
 
+def feature_index(job, durations, sizes, main_feature_only: bool) -> int | None:
+    """Which of a job's ripped files is the feature, or None for "do not choose".
+
+    The whole rule in one place, because there are three callers now — the
+    pipeline after a rip, a retry, and an encode-again — and the rule has a
+    part that is easy to leave out. A box set has no main feature: six titles
+    of 42 minutes have no 1.5× gap between them, so the timid rule declines and
+    every fallback behind it then picks the longest *episode* and calls the
+    other five extras. :func:`plan_output` has guarded that since it was
+    written; the functions in front of it had not.
+
+    *durations* may be all None — a retry works from files on disk and has no
+    MakeMKV records to read lengths out of — in which case size decides.
+    """
+    if (getattr(job, "content_type", None) or "movie") == "series":
+        return None
+    return resolve_main_feature(durations, main_feature_only, sizes)
+
+
 def only_the_feature(files, durations, main_index: int | None):
     """Drop everything but the feature from a ripped title list.
 

@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.19.0
+
+A critical read-through of everything the last week added, and the worst bug
+this repository has had.
+
+**A box set could be reduced to one episode.** "Main feature only" is on by
+default. A TV disc is detected as a series and every episode is ripped —
+correctly. But the main-feature choice then ran anyway, and six titles of 42
+minutes have no 1.5× gap between them, so the timid rule declined and every
+fallback added behind it picked the longest *episode* and called the other
+five extras. They were dropped, the survivor was named `S02E01`, and nothing
+said a word. `plan_output` has guarded this since it was written; the two
+functions in front of it did not, and nothing checked that the guard was
+reached.
+
+The rule now lives in one function, `naming.feature_index`, which declines
+outright for a series — and all three callers go through it.
+
+**Which is the second finding: there were three callers, and two of them had
+been left behind.** A retry and an encode-again both named their files
+`pt1`…`pt16`, exactly the naming a fresh rip had stopped producing. They work
+from files on disk and have no durations to read, so size decides, and
+`main_feature_only` is deliberately not consulted there: that setting decides
+what gets *ripped*, and these files are already ripped.
+
+**A scan stopped by a service restart is no longer called a cancellation.** A
+signal is a signal; only the database says which of the two it was, and
+claiming a restart was a cancellation hid the restart from the recovery pass.
+
+Also: four harmless settings were being redacted from the diagnostics bundle
+for no reason, and the README described the audio layout, the HandBrake
+arguments and the Media SDK as they were three versions ago.
+
 ## 1.18.3
 
 **The update took the GPU away again, and it was the update's fault.**

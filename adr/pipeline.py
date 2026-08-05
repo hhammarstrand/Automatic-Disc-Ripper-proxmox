@@ -40,12 +40,12 @@ from adr.joblog import JobLog
 from adr.models import Job, JobStatus, Track, TrackStatus, get_session, init_db
 from adr.naming import (
     EXTRAS_FOLDER,
+    feature_index,
     finished_files,
     only_the_feature,
     pick_main_feature,
     plan_output,
     relative_folder,
-    resolve_main_feature,
 )
 from adr.notify import Notifier
 from adr.plex import PlexNotifier
@@ -1072,12 +1072,29 @@ class DrivePipeline:
                     # pressed during the scan started a full rip of the disc
                     # the user had just cancelled.
                     if self._ripper.scan_cancelled:
+                        # A signal killed the scan, and the only two things
+                        # that send one are Cancel and the service stopping.
+                        # The database says which: Cancel writes CANCELLED
+                        # before it kills anything, a shutdown writes nothing.
+                        # Claiming a restart was a cancellation would put the
+                        # wrong sentence in the job log and hide the restart
+                        # from the recovery pass on the way back up.
                         session.refresh(job)
-                        job.status = JobStatus.CANCELLED
-                        job.completed_at = utcnow()
-                        session.commit()
-                        job_log.append("rip", "Cancelled while scanning the disc.")
-                        logger.info("Job %s cancelled during the disc scan", job.id)
+                        if job.status == JobStatus.CANCELLED:
+                            job.completed_at = utcnow()
+                            session.commit()
+                            job_log.append("rip", "Cancelled while scanning the disc.")
+                            logger.info("Job %s cancelled during the disc scan", job.id)
+                        else:
+                            job_log.append(
+                                "rip",
+                                "The disc scan was stopped before it finished, so "
+                                "nothing was ripped. Press Rip to start again.",
+                            )
+                            logger.info(
+                                "Job %s: the disc scan was stopped; leaving the job "
+                                "for the recovery pass", job.id,
+                            )
                         return
                     logger.info("Scan found %d title(s): %s",
                                 len(scan_titles),
@@ -1105,9 +1122,8 @@ class DrivePipeline:
                         logger.info(
                             "Job %s looks like a TV disc: %s", job.id, verdict["reason"],
                         )
-                        job_log_early = job_log
-                        job_log_early.append("detect", verdict["reason"])
-                        job_log_early.append(
+                        job_log.append("detect", verdict["reason"])
+                        job_log.append(
                             "detect",
                             f"Assuming season {job.series_season} starting at episode 1. "
                             "Change it in the web UI before encoding starts.",
@@ -1147,7 +1163,7 @@ class DrivePipeline:
                             "rip",
                             "The disc scan came back with no titles"
                             + (f" ({self._ripper.last_scan_error})"
-                               if getattr(self._ripper, "last_scan_error", "") else "")
+                               if self._ripper.last_scan_error else "")
                             + ", so the main feature could not be picked before "
                             "ripping. Every title will be ripped and the longest "
                             "one kept.",
@@ -1356,8 +1372,9 @@ class DrivePipeline:
                 except OSError:
                     sizes.append(0)
 
-            main_index = resolve_main_feature(
-                durations, self._config.main_feature_only, sizes,
+            is_series = (job.content_type or "movie") == "series"
+            main_index = feature_index(
+                job, durations, sizes, self._config.main_feature_only,
             )
             if main_index is not None and pick_main_feature(durations) is None:
                 logger.info(
@@ -1371,7 +1388,7 @@ class DrivePipeline:
             # point still left: encode the film and nothing else. The extras
             # stay on disk as MKV, so nothing is lost, and hours of encoding
             # nobody asked for are not spent.
-            if self._config.main_feature_only:
+            if self._config.main_feature_only and not is_series:
                 kept, lengths, reduced = only_the_feature(
                     rip_files, durations, main_index,
                 )

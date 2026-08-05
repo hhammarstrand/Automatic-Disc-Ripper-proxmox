@@ -131,7 +131,7 @@ def requeue_encode(job, session, config, encode_queue) -> int:
     attempt's rows carry its error state and output paths, and a retry that
     silently inherits them is hard to reason about afterwards.
     """
-    from adr.naming import plan_output
+    from adr.naming import feature_index, plan_output
     from adr.pipeline import EncodeTask, final_destination
     from adr.storage import should_stage
     from adr.utils import BYTES_PER_MB, unique_output_dir
@@ -148,7 +148,27 @@ def requeue_encode(job, session, config, encode_queue) -> int:
     # television, and rolling its own meant a retried season came back as
     # 'Show (2002)/Show (2002) - pt1' — wrong folder, wrong names, wrong
     # library. There is one place that knows what a job's files are called.
-    plan = plan_output(job, len(raw), fallback_title=job.disc_label or f"Job {job.id}")
+    # Which of these is the film, judged on size: a retry works from files on
+    # disk and has no MakeMKV records to read durations out of. Without this a
+    # retried disc came back as pt1…pt16 — the exact naming the pipeline
+    # stopped producing, reappearing one button along.
+    #
+    # main_feature_only is deliberately not consulted. That setting decides
+    # what gets *ripped*, and these files are already ripped; the only
+    # question left is what to call them. So the rule that applies is the
+    # count one — past three files there is no multi-part release to protect
+    # — which leaves a genuine two-parter as pt1 and pt2.
+    sizes = []
+    for path in raw:
+        try:
+            sizes.append(path.stat().st_size)
+        except OSError:
+            sizes.append(0)
+    plan = plan_output(
+        job, len(raw), fallback_title=job.disc_label or f"Job {job.id}",
+        main_index=feature_index(job, [None] * len(raw), sizes,
+                                 main_feature_only=False),
+    )
     dest_parent, _ = final_destination(job, config)
     staging = should_stage(dest_parent, config.stage_locally)
     if staging:
