@@ -1305,8 +1305,30 @@ class DrivePipeline:
                 fallback_title, fallback_year = "", None
             else:
                 from adr.utils import parse_disc_label
-                fallback_title, fallback_year = parse_disc_label(volume_name or "")
+
+                # MakeMKV's own name for the disc, when blkid could not read
+                # one. It has been parsed out of the CINFO records since the
+                # beginning and never used, so a disc whose label blkid missed
+                # came out as "Unknown - pt1.mp4" while MakeMKV had known what
+                # it was the whole time. blkid times out on a busy drive, and
+                # the drive is busy for the whole rip.
+                label = volume_name or rip_result.disc_name or ""
+                if not volume_name and rip_result.disc_name:
+                    logger.info(
+                        "blkid gave no label; using MakeMKV's disc name %r",
+                        rip_result.disc_name,
+                    )
+                fallback_title, fallback_year = parse_disc_label(label)
                 logger.info("Using disc label for output name: %s (%s)", fallback_title, fallback_year)
+                job_log.append(
+                    "encode",
+                    f"TMDb had no confident match, so the name comes from the "
+                    f"disc label {label!r}."
+                    if label else
+                    "TMDb had no confident match and the disc carries no "
+                    "readable label, so the output is named 'Unknown'. Rename "
+                    "it from the History page.",
+                )
 
             # Durations first: they decide whether one of these titles is the
             # feature and the rest are extras, or whether the disc is a
@@ -1323,8 +1345,19 @@ class DrivePipeline:
                 durations.append(seconds)
 
             rip_files = list(rip_result.mkv_files)
+            # Sizes as the last resort. Duration comes from MakeMKV's TINFO
+            # records matched to files by name, and every step of that can
+            # come back empty; a 968 MB file beside fifteen of 9 to 83 MB is
+            # not ambiguous about which one is the film.
+            sizes = []
+            for mkv_file in rip_files:
+                try:
+                    sizes.append(mkv_file.stat().st_size)
+                except OSError:
+                    sizes.append(0)
+
             main_index = resolve_main_feature(
-                durations, self._config.main_feature_only,
+                durations, self._config.main_feature_only, sizes,
             )
             if main_index is not None and pick_main_feature(durations) is None:
                 logger.info(

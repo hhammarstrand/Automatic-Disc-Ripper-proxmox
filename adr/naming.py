@@ -143,7 +143,29 @@ def pick_main_feature(durations) -> int | None:
     return None
 
 
-def resolve_main_feature(durations, main_feature_only: bool) -> int | None:
+def largest_file(sizes) -> int | None:
+    """Index of the biggest file, ignoring the ones with no size.
+
+    The last resort for picking the feature, and a surprisingly good one: on a
+    disc with a film and its extras the film is an order of magnitude larger,
+    not a few percent. It exists because duration is read out of MakeMKV's
+    TINFO records and matched to files by name, and every step of that can come
+    back empty — at which point the alternative is to number sixteen files
+    ``pt1``…``pt16`` and let Plex stack the trailers onto the film.
+    """
+    best: int | None = None
+    best_value = 0.0
+    for index, value in enumerate(sizes):
+        try:
+            size = float(value or 0)
+        except (TypeError, ValueError):
+            continue
+        if size > best_value:
+            best, best_value = index, size
+    return best
+
+
+def resolve_main_feature(durations, main_feature_only: bool, sizes=None) -> int | None:
     """Which of the ripped titles is the film, given what the user asked for.
 
     :func:`pick_main_feature` is deliberately timid — it only answers when the
@@ -164,9 +186,20 @@ def resolve_main_feature(durations, main_feature_only: bool) -> int | None:
     index = pick_main_feature(values)
     if index is not None or len(values) < 2:
         return index
-    if main_feature_only or len(values) > MAX_STACKED_PARTS:
-        return longest_title(values)
-    return None
+    if not (main_feature_only or len(values) > MAX_STACKED_PARTS):
+        return None
+    # Duration first, because it is what "the feature" means. Size only when
+    # no duration is known at all — which happens whenever MakeMKV's TINFO
+    # records cannot be matched to the files on disk, and used to end in
+    # sixteen numbered parts.
+    #
+    # Written out rather than `a or b`: index 0 is a perfectly good answer and
+    # a falsy one, and the film is the first title on a disc more often than
+    # not.
+    by_duration = longest_title(values)
+    if by_duration is not None:
+        return by_duration
+    return largest_file(sizes or [])
 
 
 def only_the_feature(files, durations, main_index: int | None):

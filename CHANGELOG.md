@@ -1,5 +1,24 @@
 # Changelog
 
+## 1.18.2
+
+Two ways the naming could still land on `Unknown - pt1.mp4`, closed.
+
+**Size decides when duration cannot.** Duration is read out of MakeMKV's TINFO
+records and matched to files by name, and every step of that can come back
+empty — at which point the feature could not be identified and sixteen files
+were numbered `pt1` to `pt16`, which Plex stacks into one movie. A 968 MB file
+beside fifteen between 9 and 83 MB is not ambiguous about which one is the
+film. Duration still outranks size, because length is what "the feature"
+means; size is the last resort rather than a second opinion.
+
+**And MakeMKV knew what the disc was called.** `RipResult.disc_name` has been
+parsed out of the CINFO records since the first version of the ripper and read
+by nothing. So a disc whose label blkid missed came out as "Unknown" — and
+blkid times out on a busy drive, which the drive is for the whole rip. The
+label still wins where there is one; MakeMKV's name is the fallback, and the
+job log says which was used.
+
 ## 1.18.1
 
 **"/dev/sr0 is already ripping" after cancelling a rip.** It was not wrong,

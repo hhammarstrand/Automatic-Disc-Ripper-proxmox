@@ -19,6 +19,7 @@ import types
 from adr.naming import (
     EXTRAS_FOLDER,
     MAX_STACKED_PARTS,
+    largest_file,
     longest_title,
     only_the_feature,
     plan_output,
@@ -321,3 +322,51 @@ class TestACancelledScanIsNotAnEmptyDisc:
         threading.Timer(0.5, lambda: registry.kill(3)).start()
         ripper.scan_disc("/dev/sr0", job_id=3)
         assert slept == [], "a cancelled scan was tried again"
+
+
+class TestSizeIsTheLastResort:
+    """Job #42's file list, which is what this test is named after:
+
+        Unknown - pt1.mp4  (229.5 MB)
+        Unknown - pt2.mp4  (968.7 MB)   <- the film
+        Unknown - pt7.mp4  (9.3 MB)
+        …fourteen more between 9 and 83 MB
+
+    Duration is read out of MakeMKV's TINFO records and matched to files by
+    name, and every step of that can come back empty. When it does, the choice
+    used to be "number them pt1 to pt16 and let Plex stack the trailers onto
+    the end of the film". A file an order of magnitude larger than every other
+    is not ambiguous.
+    """
+
+    SIZES = [229_500_000, 968_700_000] + [9_300_000 * (i + 1) for i in range(14)]
+
+    def test_the_biggest_file_wins_when_no_duration_is_known(self):
+        assert largest_file(self.SIZES) == 1
+        assert resolve_main_feature([None] * 16, True, self.SIZES) == 1
+
+    def test_duration_still_outranks_size(self):
+        """A commentary track can be a bigger file than the film it comments
+        on. Length is what "the feature" means."""
+        assert resolve_main_feature([6000, 300], True, [1, 999_999_999]) == 0
+
+    def test_size_is_ignored_where_no_choice_should_be_made(self):
+        """Two similar titles are a two-part film, and the larger half is not
+        the film."""
+        assert resolve_main_feature([3000, 3000], False, [1, 999]) is None
+
+    def test_unknown_sizes_are_skipped_not_fatal(self):
+        assert largest_file([None, 0, 500, None]) == 2
+
+    def test_nothing_known_at_all_makes_no_claim(self):
+        assert largest_file([]) is None
+        assert largest_file([0, None]) is None
+        assert resolve_main_feature([None, None], True, [0, 0]) is None
+
+    def test_index_zero_is_a_real_answer(self):
+        """`longest_title(...) or largest_file(...)` would discard it: the
+        film is the first title on a disc more often than not."""
+        assert resolve_main_feature([None, None], True, [900, 100]) == 0
+
+    def test_no_sizes_given_is_the_old_behaviour(self):
+        assert resolve_main_feature([None, None], True) is None
