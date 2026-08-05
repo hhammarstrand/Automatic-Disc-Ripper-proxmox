@@ -136,6 +136,33 @@ class ProcessRegistry:
 process_registry = ProcessRegistry()
 
 
+
+def _cancelled(session, job) -> bool:
+    """Whether someone has cancelled *job* since this thread last looked.
+
+    The pipeline holds a job object for the length of a rip, and the cancel
+    endpoint writes to the same row from another thread. Nothing about an ORM
+    object refreshes itself, so a status this thread wrote minutes ago will
+    happily overwrite a cancellation that arrived since — which is how a
+    cancelled job went on to encode, transfer and announce itself as done.
+
+    Called before each transition that would clobber it. Never raises: a
+    database that cannot be read is not a reason to abandon a finished rip.
+    """
+    try:
+        session.refresh(job)
+    except Exception:                              # noqa: BLE001 - never fatal
+        logger.debug("Could not re-read job %s", getattr(job, "id", "?"), exc_info=True)
+        return False
+    if job.status != JobStatus.CANCELLED:
+        return False
+    if job.completed_at is None:
+        job.completed_at = utcnow()
+    with contextlib.suppress(Exception):
+        session.commit()
+    return True
+
+
 def _progress_committer(job, session, phase: str, min_interval: float = 2.0):
     """Return a progress callback that writes to the database, throttled.
 
@@ -666,6 +693,23 @@ class EncoderWorker(threading.Thread):
             session.refresh(job)
             if job.status == JobStatus.CANCELLED:
                 logger.info("Job %s cancelled during encode", task.job_id)
+                # Say so on the track, and take the half-written file away.
+                #
+                # HandBrake writes straight to the final name with no temp
+                # file, so what is on disk now is a truncated MP4 that a
+                # directory listing cannot tell from a finished one. Returning
+                # here without touching either left the track saying ENCODING
+                # for ever and the stub in place — and Retry then offered to
+                # move it into the library as an intact encode.
+                track.status = TrackStatus.ERROR
+                track.error_message = "Cancelled during encoding."
+                partial = getattr(result, "output_path", None)
+                if partial:
+                    try:
+                        Path(partial).unlink()
+                        logger.info("Removed the partial encode %s", partial)
+                    except OSError:
+                        logger.debug("Could not remove %s", partial, exc_info=True)
                 job.completed_at = utcnow()
                 session.commit()
                 return
@@ -1306,6 +1350,18 @@ class DrivePipeline:
             job.rip_completed_at = utcnow()
             session.commit()
 
+            # Between here and the ENCODING write below sit the eject — a
+            # synchronous ioctl that blocks while the drive spins down — and a
+            # commit per track. Someone watching the dashboard sees 'ripped'
+            # and can press Cancel in that window, and the cancel endpoint has
+            # nothing left to kill, so the only thing that carries the decision
+            # is the row. Writing over it started the encode anyway and the job
+            # completed as if nothing had been asked.
+            if _cancelled(session, job):
+                logger.info("Job %s cancelled after the rip finished", job.id)
+                job_log.append("rip", "Cancelled after the rip finished.")
+                return
+
             # 4. Eject disc (so user can insert next)
             if self._config.should_eject(self.drive):
                 logger.info("Ejecting drive %s", self.drive)
@@ -1478,6 +1534,10 @@ class DrivePipeline:
                     passthrough=not self._config.transcode_enabled,
                 ))
 
+            if _cancelled(session, job):
+                logger.info("Job %s cancelled while its tracks were queued", job.id)
+                job_log.append("encode", "Cancelled before encoding started.")
+                return
             job.status = JobStatus.ENCODING
             session.commit()
             logger.info("Job %s: %d tracks queued for encoding", job.id, len(rip_files))
@@ -1607,6 +1667,13 @@ class DrivePipeline:
                 job_id=job.id,
                 track_number=index,
                 filename=path.name,
+                # The path, not just the name. cleanup.job_files reads this to
+                # answer "what would deleting this job remove", and its only
+                # fallback is finished_files(), which accepts .mp4 and .mkv —
+                # so an album of FLACs listed as nothing at all, and the
+                # confirmation dialog said no files were found while three
+                # gigabytes sat on the disk.
+                output_path=str(path),
                 size_mb=size_mb,
                 status=TrackStatus.DONE,
             ))
@@ -1687,6 +1754,11 @@ class DrivePipeline:
             job_id=job.id,
             track_number=1,
             filename=result.path.name if result.path else "disc.iso",
+            # Same reason as the audio tracks above, and more so here:
+            # job.output_path for an ISO job is the image *file*, and
+            # finished_files() of a file is empty by definition. Without this
+            # an eight-gigabyte image was invisible to the delete preview.
+            output_path=str(result.path) if result.path else None,
             size_mb=result.size_bytes / BYTES_PER_MB,
             status=TrackStatus.DONE,
         ))

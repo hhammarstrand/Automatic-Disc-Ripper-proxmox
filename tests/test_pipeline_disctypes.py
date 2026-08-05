@@ -463,3 +463,89 @@ class TestProgressCommitter:
             assert job.progress_rip == pytest.approx(0.6)
         finally:
             session.close()
+
+
+class TestCancelIsNotOverwritten:
+    """The pipeline holds a job object for the length of a rip; the cancel
+    endpoint writes to the same row from another thread.
+
+    Nothing about an ORM object refreshes itself, so a status this thread wrote
+    minutes ago would happily overwrite a cancellation that arrived since. The
+    window is real and seconds long on a default install: between the last
+    check and the ENCODING write sit the RIPPED write, a synchronous CDROMEJECT
+    that blocks while the drive spins down, and a commit per track. Cancel in
+    that window and the job encoded, transferred and announced itself as done.
+    """
+
+    def _job(self, session, status):
+        from adr.models import Job
+
+        job = Job(drive="/dev/sr0", status=status)
+        session.add(job)
+        session.commit()
+        return job
+
+    def test_a_cancelled_job_is_reported_as_cancelled(self):
+        from adr.models import JobStatus, get_session, init_db
+        from adr.pipeline import _cancelled
+
+        init_db()
+        session = get_session()
+        try:
+            job = self._job(session, JobStatus.CANCELLED)
+            assert _cancelled(session, job) is True
+            assert job.completed_at is not None, "a cancelled job never completes"
+        finally:
+            session.close()
+
+    def test_a_running_job_is_not(self):
+        from adr.models import JobStatus, get_session, init_db
+        from adr.pipeline import _cancelled
+
+        init_db()
+        session = get_session()
+        try:
+            assert _cancelled(session, self._job(session, JobStatus.RIPPING)) is False
+        finally:
+            session.close()
+
+    def test_it_re_reads_rather_than_trusting_what_it_holds(self):
+        """The whole point: another thread wrote CANCELLED and this object
+        still says RIPPING."""
+        from adr.models import Job, JobStatus, get_session, init_db
+        from adr.pipeline import _cancelled
+
+        init_db()
+        session = get_session()
+        other = get_session()
+        try:
+            job = self._job(session, JobStatus.RIPPING)
+            elsewhere = other.get(Job, job.id)
+            elsewhere.status = JobStatus.CANCELLED
+            other.commit()
+
+            assert job.status == JobStatus.RIPPING, "the stale view is the premise"
+            assert _cancelled(session, job) is True
+        finally:
+            session.close()
+            other.close()
+
+    def test_a_broken_database_does_not_abandon_a_finished_rip(self):
+        import types
+
+        from adr.pipeline import _cancelled
+
+        def boom(_job):
+            raise RuntimeError("database is locked")
+
+        broken = types.SimpleNamespace(refresh=boom)
+        assert _cancelled(broken, types.SimpleNamespace(id=1)) is False
+
+    def test_both_transitions_are_guarded(self):
+        """RIPPED and ENCODING are the two writes that can clobber a cancel."""
+        import inspect
+
+        from adr.pipeline import DrivePipeline
+
+        source = inspect.getsource(DrivePipeline._run_pipeline)
+        assert source.count("_cancelled(session, job)") >= 2

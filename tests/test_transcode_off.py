@@ -142,7 +142,15 @@ class TestDownstreamAcceptsMkv:
 
     def test_a_retry_can_still_salvage_mkvs(self, tmp_path, config):
         """Before this, a failed transfer of a passthrough job reported that
-        nothing was left and sent the user to find the disc again."""
+        nothing was left and sent the user to find the disc again.
+
+        The track says DONE because that is what a passthrough job that got as
+        far as the transfer looks like — the worker writes it the moment the
+        copy returns. Retry needs it: a file of the right name is not evidence
+        that the process which wrote it finished.
+        """
+        from adr.models import Track, TrackStatus
+
         session = get_session()
         try:
             init_db()
@@ -150,6 +158,11 @@ class TestDownstreamAcceptsMkv:
             folder.mkdir()
             (folder / "The Film (1999).mkv").write_bytes(b"x")
             job = Job(drive="/dev/sr0", status=JobStatus.ERROR, output_path=str(folder))
+            job.tracks.append(Track(
+                track_number=1, filename="title00.mkv",
+                output_path=str(folder / "The Film (1999).mkv"),
+                status=TrackStatus.DONE,
+            ))
             session.add(job)
             session.commit()
 

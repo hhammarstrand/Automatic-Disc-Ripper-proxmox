@@ -69,8 +69,24 @@ def plan(job, config) -> dict:
             "can_retry": False,
         }
 
+    # An encoded file on disk is not evidence that the encode finished.
+    #
+    # HandBrake writes straight to the final name with no temp file, so a job
+    # killed at 60% — Cancel, a full disk, a read error — leaves a truncated
+    # MP4 that a directory listing cannot tell from a finished one. Moving that
+    # into the library and marking the job DONE publishes a film that does not
+    # play, reported as a success, while the intact raw MKVs sit unused.
+    #
+    # The tracks are the witness. They are set to DONE only after the encoder
+    # returns success, so "every track says DONE" is the same kind of evidence
+    # the rip branch below gets from rip_completed_at. A job that failed during
+    # *transfer* still passes — which is the case this branch exists for.
     encoded = encoded_files(job)
-    if encoded:
+    tracks = list(job.tracks or [])
+    encode_finished = bool(tracks) and all(
+        t.status == TrackStatus.DONE for t in tracks
+    )
+    if encoded and encode_finished:
         return {
             "resume": RESUME_TRANSFER,
             "reason": (

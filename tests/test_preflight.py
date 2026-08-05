@@ -367,3 +367,64 @@ class TestASubfolderOfTheShareIsFine:
         })
         assert preflight.destination_blocker(config) is None
         assert preflight.check(config).ok
+
+
+class TestTheTelevisionLibraryIsCheckedToo:
+    """final_destination routes every series job to tv_path on content_type
+    alone, and series mode stamps that at job creation — before this gate runs.
+
+    tv_path appeared nowhere in this module, so a box set passed preflight
+    against a healthy film library and was then written onto the container's
+    own disk, or failed on mkdir after the whole rip. cleanup._remove_empty has
+    always treated tv_path as a first-class library root; the two disagreed.
+    """
+
+    def _config(self, tmp_path, **over):
+        import types
+
+        good = tmp_path / "media"
+        good.mkdir(exist_ok=True)
+        data = {
+            "completed_path": good, "plex_path": "", "tv_path": "",
+            "staging_path": tmp_path, "require_completed_mount": False,
+            "stage_locally": False,
+        }
+        data.update(over)
+        return types.SimpleNamespace(**data)
+
+    def test_a_broken_tv_path_blocks_the_rip(self, tmp_path):
+        blocked = preflight.destination_blocker(
+            self._config(tmp_path, tv_path=tmp_path / "nope" / "deeper"),
+        )
+        assert blocked
+        assert "TV library" in blocked
+
+    def test_a_healthy_one_does_not(self, tmp_path):
+        good = tmp_path / "series"
+        good.mkdir()
+        assert preflight.destination_blocker(
+            self._config(tmp_path, tv_path=good),
+        ) is None
+
+    def test_an_unset_tv_path_is_not_a_blocker(self, tmp_path):
+        """Not everyone rips television."""
+        assert preflight.destination_blocker(self._config(tmp_path)) is None
+
+    def test_it_honours_the_same_mount_requirement_as_the_film_library(
+        self, tmp_path, monkeypatch,
+    ):
+        """Otherwise a NAS-only install silently writes seasons to the
+        container disk, which is the smallest disk in the setup."""
+        good = tmp_path / "series"
+        good.mkdir()
+        seen = []
+
+        def record(path, require_mount=False):
+            seen.append((str(path), require_mount))
+            return True, ""
+
+        monkeypatch.setattr(preflight, "check_destination", record)
+        preflight.destination_blocker(
+            self._config(tmp_path, tv_path=good, require_completed_mount=True),
+        )
+        assert (str(good), True) in seen, seen

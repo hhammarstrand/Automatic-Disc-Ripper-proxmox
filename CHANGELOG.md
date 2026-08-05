@@ -1,5 +1,57 @@
 # Changelog
 
+## 1.20.0
+
+A second critical review, this time by nine independent reviewers with a
+skeptic behind each finding whose job was to refute it. Five defects survived
+and are fixed here; two more are confirmed and named at the end.
+
+**A privilege escalation.** `adr-update.service` runs
+`/opt/adr/scripts/update.sh` as root, and the installer's recursive `chown`
+walked into `scripts/`, so the file was owned by the unprivileged service user.
+`ProtectSystem=full` does not cover `/opt`. Anything running as `adr` — which
+includes the deliberately unauthenticated web UI — could have rewritten that
+file and then asked for an update, and systemd would have executed the new
+bytes as uid 0. That is the whole privilege separation this application claims
+to have. `scripts/` and `systemd/` are now root-owned, in the installer and in
+the update, because fixing only one of the two would have re-opened it on the
+next update.
+
+**A half-written encode was published to the library as a success.** HandBrake
+writes straight to the final name with no temp file, so a job killed at 60% —
+Cancel, a full disk, a source read error — leaves a truncated MP4 that a
+directory listing cannot tell from a finished one. Retry called that "intact",
+moved it into Plex, marked the job DONE and cleared the error, while the raw
+MKVs that would have re-encoded perfectly sat unread. The rip branch beside it
+has always refused to trust a directory listing for a process killed part-way;
+the encoded branch now gets the same evidence test — every track saying DONE.
+A cancel during encoding also marks the track and removes the stub instead of
+leaving both behind.
+
+**A cancellation could be silently overwritten.** The pipeline holds a job
+object for the length of a rip while the cancel endpoint writes to the same row
+from another thread. Between the last check and the write of ENCODING sit the
+RIPPED write, a synchronous eject that blocks while the drive spins down, and a
+commit per track. Cancel in that window and the job encoded, transferred and
+announced itself as done.
+
+**The television library was never preflighted.** Every series job goes to
+`tv_path`, and `tv_path` appeared nowhere in the checks — so a box set passed
+against a healthy film library and was then written onto the container's own
+disk, or failed on `mkdir` after the whole rip.
+
+**And "delete the files" deleted nothing for an audio CD or a data disc**,
+while telling the user no files were found. Both created their track rows
+without a path, so the preview fell back to looking for `.mp4` and `.mkv`. The
+only way forward then dropped the row that was the sole record of where three
+gigabytes had gone.
+
+Two confirmed defects are **not** fixed here, because both change where files
+land and deserve their own change: the second disc of a season lands in
+`Season 02 (2)` instead of merging into the existing folder, and re-encoding
+from the finished file leaves the old copy behind and permanently renames the
+job's folder.
+
 ## 1.19.0
 
 A critical read-through of everything the last week added, and the worst bug

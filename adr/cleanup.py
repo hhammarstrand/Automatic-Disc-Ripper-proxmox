@@ -133,6 +133,12 @@ def _remove_empty(directories: set[Path], config) -> None:
             config.completed_path, config.raw_path, config.staging_path,
             getattr(config, "plex_path", "") or None,
             getattr(config, "tv_path", "") or None,
+            # Music and ISO libraries are roots too. They were absent here
+            # only because no audio or data job ever reached this code — their
+            # tracks recorded no path, so nothing of theirs was ever deletable.
+            # Now that it is, the root they live in must not be.
+            getattr(config, "music_path", "") or None,
+            getattr(config, "data_disc_path", "") or None,
         )
         if p
     }

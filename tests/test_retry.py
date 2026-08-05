@@ -49,13 +49,28 @@ def failed_job(tmp_path):
     session.close()
 
 
-def _make_encoded(config, job, tmp_path, count=1):
-    """A finished encode sitting in staging, as after a failed transfer."""
+def _make_encoded(config, job, tmp_path, count=1, tracks_done=True):
+    """A finished encode sitting in staging, as after a failed transfer.
+
+    The Track rows matter as much as the files. HandBrake writes straight to
+    the final name with no temp file, so a truncated encode is a file of the
+    right name and the wrong length — indistinguishable from this one in a
+    directory listing. What tells them apart is whether the tracks say DONE,
+    which only happens after the encoder returns success.
+    """
+    from adr.models import Track, TrackStatus
+
     out = config.staging_path / "The Matrix (1999)"
     out.mkdir(parents=True, exist_ok=True)
     for i in range(count):
         name = "The Matrix (1999).mp4" if count == 1 else f"The Matrix (1999) - pt{i+1}.mp4"
         (out / name).write_bytes(b"X" * 2048)
+        job.tracks.append(Track(
+            track_number=i + 1,
+            filename=f"title{i:02d}.mkv",
+            output_path=str(out / name),
+            status=TrackStatus.DONE if tracks_done else TrackStatus.ENCODING,
+        ))
     job.output_path = str(out)
     return out
 
@@ -332,3 +347,75 @@ class TestRetryingASeries:
         retry.requeue_encode(job, session, config, queue.Queue())
         session.refresh(job)
         assert sorted(t.episode_number for t in job.tracks) == [5, 6]
+
+
+class TestAHalfWrittenEncodeIsNotAFinishedOne:
+    """The worst outcome this module can produce: a truncated film published to
+    the library and reported as a success.
+
+    HandBrake writes straight to the final name with no temp file. A job killed
+    at 60% — Cancel, a full disk, a source read error — leaves an unfinalised
+    MP4 that a directory listing cannot tell from a finished one. Retry used to
+    call that "intact", move it into the Plex library, mark the job DONE and
+    clear the error, while the raw MKVs that would have re-encoded perfectly
+    sat unread: the encoded branch is consulted before the raw one.
+
+    The rip branch has had the right shape all along — it refuses to trust a
+    directory listing for a process killed part-way, and uses rip_completed_at
+    as the witness. This is the same test for the other half.
+    """
+
+    def test_a_cancelled_encode_is_re_encoded_not_transferred(
+        self, failed_job, config, tmp_path,
+    ):
+        session, job = failed_job
+        _make_encoded(config, job, tmp_path, tracks_done=False)
+        _make_raw(config, job, count=1)
+        session.commit()
+
+        result = retry.plan(job, config)
+        assert result["resume"] == retry.RESUME_ENCODE, (
+            "a truncated encode was offered for transfer"
+        )
+        assert result["can_retry"] is True
+
+    def test_a_job_with_no_tracks_at_all_is_not_trusted(
+        self, failed_job, config, tmp_path,
+    ):
+        """Files with no rows behind them: a leftover from an older run, or a
+        job cancelled before the tracks were created."""
+        session, job = failed_job
+        out = config.staging_path / "The Matrix (1999)"
+        out.mkdir(parents=True, exist_ok=True)
+        (out / "The Matrix (1999).mp4").write_bytes(b"X" * 2048)
+        job.output_path = str(out)
+        _make_raw(config, job, count=1)
+        session.commit()
+
+        assert retry.plan(job, config)["resume"] == retry.RESUME_ENCODE
+
+    def test_one_failed_track_among_finished_ones_still_re_encodes(
+        self, failed_job, config, tmp_path,
+    ):
+        from adr.models import TrackStatus
+
+        session, job = failed_job
+        _make_encoded(config, job, tmp_path, count=2)
+        job.tracks[1].status = TrackStatus.ERROR
+        _make_raw(config, job, count=2)
+        session.commit()
+
+        assert retry.plan(job, config)["resume"] == retry.RESUME_ENCODE
+
+    def test_a_failed_transfer_still_only_redoes_the_transfer(
+        self, failed_job, config, tmp_path,
+    ):
+        """The case this branch exists for, and the one the fix must not break:
+        every track encoded, and the move to the NAS is what failed."""
+        session, job = failed_job
+        _make_encoded(config, job, tmp_path, count=2)
+        session.commit()
+
+        result = retry.plan(job, config)
+        assert result["resume"] == retry.RESUME_TRANSFER
+        assert "no re-encoding" in result["reason"]

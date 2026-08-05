@@ -77,6 +77,19 @@ def destination_blocker(config) -> str | None:
         if not ok:
             return f"Plex library unusable: {error}"
 
+    # And the television library, which is where every series job actually
+    # goes — final_destination routes on content_type alone, and series mode
+    # stamps that at job creation, before this gate runs. It was never checked
+    # here, so a box set could pass preflight against a healthy film library
+    # and then be written onto the container's own disk, or fail on mkdir
+    # after the whole rip: exactly what this module exists to prevent.
+    if config.tv_path:
+        ok, error = check_destination(
+            config.tv_path, require_mount=config.require_completed_mount,
+        )
+        if not ok:
+            return f"TV library unusable: {error}"
+
     # When encoding is staged locally the scratch area needs room too,
     # otherwise the rip only fails later, at the staging step.
     if should_stage(config.plex_path or config.completed_path, config.stage_locally):

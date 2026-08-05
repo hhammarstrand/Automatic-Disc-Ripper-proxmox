@@ -158,6 +158,20 @@ cp -a "$TMP/src/." "$INSTALL_DIR/"
 find "$INSTALL_DIR" -mindepth 1 -maxdepth 1 ! -name completed \
     -exec chown -R "$RUN_USER:$RUN_USER" {} + 2>/dev/null || true
 chown "$RUN_USER:$RUN_USER" "$INSTALL_DIR" 2>/dev/null || true
+
+# The two directories systemd runs as root must not be writable by the service
+# user.
+#
+# adr-update.service has ExecStart=/opt/adr/scripts/update.sh and runs as uid 0.
+# The chown above recurses into scripts/, so without this the unprivileged web
+# UI — unauthenticated by design, on the LAN — could overwrite that file and
+# then ask for an update, and systemd would execute the new bytes as root.
+# ProtectSystem=full does not cover /opt, so nothing else stops it. That is the
+# whole privilege separation this application claims to have.
+chown -R root:root "$INSTALL_DIR/scripts" "$INSTALL_DIR/systemd" 2>/dev/null || true
+chmod 0755 "$INSTALL_DIR/scripts" 2>/dev/null || true
+chmod 0755 "$INSTALL_DIR"/scripts/*.sh 2>/dev/null || true
+chmod 0644 "$INSTALL_DIR"/systemd/* 2>/dev/null || true
 if mountpoint -q "$INSTALL_DIR/completed" 2>/dev/null; then
     msg_warn "$INSTALL_DIR/completed is a bind-mount — ownership left to the host."
     msg_warn "1.0 moves that mount to /mnt/media. On the Proxmox host, run:"
