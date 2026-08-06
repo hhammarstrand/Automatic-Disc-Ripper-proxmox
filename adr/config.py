@@ -7,6 +7,7 @@ This is the Linux/Proxmox build: paths default to /opt/adr and optical
 drives are addressed by device path (/dev/sr0) instead of drive letters.
 """
 
+import contextlib
 import logging
 import os
 from pathlib import Path
@@ -282,6 +283,26 @@ class Config:
     def as_dict(self) -> dict[str, Any]:
         """Return a copy of all settings."""
         return dict(self._data)
+
+    def effective_secrets(self) -> dict[str, str]:
+        """Every credential the application would actually use, by setting name.
+
+        Not the same as reading them out of :meth:`as_dict`. A key supplied
+        through the environment — which ``adr.service`` documents, right above
+        its ``EnvironmentFile`` line — is what the accessor returns and what
+        goes out over the network, while the file it was never written to still
+        holds an empty string. So the diagnostics bundle reported it as unset
+        and, worse, had no value to hunt for when scrubbing the log: a library
+        that printed the request URL would have leaked the one key the bundle
+        was most careful about.
+        """
+        found: dict[str, str] = {}
+        for name in ("tmdb_api_key", "plex_token", "notify_token", "notify_url"):
+            with contextlib.suppress(Exception):
+                value = getattr(self, name, "") or ""
+                if isinstance(value, str) and value.strip():
+                    found[name] = value.strip()
+        return found
 
     # ------------------------------------------------------------------ #
     # Typed accessors

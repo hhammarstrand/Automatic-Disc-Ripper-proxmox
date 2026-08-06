@@ -40,6 +40,8 @@ _popen = subprocess.Popen
 
 # <linux/cdrom.h>
 CDROM_DRIVE_STATUS = 0x5326
+CDS_NO_INFO = 0
+CDS_DISC_OK = 4
 CDROM_DISC_STATUS = 0x5327
 CDSL_CURRENT = 0x7FFFFFFF
 
@@ -167,7 +169,15 @@ def probe_drive(device: str, deep: bool = False) -> dict:
             ))
 
         # 5. A real read. Proves the cgroup allows more than open().
-        if fd is not None and status_code == 4:
+        #
+        # "The drive did not give a usable status" is not "no disc". Some USB
+        # enclosures answer CDS_NO_INFO or nothing at all, and this probe then
+        # skipped both remaining steps and declared the drive healthy — while
+        # the watcher, which falls back to the kernel's capacity, was ripping
+        # discs from it. Two answers to one question. A read that then fails
+        # with ENOMEDIUM is already reported properly.
+        maybe_loaded = status_code in (None, CDS_NO_INFO, CDS_DISC_OK)
+        if fd is not None and maybe_loaded:
             steps.append(_read_sector(fd, device))
         elif fd is not None:
             steps.append(_step(
@@ -176,7 +186,7 @@ def probe_drive(device: str, deep: bool = False) -> dict:
             ))
 
         if deep:
-            steps.append(_makemkv_scan(device, has_disc=(status_code == 4)))
+            steps.append(_makemkv_scan(device, has_disc=maybe_loaded))
 
         return _finish(device, steps)
     finally:
@@ -274,6 +284,10 @@ def _makemkv_scan(device: str, has_disc: bool, timeout: int | None = None) -> di
         proc = _popen(
             [binary, "-r", "--cache=1", "info", f"dev:{device}"],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            # Its own session, so the whole tree can be killed on timeout.
+            # Killing only the leader leaves a child holding stdout open, and
+            # the reader thread then waits on an EOF that never comes.
+            start_new_session=True,
         )
     except OSError as exc:
         return _step("MakeMKV scan", "fail", f"Could not run makemkvcon: {exc}")
@@ -291,9 +305,26 @@ def _makemkv_scan(device: str, has_disc: bool, timeout: int | None = None) -> di
     reader.start()
     reader.join(timeout)
 
+    # Whether the *reader* finished is the question, not proc.poll().
+    #
+    # The reader ends at EOF, which happens the moment makemkvcon closes its
+    # stdout — a fraction of a second before the process is reaped. Asking
+    # poll() right then gets None for a scan that finished perfectly well, and
+    # the probe reported "still scanning after 300s" for a drive that had
+    # answered. A short wait() settles it, and leaves no zombie either.
+    if not reader.is_alive():
+        with contextlib.suppress(subprocess.SubprocessError, OSError):
+            proc.wait(timeout=10)
+
     if reader.is_alive() or proc.poll() is None:
+        from adr.utils import kill_process_tree
+
+        # The tree, not the leader: a surviving child holds stdout open and
+        # the reader thread never reaches EOF.
         with contextlib.suppress(OSError):
-            proc.kill()
+            kill_process_tree(proc)
+        with contextlib.suppress(subprocess.SubprocessError, OSError):
+            proc.wait(timeout=10)
         reader.join(timeout=5)
 
         if lines:

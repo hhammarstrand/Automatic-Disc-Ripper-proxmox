@@ -25,6 +25,7 @@ continue, with skipping available for someone deliberately working through a
 large shelf.
 """
 
+import contextlib
 import logging
 from pathlib import Path
 
@@ -40,7 +41,7 @@ MATCH_LABEL = "label"
 VIDEO_SUFFIXES = (".mp4", ".mkv", ".m4v", ".avi")
 
 
-def _library_match(job, config) -> dict | None:
+def _library_match(job, config, session=None) -> dict | None:
     """A folder for this title already holding video at the destination.
 
     Uses the same naming that a rip would produce, so this is literally asking
@@ -73,6 +74,22 @@ def _library_match(job, config) -> dict | None:
         # An empty folder is a failed attempt, not a finished film.
         return None
 
+    # Whose files are these?
+    #
+    # A folder holding video is normally a film that is already in the library.
+    # But a job that failed or was cancelled during the transfer leaves its
+    # output exactly there — and calling that a duplicate means the retry is
+    # skipped, so the disc that failed once can never be ripped again without
+    # turning the setting off. The rip that produced these files knows whether
+    # it finished.
+    owner = _unfinished_owner(folder, session)
+    if owner is not None:
+        logger.info(
+            "%s holds files from job %s, which did not finish — not a duplicate",
+            folder, owner,
+        )
+        return None
+
     return {
         "kind": MATCH_LIBRARY,
         "job_id": None,
@@ -84,6 +101,35 @@ def _library_match(job, config) -> dict | None:
             f"{'…' if len(existing) > 3 else ''}."
         ),
     }
+
+
+
+def _unfinished_owner(folder: Path, session) -> int | None:
+    """The id of a job that wrote to *folder* and did not finish, if any.
+
+    Never raises: a duplicate check that fails is not a reason to abandon a
+    disc, and the honest answer when the database cannot be read is "no
+    evidence that these are leftovers".
+    """
+    if session is None:
+        return None
+    try:
+        wanted = str(Path(folder).resolve())
+        for job in (
+            session.query(Job)
+            .filter(Job.status != JobStatus.DONE)
+            .order_by(Job.id.desc())
+            .limit(50)
+        ):
+            for candidate in (job.output_path, job.plex_path):
+                if not candidate:
+                    continue
+                with contextlib.suppress(OSError):
+                    if str(Path(candidate).resolve()) == wanted:
+                        return job.id
+    except Exception:                              # noqa: BLE001 - never fatal
+        logger.debug("Could not check who owns %s", folder, exc_info=True)
+    return None
 
 
 def _tmdb_match(job, session) -> dict | None:
@@ -154,7 +200,7 @@ def find_duplicate(job, session, config) -> dict | None:
         return None
 
     for check in (
-        lambda: _library_match(job, config),
+        lambda: _library_match(job, config, session),
         lambda: _tmdb_match(job, session),
         lambda: _label_match(job, session),
     ):

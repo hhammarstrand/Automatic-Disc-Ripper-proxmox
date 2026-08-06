@@ -719,16 +719,65 @@ function escapeHtml(str) {
     return el.innerHTML;
 }
 
-function copyPath(path) {
-    navigator.clipboard.writeText(path).then(() => {
-        // Brief visual feedback on the button
-        const btn = event.target.closest('button');
-        if (btn) {
-            const orig = btn.innerHTML;
-            btn.innerHTML = '<i class="bi bi-check"></i>';
-            setTimeout(() => btn.innerHTML = orig, 1500);
-        }
-    });
+
+// Copying to the clipboard on a plain-http page.
+//
+// navigator.clipboard needs a secure context, and this application is served
+// over http on a LAN address by design — so every copy button here did nothing
+// at all, with no error, on the deployment the README describes. The diagnostics
+// page had already learned this and guarded; the rest had not.
+//
+// The button is passed in rather than read off the global `event`, which is
+// undefined in a module, in strict mode, and in any handler attached with
+// addEventListener.
+function copyToClipboard(text, btn, okLabel = '<i class="bi bi-check"></i>') {
+    const restore = (original) => setTimeout(() => { btn.innerHTML = original; }, 1500);
+
+    const confirmOnButton = () => {
+        if (!btn) return;
+        const original = btn.innerHTML;
+        btn.innerHTML = okLabel;
+        restore(original);
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text)
+            .then(confirmOnButton)
+            .catch(() => fallbackCopy(text, confirmOnButton));
+        return;
+    }
+    fallbackCopy(text, confirmOnButton);
+}
+
+// document.execCommand is deprecated and is the only thing that works without
+// a secure context. When even that fails the text is put where it can be
+// selected by hand, because a copy button that quietly does nothing is worse
+// than one that says it cannot.
+function fallbackCopy(text, onSuccess) {
+    const area = document.createElement('textarea');
+    area.value = text;
+    area.setAttribute('readonly', '');
+    area.style.position = 'fixed';
+    area.style.opacity = '0';
+    document.body.appendChild(area);
+    area.select();
+    let copied = false;
+    try {
+        copied = document.execCommand('copy');
+    } catch {
+        copied = false;
+    }
+    document.body.removeChild(area);
+    if (copied) {
+        onSuccess();
+    } else {
+        notify('This browser will not copy from a plain-http page. '
+            + 'Select the text and copy it by hand.', 'warning');
+    }
+}
+
+function copyPath(path, btn) {
+    copyToClipboard(path, btn || (window.event && window.event.target.closest('button')));
 }
 
 // ------------------------------------------------------------------ //
@@ -881,13 +930,34 @@ function searchSeriesShow() {
         .then(d => {
             if (d.error) { box.innerHTML = `<span class="text-danger small">${escapeHtml(d.error)}</span>`; return; }
             if (!d.results.length) { box.innerHTML = '<span class="text-secondary small">No shows found.</span>'; return; }
-            box.innerHTML = d.results.map(s => `
-                <button type="button" class="list-group-item list-group-item-action bg-transparent text-start"
-                        onclick="pickSeriesShow(${s.tmdb_id}, ${JSON.stringify(s.name)}, ${s.year || 'null'})">
-                    <strong>${escapeHtml(s.name)}</strong>
-                    <span class="text-secondary">${s.year ? '(' + s.year + ')' : ''}</span>
-                    <div class="small text-secondary">${escapeHtml((s.overview || '').slice(0, 140))}</div>
-                </button>`).join('');
+            // Built as elements, with the handler attached in JS.
+            //
+            // The template-string version put JSON.stringify(s.name) inside a
+            // double-quoted onclick attribute — and JSON.stringify wraps its
+            // own result in double quotes, so the attribute ended at the show
+            // name and every result in the list was a broken handler. Any show
+            // with an apostrophe or a quote in its title, which is most of the
+            // ones people search for.
+            box.replaceChildren(...d.results.map(s => {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className =
+                    'list-group-item list-group-item-action bg-transparent text-start';
+
+                const name = document.createElement('strong');
+                name.textContent = s.name;
+                const year = document.createElement('span');
+                year.className = 'text-secondary';
+                year.textContent = s.year ? ` (${s.year})` : '';
+                const overview = document.createElement('div');
+                overview.className = 'small text-secondary';
+                overview.textContent = (s.overview || '').slice(0, 140);
+
+                button.append(name, year, overview);
+                button.addEventListener('click', () =>
+                    pickSeriesShow(s.tmdb_id, s.name, s.year || null));
+                return button;
+            }));
             box.className = 'list-group';
         })
         .catch(err => { box.innerHTML = `<span class="text-danger small">${escapeHtml(err.message)}</span>`; });
@@ -1078,7 +1148,10 @@ function retryJob(jobId) {
         .then(r => r.json())
         .then(plan => {
             if (!plan.can_retry) {
-                notify(plan.reason, 'success');
+                // A refusal, not a success. Green and auto-hiding meant the
+                // reason a retry is impossible — usually that nothing is left
+                // on disk — flashed by in the colour used for "done".
+                notify(plan.reason, 'warning');
                 return;
             }
             confirmAction({
@@ -1105,12 +1178,11 @@ function copyErrorText() {
     const text = document.getElementById('errorModalText').textContent
         + '\n\n--- tool output ---\n'
         + (document.getElementById('errorModalLog')?.textContent || '');
-    navigator.clipboard.writeText(text).then(() => {
-        const btn = event.target.closest('button');
-        const orig = btn.innerHTML;
-        btn.innerHTML = '<i class="bi bi-check me-1"></i>Copied!';
-        setTimeout(() => btn.innerHTML = orig, 2000);
-    });
+    copyToClipboard(
+        text,
+        window.event && window.event.target.closest('button'),
+        '<i class="bi bi-check me-1"></i>Copied!',
+    );
 }
 
 // ------------------------------------------------------------------ //

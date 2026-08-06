@@ -196,16 +196,24 @@ def kill_process_tree(proc) -> bool:
         return False
 
 
-def unique_output_dir(base_dir: Path | str) -> Path:
+def unique_output_dir(base_dir: Path | str, merge: bool = False) -> Path:
     """Create base_dir; if it already holds finished video, append (2), (3) etc.
 
     Prevents output collision when two jobs produce the same Plex title. Both
     containers count: with transcoding off the earlier job left MKVs, and
     looking only for MP4s would write the second film into the first one's
     folder.
+
+    *merge* turns that off, for the one case where a folder already holding
+    finished video is the right place: the next disc of a season. Forking it
+    gave a six-disc box set ``Season 02``, ``Season 02 (2)`` … ``(6)`` with
+    four episodes in each. Episode filenames carry SxxEyy, so files that really
+    do collide are still visible individually.
     """
     base_dir = Path(base_dir)
     base_dir.mkdir(parents=True, exist_ok=True)
+    if merge:
+        return base_dir
     if not _holds_finished_video(base_dir):
         return base_dir
     for i in range(2, 100):

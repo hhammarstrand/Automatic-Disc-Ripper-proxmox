@@ -119,7 +119,7 @@
                          could not see without scrolling sideways. -->
                     <div class="small text-danger mt-1 job-reason"
                          role="button" style="cursor:pointer;"
-                         onclick="showError({{ job.id }}, '{{ job.display_title | e }}', {{ job.error_message | tojson }})">
+                         onclick="showError({{ job.id }}, {{ job.display_title | tojson }}, {{ job.error_message | tojson }})">
                         <i class="bi bi-exclamation-triangle me-1"></i>{{ job.error_message.strip().split('\n')[0][:200] }}
                     </div>
                     {% endif %}
@@ -129,7 +129,7 @@
                     {% if job.status and job.status.value == 'error' and job.error_message %}
                     <span class="badge bg-danger" role="button" style="cursor:pointer;"
                         title="{{ job.error_message[:120] }}"
-                        onclick="showError({{ job.id }}, '{{ job.display_title | e }}', {{ job.error_message | tojson }})">
+                        onclick="showError({{ job.id }}, {{ job.display_title | tojson }}, {{ job.error_message | tojson }})">
                         <i class="bi bi-exclamation-triangle me-1"></i>Error
                     </span>
                     {% else %}
@@ -163,12 +163,12 @@
                     {% if job.plex_path %}
                     <span class="badge bg-success me-1"><i class="bi bi-collection-play"></i> Plex</span>
                     <span class="text-break small text-secondary" title="{{ job.plex_path }}">{{ job.plex_path }}</span>
-                    <button class="btn btn-outline-light btn-sm ms-1 py-0 px-1" onclick="copyPath('{{ job.plex_path | e }}')" title="Copy path">
+                    <button class="btn btn-outline-light btn-sm ms-1 py-0 px-1" onclick="copyPath({{ job.plex_path | tojson }})" title="Copy path">
                         <i class="bi bi-clipboard"></i>
                     </button>
                     {% elif job.output_path %}
                     <span class="text-break small text-secondary" title="{{ job.output_path }}">{{ job.output_path }}</span>
-                    <button class="btn btn-outline-light btn-sm ms-1 py-0 px-1" onclick="copyPath('{{ job.output_path | e }}')" title="Copy path">
+                    <button class="btn btn-outline-light btn-sm ms-1 py-0 px-1" onclick="copyPath({{ job.output_path | tojson }})" title="Copy path">
                         <i class="bi bi-clipboard"></i>
                     </button>
                     {% endif %}
@@ -184,7 +184,7 @@
                              "worked" but produced the wrong title is diagnosed the
                              same way, from what the tools actually said. -->
                         <button class="btn btn-outline-secondary btn-sm"
-                                onclick="showError({{ job.id }}, '{{ job.display_title | e }}', {{ (job.error_message or '') | tojson }})"
+                                onclick="showError({{ job.id }}, {{ job.display_title | tojson }}, {{ (job.error_message or '') | tojson }})"
                                 title="Tool output for this job">
                             <i class="bi bi-terminal"></i>
                         </button>
@@ -205,7 +205,7 @@
                             <i class="bi bi-arrow-repeat"></i>
                         </button>
                         {% endif %}
-                        <button class="btn btn-outline-info btn-sm" onclick="openRematchModal({{ job.id }}, '{{ job.display_title | e }}')" title="Re-match against TMDb">
+                        <button class="btn btn-outline-info btn-sm" onclick="openRematchModal({{ job.id }}, {{ job.display_title | tojson }})" title="Re-match against TMDb">
                             <i class="bi bi-search"></i>
                         </button>
                         {% if job.status and job.status.value in ('done', 'error', 'cancelled') %}

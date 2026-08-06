@@ -1,5 +1,54 @@
 # Changelog
 
+## 1.21.0
+
+Every remaining finding from the review, fixed. Thirty of them, across the
+naming rules, the encoder settings, the device probes, the templates, the
+shell scripts and the data layer.
+
+**Television took the worst of it.** Disc 2 of a season landed in
+`Season 02 (2)` — the collision rule is a film rule, and a folder already
+taken means *the previous disc of this season*, which is exactly where the
+episodes belong. A six-disc box set produced six season folders with four
+episodes in each. Season 0 became season 1, so a specials disc was named into
+the real first season where the numbers collide with actual episodes. And two
+drives fed discs a minute apart both produced S02E01–E04: the numbers were
+read when the disc went in and only spent once the rip finished, so the read
+and the write were minutes apart with another drive in between. They are
+claimed atomically now, before the plan is built.
+
+**Extras were flattened out of `Other/` by every path that moved a folder**,
+so the row named a file that did not exist — the delete preview could not see
+them and Play pointed at nothing. With transcoding off they were never created
+at all: the passthrough path made the output directory and not the file's
+parent, so the move failed for every extra and took the job with it.
+
+**`_cleanup_raw` deleted the titles the job log had just promised would
+stay.** When "main feature only" cannot scan the disc it rips everything and
+encodes the film, and says the rest are still in `raw/`. They were gone by the
+time anyone looked. The evidence that titles were kept on purpose is
+arithmetic — more files on disk than the job has tracks — so it needs no
+schema change and cannot drift from the decision that produced it.
+
+**"Encode again" left the previous copy in the library**, referenced by no job
+row and therefore invisible to the delete preview. The finished-file path now
+removes each superseded file once its replacement exists and has bytes in it.
+
+**Four separate places built JavaScript by concatenating data**, and a film
+called *Ocean's Eleven* broke each of them. Jinja's `|e` emits `&#39;`, which
+the browser turns back into an apostrophe before the JS parser sees it. And
+every copy button did nothing at all over plain http, which is how this
+application is served by design.
+
+Also: `PRAGMA busy_timeout` silently overrode the configured lock timeout with
+one six times shorter; a cancelled attempt's leftovers counted as a finished
+film, so the disc that failed once could never be ripped again; the drive
+probe called "the drive did not answer" the same as "no disc" while the
+watcher did not; a language code outside the ffmpeg backend's table was
+accepted and then matched nothing on one of the two encoders; cancelling an
+audio CD was recorded as a failure and sent a notification; and the fstab
+marker the uninstaller searches for was never written by the installer.
+
 ## 1.20.1
 
 The rest of the review finished — 63 agents, 32 findings that survived a

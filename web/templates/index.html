@@ -282,7 +282,7 @@
                             <!-- Actions -->
                             <div class="col-auto d-flex flex-column gap-1 align-items-end">
                                 <div class="d-flex gap-1">
-                                    <button class="btn btn-outline-info btn-sm" onclick="openRematchModal({{ job.id }}, '{{ job.display_title | e }}')" title="Change movie (TMDb)">
+                                    <button class="btn btn-outline-info btn-sm" onclick="openRematchModal({{ job.id }}, {{ job.display_title | tojson }})" title="Change movie (TMDb)">
                                         <i class="bi bi-search"></i> Match
                                     </button>
                                     <button class="btn btn-outline-danger btn-sm" onclick="cancelJob({{ job.id }})">
@@ -397,7 +397,7 @@
                                     <td>
                                         {% if job.status and job.status.value == 'error' and job.error_message %}
                                         <span class="badge bg-danger" role="button" style="cursor:pointer;"
-                                            onclick="showError({{ job.id }}, '{{ job.display_title | e }}', {{ job.error_message | tojson }})">
+                                            onclick="showError({{ job.id }}, {{ job.display_title | tojson }}, {{ job.error_message | tojson }})">
                                             <i class="bi bi-exclamation-triangle me-1"></i>Error
                                         </span>
                                         {% else %}

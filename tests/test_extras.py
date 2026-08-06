@@ -146,3 +146,63 @@ def test_the_encoder_creates_the_extras_subfolder(tmp_path, monkeypatch):
     # then, because that is the part HandBrake cannot do for itself.
     assert (tmp_path / "out" / "The Film (1999)" / EXTRAS_FOLDER).is_dir()
     assert result.output_path.name == "Extra 1.mp4"
+
+
+class TestExtrasSurviveEveryPathToTheLibrary:
+    """`Other/Extra 1.mp4` has a subfolder in its name, and three places
+    assumed a filename was just a filename."""
+
+    def test_passthrough_creates_the_extras_subfolder(self, tmp_path):
+        """HandBrake's path has created it since extras existed. The
+        passthrough path never did, so turning transcoding off failed the move
+        for every extra on the disc — and with it the whole job."""
+        from adr.pipeline import EncoderWorker, EncodeTask
+
+        source = tmp_path / "raw" / "title_t01.mkv"
+        source.parent.mkdir(parents=True)
+        source.write_bytes(b"a trailer")
+
+        task = EncodeTask(
+            job_id=1, track_id=1, input_path=source,
+            output_dir=tmp_path / "out" / "The Film (1999)",
+            output_filename=f"{EXTRAS_FOLDER}/Extra 1",
+            passthrough=True,
+        )
+        result = EncoderWorker._passthrough(task)
+        assert result.success, result.error
+        assert result.output_path == (
+            tmp_path / "out" / "The Film (1999)" / EXTRAS_FOLDER / "Extra 1.mkv"
+        )
+
+    def test_the_transfer_keeps_the_subfolder_in_the_track_path(self, tmp_path):
+        """Rebuilding the path as `dest / name` flattened the extras out of
+        Other/, so the row named a file that did not exist: the delete preview
+        could not see them and Play pointed at nothing."""
+        import types
+
+        from adr.pipeline import transfer_to_destination
+
+        staged = tmp_path / "staging" / "The Film (1999)"
+        (staged / EXTRAS_FOLDER).mkdir(parents=True)
+        (staged / "The Film (1999).mp4").write_bytes(b"film")
+        (staged / EXTRAS_FOLDER / "Extra 1.mp4").write_bytes(b"trailer")
+
+        tracks = [
+            types.SimpleNamespace(output_path=str(staged / "The Film (1999).mp4")),
+            types.SimpleNamespace(
+                output_path=str(staged / EXTRAS_FOLDER / "Extra 1.mp4")),
+        ]
+        job = types.SimpleNamespace(
+            id=3, content_type="movie", output_path=str(staged),
+            tracks=tracks, error_message=None,
+        )
+        library = tmp_path / "Films"
+        library.mkdir()
+
+        assert transfer_to_destination(
+            job, types.SimpleNamespace(commit=lambda: None), library) is True
+
+        assert tracks[1].output_path.endswith(f"{EXTRAS_FOLDER}/Extra 1.mp4")
+        from pathlib import Path
+        assert Path(tracks[0].output_path).is_file()
+        assert Path(tracks[1].output_path).is_file()

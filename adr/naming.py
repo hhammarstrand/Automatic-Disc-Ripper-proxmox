@@ -266,7 +266,11 @@ def plan_output(job, file_count: int, fallback_title: str = "",
     count = max(0, int(file_count))
 
     if (job.content_type or "movie") == "series":
-        season = int(job.series_season or 1)
+        # `or 1` would turn season 0 into season 1, and season 0 is a real
+        # season: Plex files specials there. A specials disc would have been
+        # named into Season 01 among the actual first-season episodes, where
+        # the episode numbers then collide with real ones.
+        season = int(1 if job.series_season is None else job.series_season)
         first = int(job.series_first_episode or 1)
         numbers = episode_numbers(count, first)
         return OutputPlan(

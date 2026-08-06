@@ -301,6 +301,10 @@ if compgen -G "/dev/dri/renderD*" >/dev/null 2>&1; then
         fi
     done
     if [[ ${#gpu_driver_choices[@]} -gt 0 && "$gpu_have_driver" -eq 0 ]]; then
+        # The index is often months stale in a container that has only ever
+        # been updated through this script, and apt-get install then fails on
+        # every name with 404. Once, and only when there is something to fetch.
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq >/dev/null 2>&1 || true
         for pkg in "${gpu_driver_choices[@]}"; do
             if DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "$pkg" \
                     >/dev/null 2>&1; then
@@ -329,6 +333,11 @@ if compgen -G "/dev/dri/renderD*" >/dev/null 2>&1; then
     if [[ ${#gpu_installed[@]} -gt 0 ]]; then
         msg_ok "GPU media stack installed: ${gpu_installed[*]}"
         msg_info "  Settings → Encoding → Test encoder proves it by encoding two seconds."
+    elif [[ "$gpu_have_driver" -eq 0 && ${#gpu_driver_choices[@]} -gt 0 ]]; then
+        # Silence here read as "nothing needed doing", which is the opposite of
+        # what it meant: the GPU is present and none of its packages installed.
+        msg_warn "No GPU media package could be installed — encoding stays on the CPU."
+        msg_warn "    apt-get update && apt-get install -y ${gpu_driver_choices[0]}"
     fi
 fi
 

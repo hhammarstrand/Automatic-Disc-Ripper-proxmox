@@ -685,7 +685,12 @@ class TestHearingTheRightLanguage:
         — the track some hardware cannot decode from an MP4, which is the
         silent film this whole arrangement exists to prevent."""
         plan = self._plan(monkeypatch, tmp_path, self.SWEDISH_DISC, "swe")
-        assert len([a for a in plan if a.startswith("-disposition:")]) == 1
+        # One default, and the other explicitly cleared. ffmpeg copies the
+        # source's dispositions, so the disc's own default flag arrived with
+        # the surround track — setting one without clearing the other left
+        # both marked default and a player free to pick either.
+        assert plan[plan.index("-disposition:a:0") + 1] == "default"
+        assert plan[plan.index("-disposition:a:1") + 1] == "0"
 
     @pytest.mark.parametrize("tag,wanted", [
         ("swe", "sv"), ("swe", "swe"), ("ger", "de"), ("deu", "ger"),

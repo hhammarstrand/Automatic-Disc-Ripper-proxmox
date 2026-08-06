@@ -298,3 +298,59 @@ class TestTheToastsSayWhatTheyMean:
         body = Path("web/static/js/app.js").read_text()
         autohide = re.search(r"autohide:\s*(.+)", body).group(1)
         assert "'danger'" in autohide and "'warning'" in autohide
+
+
+class TestValuesFromDataNeverBreakTheHandler:
+    """Four separate places built JavaScript by string-concatenating data.
+
+    A film called "Ocean's Eleven" was enough to break each of them: Jinja's
+    |e emits &#39;, which the browser turns back into an apostrophe *before*
+    the JS parser sees it, so the string literal ended early and the whole
+    onclick was a syntax error. The button then did nothing, with an error
+    only visible in the console.
+    """
+
+    TEMPLATES = ("web/templates/history.html", "web/templates/index.html")
+
+    def test_no_quoted_escape_filter_survives_in_a_handler(self):
+        for path in self.TEMPLATES:
+            text = Path(path).read_text()
+            assert "| e }}'" not in text, (
+                f"{path}: a value is quoted into JS with |e again — use |tojson"
+            )
+
+    def test_the_handlers_use_tojson(self):
+        for path in self.TEMPLATES:
+            assert "| tojson }}" in Path(path).read_text()
+
+    def test_the_show_search_builds_elements_not_markup(self):
+        """JSON.stringify wraps its result in double quotes, which terminated
+        the double-quoted attribute it was being written into."""
+        source = Path("web/static/js/app.js").read_text()
+        start = source.index("function searchSeriesShow")
+        body = source[start:start + 3000]
+        assert "onclick=" not in body, (
+            "the show list builds inline handlers from data again"
+        )
+        assert "addEventListener('click'" in body
+
+    def test_the_gpu_pairing_is_not_json_in_an_attribute(self):
+        """escapeHtml does not escape the double quote, so JSON in a value
+        attribute ended at its first key."""
+        source = Path("web/templates/doctor.html").read_text()
+        assert "escapeHtml(JSON.stringify(" not in source
+        assert "hbGpuPairings[" in source
+
+    def test_copying_works_without_a_secure_context(self):
+        """navigator.clipboard is undefined over plain http, which is how this
+        application is served by design — every copy button did nothing."""
+        source = Path("web/static/js/app.js").read_text()
+        assert "window.isSecureContext" in source
+        assert "function copyToClipboard" in source
+        assert "execCommand" in source
+
+    def test_a_retry_refusal_is_not_reported_as_success(self):
+        source = Path("web/static/js/app.js").read_text()
+        start = source.index("function retryJob")
+        body = source[start:start + 800]
+        assert "notify(plan.reason, 'success')" not in body

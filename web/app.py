@@ -1021,11 +1021,20 @@ def _register_api_routes(app: Flask) -> None:
             out = Path(job.output_path)
             files = []
             if out.is_dir():
-                for f in sorted(out.glob("*.mp4")):
-                    files.append({
-                        "name": f.name,
-                        "size_mb": round(f.stat().st_size / BYTES_PER_MB, 1),
-                    })
+                # Both containers: with transcoding off a finished job holds
+                # MKVs, and listing only MP4s left the file list and the Play
+                # button empty on a job that had worked perfectly.
+                from adr.naming import finished_files
+
+                for f in finished_files(out):
+                    try:
+                        size_mb = round(f.stat().st_size / BYTES_PER_MB, 1)
+                    except OSError:
+                        # Deleted between the listing and the stat. One
+                        # missing file is not a reason to answer the whole
+                        # request with a 500 and an HTML error page.
+                        continue
+                    files.append({"name": f.name, "size_mb": size_mb})
             return jsonify({"files": files, "title": job.display_title})
         finally:
             session.close()
@@ -1042,7 +1051,10 @@ def _register_api_routes(app: Flask) -> None:
             # Sanitise filename to prevent path traversal
             safe_name = Path(filename).name
             file_path = out / safe_name
-            if not file_path.exists() or file_path.suffix.lower() != ".mp4":
+            from adr.naming import OUTPUT_SUFFIXES
+
+            if (not file_path.exists()
+                    or file_path.suffix.lower() not in OUTPUT_SUFFIXES):
                 abort(404)
             # Ensure the resolved path is still inside the output dir
             if not file_path.resolve().is_relative_to(out.resolve()):

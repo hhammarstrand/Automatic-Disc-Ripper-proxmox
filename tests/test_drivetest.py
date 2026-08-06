@@ -197,9 +197,26 @@ class FakePopen:
     def poll(self):
         return self.returncode
 
+    def wait(self, timeout=None):
+        """Reap the child, as the probe now does once its reader hits EOF.
+
+        A real process closes stdout a fraction before it is reaped, so asking
+        poll() at EOF returned None for a scan that had finished and the probe
+        reported "still scanning" for a drive that had answered.
+        """
+        if self.returncode is None:
+            self.returncode = self._final
+        return self.returncode
+
     def kill(self):
         self.killed = True
         self.returncode = -9
+
+    # kill_process_tree reaches for these on a real Popen.
+    pid = 4242
+
+    def send_signal(self, _sig):
+        self.kill()
 
 
 class TestMakeMkvScan:

@@ -109,23 +109,45 @@ def apply_to(job, config) -> bool:
     return True
 
 
-def advance(config, episode_count: int) -> dict:
-    """Move the counter past the episodes this disc produced.
+def take_episodes(config, episode_count: int) -> int | None:
+    """Claim *episode_count* numbers and return the first, atomically.
 
-    Called once the tracks are queued, which is the moment the numbers are
-    actually spent. Doing it at insert time would mean guessing the count;
-    doing it at completion would let two drives hand out the same numbers.
+    The read and the write have to be one step. ``apply_to`` stamps
+    ``series_first_episode`` on the job when the disc goes in, but the counter
+    only moved once the rip had finished — so two drives fed discs a minute
+    apart both read the same value and both produced S02E01–E04, one silently
+    overwriting the other in the same season folder. Two drives is the setup
+    this application documents for a box set.
+
+    Returns None when series mode is off or the count is not positive, in
+    which case nothing is claimed.
     """
     if not is_active(config) or episode_count <= 0:
-        return state(config)
+        return None
 
     with _lock:
-        current = int(getattr(config, "series_mode_next_episode", 1) or 1)
+        first = int(getattr(config, "series_mode_next_episode", 1) or 1)
         discs = int(getattr(config, "series_mode_discs", 0) or 0)
         config.update({
-            "series_mode_next_episode": current + int(episode_count),
+            "series_mode_next_episode": first + int(episode_count),
             "series_mode_discs": discs + 1,
         })
+    logger.info(
+        "Series mode: episodes %d-%d claimed", first, first + episode_count - 1,
+    )
+    return first
+
+
+def advance(config, episode_count: int) -> dict:
+    """Claim the numbers and report the state that follows.
+
+    Kept as the reporting form of :func:`take_episodes`, which is what does
+    the work. Callers that need to know *which* numbers they got must use
+    take_episodes: reading the state afterwards is the race this replaced.
+    """
+    if take_episodes(config, episode_count) is None:
+        return state(config)
+
     new = state(config)
     logger.info(
         "Series mode: %d episode(s) taken, next disc starts at episode %d",

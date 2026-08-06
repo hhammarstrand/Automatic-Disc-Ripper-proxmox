@@ -138,3 +138,52 @@ class TestTheRulesThatNeedTwoSettings:
         """Two complaints about one mistake is one complaint too many."""
         assert settingsrules.cross_check(
             {"series_min_minutes": "soon"}, self._config()) == []
+
+
+class TestTheDrivesFieldCannotBeCorrupted:
+    """The field round-tripped a Python list through the template, so a saved
+    list came back as "['/dev/sr0', '/dev/sr1']" and the next save split *that*
+    on commas. The watcher then had device paths made of brackets and quotes,
+    and simply never saw a disc — with nothing on any page saying why."""
+
+    def test_auto_is_fine(self):
+        assert settingsrules.check({"drives": "auto"}) == []
+
+    def test_empty_is_fine(self):
+        assert settingsrules.check({"drives": ""}) == []
+
+    def test_a_list_of_device_paths_is_fine(self):
+        assert settingsrules.check({"drives": ["/dev/sr0", "/dev/sr1"]}) == []
+
+    def test_the_corrupted_shape_is_refused(self):
+        assert settingsrules.check({"drives": ["['/dev/sr0',", "'/dev/sr1']"]})
+
+    def test_a_bare_string_that_is_not_auto_is_refused(self):
+        assert settingsrules.check({"drives": "/dev/sr0"})
+
+    def test_an_empty_list_is_refused(self):
+        """"Watch nothing" is what "auto" with no drives means; an empty list
+        is a form that lost its value."""
+        assert settingsrules.check({"drives": []})
+
+
+class TestALanguageBothEncodersCanHonour:
+    """HandBrake resolves any ISO code; the ffmpeg backend matches against a
+    table. A code outside it produced a Swedish film under one encoder and an
+    English one under the other, with nothing saying why."""
+
+    def test_the_common_codes_pass(self):
+        for code in ("swe", "eng", "sv", "en", "ger", "fre", "nor"):
+            assert settingsrules.check({"audio_language": code}) == [], code
+
+    def test_empty_passes(self):
+        assert settingsrules.check({"audio_language": ""}) == []
+
+    def test_a_code_the_ffmpeg_backend_cannot_match_is_refused(self):
+        problems = settingsrules.check({"audio_language": "xy"})
+        assert problems
+        assert "both encoders" in problems[0]
+
+    def test_the_message_says_what_would_work(self):
+        problems = settingsrules.check({"audio_language": "zzz"})
+        assert "swe" in problems[0]

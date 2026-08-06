@@ -268,7 +268,13 @@ def get_engine():
         def _set_sqlite_wal(dbapi_conn, connection_record):
             cursor = dbapi_conn.cursor()
             cursor.execute("PRAGMA journal_mode=WAL")
-            cursor.execute("PRAGMA busy_timeout=5000")
+            # The same 30 seconds the connect args ask for, three lines up.
+            # pysqlite's `timeout` *is* busy_timeout, so setting a smaller one
+            # here silently replaced it — a writer that lost a lock gave up
+            # after five seconds instead of thirty, which under three encoder
+            # workers and the dashboard's polling is the difference between a
+            # slow commit and "database is locked".
+            cursor.execute("PRAGMA busy_timeout=30000")
             cursor.close()
     return _engine
 

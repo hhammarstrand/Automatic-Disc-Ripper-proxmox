@@ -375,9 +375,17 @@ def _make_sample(config, workdir: Path) -> tuple[Path | None, str]:
 
 
 def _wanted_language(config) -> str:
-    from adr.vaapi import normalise_language
+    """The language a real encode would ask for.
 
-    return normalise_language(getattr(config, "audio_language", "") or "")
+    Both encoders go through encodingsettings.language(), which falls back to
+    the HandBrake preset when the setting is blank. Reading only the setting
+    tagged the sample "und" on every install that had chosen its language in
+    the preset — so the probe exercised the "no language wanted" path while a
+    real encode took the other one.
+    """
+    from adr.encodingsettings import language
+
+    return language(config)
 
 
 def _try_encoder(

@@ -466,13 +466,22 @@ function offerSoftware() {
     .catch(() => {});
 }
 
+
+// The pairings the encoder test found, kept in JS rather than in an
+// attribute — see the note where the options are built.
+let hbGpuPairings = [];
 function offerHandBrakeGpu(pairings) {
   const select = document.getElementById('hbGpuPairing');
-  select.innerHTML = pairings.map(p => {
+  // The index, not the object. escapeHtml handles & < > and not the double
+  // quote, so JSON in an attribute value terminated the attribute at its first
+  // key and JSON.parse then failed on the fragment that survived — every
+  // pairing unusable. Keeping the objects in JS avoids the question entirely.
+  hbGpuPairings = pairings;
+  select.innerHTML = pairings.map((p, i) => {
     const label = p.driver
       ? `${p.encoder} — with the ${p.driver} driver`
       : `${p.encoder}`;
-    return `<option value="${escapeHtml(JSON.stringify(p))}">${escapeHtml(label)}</option>`;
+    return `<option value="${i}">${escapeHtml(label)}</option>`;
   }).join('');
   document.getElementById('encoderHbGpu').classList.remove('d-none');
 }
@@ -480,7 +489,7 @@ function offerHandBrakeGpu(pairings) {
 function useHandBrakeGpu() {
   const btn = document.getElementById('useHbGpuBtn');
   const status = document.getElementById('hbGpuStatus');
-  const pairing = JSON.parse(document.getElementById('hbGpuPairing').value);
+  const pairing = hbGpuPairings[document.getElementById('hbGpuPairing').selectedIndex];
   const original = btn.innerHTML;
   btn.disabled = true;
   btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Testing…';
@@ -709,6 +718,14 @@ function startUpdate(btn) {
         return;
       }
       pollUpdate();
+    })
+    .catch(err => {
+      // Without this the button stayed disabled with a spinner on it and no
+      // message — indistinguishable from an update that is running.
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-download me-1"></i>Update now';
+      document.getElementById('updateBox').insertAdjacentHTML('beforeend',
+        `<div class="text-danger small mt-2">Could not ask for an update: ${escapeHtml(err.message)}</div>`);
     });
 }
 

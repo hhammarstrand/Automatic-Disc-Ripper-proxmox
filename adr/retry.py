@@ -189,10 +189,12 @@ def requeue_encode(job, session, config, encode_queue) -> int:
     staging = should_stage(dest_parent, config.stage_locally)
     if staging:
         final_dir = dest_parent
-        output_dir = unique_output_dir(Path(config.staging_path) / plan.folder)
+        output_dir = unique_output_dir(
+            Path(config.staging_path) / plan.folder, merge=plan.is_series,
+        )
     else:
         final_dir = None
-        output_dir = unique_output_dir(dest_parent / plan.folder)
+        output_dir = unique_output_dir(dest_parent / plan.folder, merge=plan.is_series)
 
     job.output_path = str(output_dir)
     job.status = JobStatus.ENCODING

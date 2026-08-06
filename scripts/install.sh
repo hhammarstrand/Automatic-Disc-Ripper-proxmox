@@ -310,6 +310,12 @@ if [[ -n "$GITHUB_TOKEN" ]]; then
 fi
 if git clone --depth 1 --branch "$ADR_BRANCH" "$CLONE_URL" "$TMP_SRC/adr" >/dev/null 2>&1; then
     msg_ok "Cloned $ADR_REPO_URL ($ADR_BRANCH)"
+    # Record the commit while .git is still here. It is the only thing that can
+    # answer "am I up to date?" from a working tree with no checkout — and this
+    # path, the normal host-driven install, never wrote it, so every fresh
+    # container reported its version as unknown and the Doctor page offered an
+    # update it could not tell had already been applied.
+    git -C "$TMP_SRC/adr" rev-parse HEAD > "$TMP_SRC/adr/.commit" 2>/dev/null || true
     TARBALL="$TMP_SRC/adr-src.tar.gz"
     tar -C "$TMP_SRC/adr" --exclude='.git' -czf "$TARBALL" .
     pct exec "$CT_ID" -- mkdir -p /opt/adr

@@ -448,6 +448,19 @@ def _eject_ioctl(drive: str) -> str:
                 os.close(fd)
 
 
+def forget_blkid_backoff(device: str) -> None:
+    """Drop the "blkid timed out here" note for *device*.
+
+    The backoff is armed when blkid blocks on a busy drive — mid-rip, or
+    spinning up — and it was keyed on elapsed time alone. So a disc ejected
+    and a new one put in ten seconds later inherited the previous disc's
+    silence: the label came back None, and the job was named from the disc
+    that was no longer in the drive. A disc change means the condition that
+    armed it is over, whatever the clock says.
+    """
+    _blkid_timed_out.pop(device, None)
+
+
 def eject_drive(drive: str) -> bool:
     """Eject the disc in the given drive (e.g. "/dev/sr0").
 
@@ -461,6 +474,7 @@ def eject_drive(drive: str) -> bool:
     reason = _eject_ioctl(drive)
     if not reason:
         logger.info("Ejected disc from drive %s", drive)
+        forget_blkid_backoff(drive)
         return True
     logger.debug("Eject ioctl on %s failed (%s) — trying the eject command", drive, reason)
 
@@ -471,6 +485,7 @@ def eject_drive(drive: str) -> bool:
         )
         if result.returncode == 0:
             logger.info("Ejected disc from drive %s", drive)
+            forget_blkid_backoff(drive)
             return True
         logger.error(
             "eject failed for %s: %s (the kernel refused it too: %s)", drive,
@@ -625,8 +640,12 @@ class DiscWatcher:
 
                 for drive in drives:
                     has_disc = _has_media(drive)
-                    volume_name = _blkid_label(drive) if has_disc else None
                     was_present = self._disc_present.get(drive, False)
+                    if has_disc != was_present:
+                        # The disc changed, so whatever made blkid block is
+                        # over. Asking again now is the whole point.
+                        forget_blkid_backoff(drive)
+                    volume_name = _blkid_label(drive) if has_disc else None
 
                     if has_disc and not was_present:
                         logger.info("Disc inserted in %s: %s", drive, volume_name)

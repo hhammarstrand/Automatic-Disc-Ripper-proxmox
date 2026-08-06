@@ -304,7 +304,13 @@ def _preset_shaped_plan(streams: list[dict], language: str) -> list[str]:
     # The stereo track leads. Flagging the surround one as well would let a
     # player choose the AC-3 — the track some hardware cannot decode from an
     # MP4, and the silent film this arrangement exists to prevent.
-    args += ["-disposition:a:0", "default"]
+    #
+    # And the surround one is explicitly cleared, because ffmpeg copies the
+    # source's dispositions: the disc's own default flag came along with the
+    # track, so both were marked default and a player was free to pick either.
+    # Setting one without clearing the other was a no-op on exactly the discs
+    # this matters for.
+    args += ["-disposition:a:0", "default", "-disposition:a:1", "0"]
     return args
 
 

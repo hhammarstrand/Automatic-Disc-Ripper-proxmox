@@ -223,30 +223,40 @@ class TestTheDriverIsAChoiceNotAList:
             if not line.lstrip().startswith("#")
         )
 
-    def _after_the_drivers(self, code: str, lines: int = 25) -> str:
-        """The window of code that decides which VA-API driver gets installed.
+    #: Where each script decides which VA-API driver to install, and how far
+    #: that decision reaches. Spelled out per file rather than found by a
+    #: parser: the three express the same choice three ways — a bash array, a
+    #: plain word list, and a quoted `sh -c` body — and a parser clever enough
+    #: for all three would be a fourth thing to keep correct.
+    DRIVER_LOOP = {
+        "scripts/update.sh": ('for pkg in "${gpu_driver_choices[@]}"', "done"),
+        "scripts/install-container.sh": (
+            "for pkg in intel-media-va-driver-non-free", "done"),
+        "scripts/adr-doctor.sh": ("for pkg in $1", "done"),
+    }
 
-        Crude on purpose. The three scripts express the same choice three
-        ways — a bash array, a plain word list, and a quoted `sh -c` body —
-        and a parser clever enough for all three would be a third thing to
-        keep correct.
-        """
-        rows = code.splitlines()
-        # The *last* mention, not the first: adr-doctor names the packages in
-        # a variable well above the loop that installs them.
-        first = max(
-            i for i, row in enumerate(rows)
-            if "intel-media-va-driver-non-free" in row
-            or 'in $1' in row or "gpu_driver_choices" in row
-        )
-        return "\n".join(rows[first:first + lines])
+    def _driver_loop(self, path: str) -> str:
+        code = self._code(path)
+        opener, closer = self.DRIVER_LOOP[path]
+        start = code.index(opener)
+        end = code.index(closer, start)
+        return code[start:end]
 
     def test_the_driver_choice_stops_at_the_first_that_installs(self):
         """Without a break the second install removes the first — and the
         second is the stripped-down build."""
         for path in self.SCRIPTS:
-            window = self._after_the_drivers(self._code(path))
-            assert "break" in window, f"{path}: the driver choice runs to the end"
+            assert "break" in self._driver_loop(path), (
+                f"{path}: the driver choice runs to the end"
+            )
+
+    def test_the_runtimes_are_not_inside_that_loop(self):
+        """They do not conflict, so stopping at the first would install one of
+        the two Quick Sync runtimes and skip the other."""
+        for path in self.SCRIPTS:
+            assert "libmfx1" not in self._driver_loop(path), (
+                f"{path}: a runtime is inside the driver choice"
+            )
 
     def test_i965_is_the_last_choice_not_the_first(self):
         """It is for pre-Broadwell hardware. Beside iHD it only gives libva

@@ -383,3 +383,173 @@ class TestABoxSetIsNeverReducedToOneEpisode:
         plan = plan_output(show, len(self.EPISODES), main_index=0)
         assert len(plan.filenames) == len(self.EPISODES)
         assert all(EXTRAS_FOLDER not in name for name in plan.filenames)
+
+
+class TestASeasonIsMergedNotForked:
+    """Disc 2 of a season landed in "Season 02 (2)".
+
+    The collision rule is a film rule: a folder already taken means a different
+    film, so it is forked. A season folder already taken means *the previous
+    disc of this season*, which is exactly where these episodes belong — and a
+    six-disc box set became Season 02, Season 02 (2) … (6), four episodes in
+    each. The filenames already carry SxxEyy, so merging is safe and any real
+    collision is still visible per file.
+    """
+
+    def test_unique_output_dir_merges_when_asked(self, tmp_path):
+        from adr.utils import unique_output_dir
+
+        season = tmp_path / "The Wire (2002)" / "Season 02"
+        season.mkdir(parents=True)
+        (season / "The Wire (2002) - S02E01.mp4").write_bytes(b"x")
+
+        assert unique_output_dir(season, merge=True) == season
+
+    def test_and_still_forks_for_a_film(self, tmp_path):
+        """Unchanged: two films in one folder is one Plex entry with two
+        movies in it."""
+        from adr.utils import unique_output_dir
+
+        folder = tmp_path / "The Matrix (1999)"
+        folder.mkdir()
+        (folder / "The Matrix (1999).mp4").write_bytes(b"x")
+
+        assert unique_output_dir(folder).name == "The Matrix (1999) (2)"
+
+    def test_the_transfer_merges_a_season(self, tmp_path):
+        import types
+
+        from adr.pipeline import transfer_to_destination
+
+        library = tmp_path / "TV"
+        existing = library / "The Wire (2002)" / "Season 02"
+        existing.mkdir(parents=True)
+        (existing / "The Wire (2002) - S02E01.mp4").write_bytes(b"one")
+
+        staged = tmp_path / "staging" / "The Wire (2002)" / "Season 02"
+        staged.mkdir(parents=True)
+        (staged / "The Wire (2002) - S02E05.mp4").write_bytes(b"five")
+
+        committed = []
+        job = types.SimpleNamespace(
+            id=7, content_type="series", output_path=str(staged),
+            tracks=[], error_message=None,
+        )
+        session = types.SimpleNamespace(commit=lambda: committed.append(True))
+
+        assert transfer_to_destination(job, session, library) is True
+        assert sorted(p.name for p in existing.iterdir()) == [
+            "The Wire (2002) - S02E01.mp4",
+            "The Wire (2002) - S02E05.mp4",
+        ]
+        assert job.output_path == str(existing)
+        assert not staged.exists(), "the emptied staging folder was left behind"
+
+    def test_a_film_transfer_still_forks(self, tmp_path):
+        import types
+
+        from adr.pipeline import transfer_to_destination
+
+        library = tmp_path / "Films"
+        (library / "The Matrix (1999)").mkdir(parents=True)
+        (library / "The Matrix (1999)" / "The Matrix (1999).mp4").write_bytes(b"x")
+
+        staged = tmp_path / "staging" / "The Matrix (1999)"
+        staged.mkdir(parents=True)
+        (staged / "The Matrix (1999).mp4").write_bytes(b"y")
+
+        job = types.SimpleNamespace(
+            id=8, content_type="movie", output_path=str(staged),
+            tracks=[], error_message=None,
+        )
+        session = types.SimpleNamespace(commit=lambda: None)
+
+        assert transfer_to_destination(job, session, library) is True
+        assert job.output_path.endswith("The Matrix (1999) (2)")
+
+
+class TestSeasonZeroIsARealSeason:
+    """Plex files specials in season 0. `or 1` turned it into season 1, where
+    the episode numbers then collide with the actual first season."""
+
+    def _specials(self):
+        import types
+
+        return types.SimpleNamespace(
+            title="The Show", year=2019, content_type="series",
+            series_season=0, series_first_episode=1,
+        )
+
+    def test_a_specials_disc_keeps_its_season(self):
+        from adr.naming import plan_output
+
+        plan = plan_output(self._specials(), 2)
+        assert "Season 00" in plan.folder
+        assert plan.filenames[0] == "The Show (2019) - S00E01"
+
+    def test_an_unset_season_still_defaults_to_one(self):
+        import types
+
+        from adr.naming import plan_output
+
+        job = types.SimpleNamespace(
+            title="The Show", year=2019, content_type="series",
+            series_season=None, series_first_episode=1,
+        )
+        assert "Season 01" in plan_output(job, 1).folder
+
+
+class TestEpisodeNumbersAreClaimedAtomically:
+    """Two drives fed discs a minute apart both produced S02E01-E04.
+
+    apply_to stamped series_first_episode when the disc went in, and the
+    counter only moved once the rip had finished — so the read and the write
+    were minutes apart with another drive between them.
+    """
+
+    def _config(self, tmp_path):
+        from adr.config import Config
+
+        config = Config(str(tmp_path / "adr.yaml"))
+        config.update({
+            "series_mode": True, "series_mode_show": "The Wire",
+            "series_mode_season": 2, "series_mode_next_episode": 1,
+        })
+        return config
+
+    def test_two_claims_do_not_overlap(self, tmp_path):
+        from adr import seriesmode
+
+        config = self._config(tmp_path)
+        first = seriesmode.take_episodes(config, 4)
+        second = seriesmode.take_episodes(config, 4)
+        assert first == 1
+        assert second == 5, "the second disc reused the first disc's numbers"
+
+    def test_concurrent_claims_never_collide(self, tmp_path):
+        import threading
+
+        from adr import seriesmode
+
+        config = self._config(tmp_path)
+        claimed = []
+        barrier = threading.Barrier(4)
+
+        def claim():
+            barrier.wait()
+            claimed.append(seriesmode.take_episodes(config, 3))
+
+        threads = [threading.Thread(target=claim) for _ in range(4)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+
+        assert sorted(claimed) == [1, 4, 7, 10]
+
+    def test_an_inactive_mode_claims_nothing(self, tmp_path):
+        from adr import seriesmode
+
+        config = self._config(tmp_path)
+        config.update({"series_mode": False})
+        assert seriesmode.take_episodes(config, 4) is None

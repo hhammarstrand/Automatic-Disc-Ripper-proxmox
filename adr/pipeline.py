@@ -137,6 +137,39 @@ process_registry = ProcessRegistry()
 
 
 
+
+def _remove_superseded(task: "EncodeTask", result) -> None:
+    """Delete the file an encode-again has just replaced.
+
+    Only after the replacement exists and has bytes in it. "Encode again" from
+    a finished file cannot write over its own input, so the new copy lands in a
+    sibling folder — and the old one then sat in the library for ever,
+    referenced by no job row, invisible to the delete preview and counted twice
+    by anything reading the folder.
+
+    Exactly the recorded path, never a walk: this runs against the user's
+    library.
+    """
+    source = getattr(task, "supersedes", None)
+    if not source:
+        return
+    output = getattr(result, "output_path", None)
+    try:
+        if not output or not Path(output).is_file() or Path(output).stat().st_size == 0:
+            logger.warning(
+                "Not removing %s: the replacement is missing or empty", source,
+            )
+            return
+        if Path(source).resolve() == Path(output).resolve():
+            return
+        Path(source).unlink()
+        logger.info("Removed the superseded copy %s", source)
+        with contextlib.suppress(OSError):
+            Path(source).parent.rmdir()          # only if it is now empty
+    except OSError:
+        logger.warning("Could not remove the superseded %s", source, exc_info=True)
+
+
 def _cancelled(session, job) -> bool:
     """Whether someone has cancelled *job* since this thread last looked.
 
@@ -338,18 +371,41 @@ def transfer_to_destination(job, session, final_parent: Path) -> bool:
     # library root.
     relative = relative_folder(src, job)
     dest = final_parent / relative
+    merging = False
     if dest.exists():
-        counter = 2
-        while (candidate := dest.parent / f"{dest.name} ({counter})").exists():
-            counter += 1
-        dest = candidate
+        # A film and a season collide for opposite reasons.
+        #
+        # Two films in one folder is one Plex entry with two movies in it, so a
+        # name already taken means a different film and the folder is forked.
+        # A season folder already taken means *the previous disc of this
+        # season*, which is exactly where these episodes belong — forking it
+        # gave a six-disc box set Season 02, Season 02 (2) … (6), with four
+        # episodes in each. The filenames already carry SxxEyy, so the files
+        # can be merged and any real collision is still visible per file.
+        if (job.content_type or "movie") == "series":
+            merging = True
+        else:
+            counter = 2
+            while (candidate := dest.parent / f"{dest.name} ({counter})").exists():
+                counter += 1
+            dest = candidate
 
     size_mb = sum(f.stat().st_size for f in src.rglob("*") if f.is_file()) / BYTES_PER_MB
     logger.info("Transferring job %s to %s (%.0f MB)", job.id, dest, size_mb)
     started = time.monotonic()
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dest))
+        if merging:
+            # The contents, not the folder: shutil.move of a directory onto an
+            # existing directory puts it *inside* it, which would give
+            # Season 02/Season 02.
+            dest.mkdir(parents=True, exist_ok=True)
+            for item in sorted(src.iterdir()):
+                shutil.move(str(item), str(dest / item.name))
+            with contextlib.suppress(OSError):
+                src.rmdir()
+        else:
+            shutil.move(str(src), str(dest))
     except (OSError, shutil.Error) as exc:
         logger.error("Transfer failed for job %s: %s", job.id, exc)
         job.error_message = (
@@ -366,11 +422,30 @@ def transfer_to_destination(job, session, final_parent: Path) -> bool:
     )
 
     job.output_path = str(dest)
-    for t in job.tracks:
-        if t.output_path:
-            t.output_path = str(dest / Path(t.output_path).name)
+    _rebase_tracks(job, src, dest)
     session.commit()
     return True
+
+
+def _rebase_tracks(job, src: Path, dest: Path) -> None:
+    """Point each track at where its file now is.
+
+    Rebuilding the path as ``dest / Path(old).name`` drops any component
+    between the job folder and the file — which is exactly where extras live,
+    ``Other/Extra 1.mp4``. The row then named a path that did not exist, so the
+    delete preview could not see the extras and the Play button pointed at
+    nothing. The part below the job folder is preserved instead.
+    """
+    for t in job.tracks:
+        if not t.output_path:
+            continue
+        old = Path(t.output_path)
+        try:
+            t.output_path = str(dest / old.relative_to(src))
+        except ValueError:
+            # Not below the folder we moved — an older row, or a path from
+            # before staging existed. Its own name is the best guess left.
+            t.output_path = str(dest / old.name)
 
 
 def move_to_plex(job, session, config) -> bool:
@@ -401,27 +476,33 @@ def move_to_plex(job, session, config) -> bool:
 
     dest = Path(library) / relative_folder(src, job)
 
-    # Handle collision — append (2), (3), etc.
+    # Same rule as the transfer: a film's folder is forked on collision, a
+    # season's is merged into. See transfer_to_destination.
+    merging = False
     if dest.exists():
-        counter = 2
-        while True:
-            candidate = dest.parent / f"{dest.name} ({counter})"
-            if not candidate.exists():
-                dest = candidate
-                break
-            counter += 1
+        if (job.content_type or "movie") == "series":
+            merging = True
+        else:
+            counter = 2
+            while True:
+                candidate = dest.parent / f"{dest.name} ({counter})"
+                if not candidate.exists():
+                    dest = candidate
+                    break
+                counter += 1
 
     try:
-        shutil.move(str(src), str(dest))
+        if merging:
+            dest.mkdir(parents=True, exist_ok=True)
+            for item in sorted(src.iterdir()):
+                shutil.move(str(item), str(dest / item.name))
+            with contextlib.suppress(OSError):
+                src.rmdir()
+        else:
+            shutil.move(str(src), str(dest))
         job.plex_path = str(dest)
         job.output_path = str(dest)
-
-        # Update track output paths to new location
-        for t in job.tracks:
-            if t.output_path:
-                old_track = Path(t.output_path)
-                t.output_path = str(dest / old_track.name)
-
+        _rebase_tracks(job, src, dest)
         session.commit()
         logger.info("Moved job %s to Plex: %s", job.id, dest)
         return True
@@ -452,11 +533,19 @@ class EncodeTask:
         output_filename: str,
         final_dir: Path | None = None,
         passthrough: bool = False,
+        supersedes: Path | None = None,
     ):
         self.job_id = job_id
         self.track_id = track_id
         self.input_path = input_path
         self.output_dir = output_dir
+        #: The file this encode replaces, deleted once the new one is written.
+        #: Set only by "encode again" reading a finished file: the encoder
+        #: cannot write over what it is reading, so the result lands in a
+        #: sibling folder — and without this the old copy stayed in the
+        #: library for ever, referenced by no job row and therefore invisible
+        #: to the delete preview.
+        self.supersedes = supersedes
         self.output_filename = output_filename
         self.final_dir = final_dir
         #: Keep the MKV as it came off the disc instead of transcoding it.
@@ -718,6 +807,7 @@ class EncoderWorker(threading.Thread):
                 track.status = TrackStatus.DONE
                 track.output_path = str(result.output_path)
                 logger.info("Track %s encoded: %s", track.track_number, result.output_path)
+                _remove_superseded(task, result)
             else:
                 track.status = TrackStatus.ERROR
                 track.error_message = result.error
@@ -766,7 +856,7 @@ class EncoderWorker(threading.Thread):
                 move_to_plex(job, session, self._config)
 
                 # Clean up raw MKV files / watch folder source
-                self._cleanup_raw(job.id)
+                self._cleanup_raw(job.id, session)
                 self._cleanup_watch_source(job, task)
 
                 # The disc is done. Tell whoever walked away, and tell Plex so
@@ -828,7 +918,13 @@ class EncoderWorker(threading.Thread):
         result.input_path = task.input_path
         destination = task.output_dir / f"{task.output_filename}.mkv"
         try:
-            task.output_dir.mkdir(parents=True, exist_ok=True)
+            # The destination's parent, not the output directory. An extra's
+            # filename is 'Other/Extra 1', so the two differ by exactly the
+            # subfolder Plex reads extras out of — and without it the move
+            # failed for every extra on the disc, which failed the whole job.
+            # HandBrake's own path has created it since extras existed; this
+            # one never did, so turning transcoding off broke them.
+            destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(task.input_path), str(destination))
         except (OSError, shutil.Error) as exc:
             result.error = f"Could not move {task.input_path.name} into place: {exc}"
@@ -839,15 +935,53 @@ class EncoderWorker(threading.Thread):
         logger.info("Job %s: kept %s without transcoding", task.job_id, destination.name)
         return result
 
-    def _cleanup_raw(self, job_id: int) -> None:
-        """Remove temporary raw MKV directory for a completed job."""
+    def _cleanup_raw(self, job_id: int, session=None) -> None:
+        """Remove the temporary raw MKV directory for a completed job.
+
+        Unless titles were deliberately kept there. When the pre-rip scan
+        cannot run, "main feature only" rips the whole disc and encodes just
+        the film, and the job log promises the rest are still in raw/ — so
+        deleting them the moment the one encode finished made that sentence
+        false, and the fallback it describes impossible.
+
+        The evidence is arithmetic: more MKVs on disk than the job has tracks
+        means files were dropped on purpose. No schema change, and it cannot
+        drift out of step with the decision that produced it.
+        """
         raw_dir = self._config.raw_path / str(job_id)
-        if raw_dir.exists():
-            try:
-                shutil.rmtree(raw_dir)
-                logger.info("Cleaned up raw directory: %s", raw_dir)
-            except OSError:
-                logger.warning("Could not clean up %s", raw_dir, exc_info=True)
+        if not raw_dir.exists():
+            return
+
+        try:
+            on_disk = sorted(p for p in raw_dir.glob("*.mkv") if p.is_file())
+        except OSError:
+            on_disk = []
+        tracks = 0
+        if session is not None:
+            with contextlib.suppress(Exception):
+                tracks = session.query(Track).filter(Track.job_id == job_id).count()
+
+        if on_disk and tracks and len(on_disk) > tracks:
+            kept = len(on_disk) - tracks
+            megabytes = sum(f.stat().st_size for f in on_disk) / BYTES_PER_MB
+            logger.info(
+                "Keeping %s: %d title(s) were ripped but not encoded (%.0f MB)",
+                raw_dir, kept, megabytes,
+            )
+            with contextlib.suppress(Exception):
+                JobLog(self._config, job_id).append(
+                    "encode",
+                    f"{kept} ripped title(s) that were not encoded are still in "
+                    f"{raw_dir} ({megabytes:.0f} MB). Delete the job with its "
+                    "files from the History page to reclaim the space.",
+                )
+            return
+
+        try:
+            shutil.rmtree(raw_dir)
+            logger.info("Cleaned up raw directory: %s", raw_dir)
+        except OSError:
+            logger.warning("Could not clean up %s", raw_dir, exc_info=True)
 
     @staticmethod
     def _cleanup_watch_source(job: Job, task: "EncodeTask") -> None:
@@ -1466,6 +1600,21 @@ class DrivePipeline:
                     )
                 rip_files, durations, main_index = kept, lengths, reduced
 
+            # Claim the episode numbers before the plan is built, not after
+            # the tracks are queued.
+            #
+            # apply_to stamped series_first_episode when the disc went in, and
+            # the counter only moved down there — so two drives fed discs a
+            # minute apart both read the same value and both produced
+            # S02E01-E04, one overwriting the other in the same season folder.
+            # Claiming is one atomic step now, and the number it returns is
+            # what the plan is built from.
+            if (job.content_type or "movie") == "series":
+                claimed = seriesmode.take_episodes(self._config, len(rip_files))
+                if claimed is not None:
+                    job.series_first_episode = claimed
+                    session.commit()
+
             plan = plan_output(
                 job, len(rip_files), fallback_title, fallback_year,
                 main_index=main_index,
@@ -1502,7 +1651,9 @@ class DrivePipeline:
                 )
             else:
                 final_dir = None
-                output_dir = unique_output_dir(dest_parent / plex_folder_name)
+                output_dir = unique_output_dir(
+                    dest_parent / plex_folder_name, merge=plan.is_series,
+                )
             job.output_path = str(output_dir)
 
             for idx, mkv_file in enumerate(rip_files):
@@ -1542,12 +1693,10 @@ class DrivePipeline:
             session.commit()
             logger.info("Job %s: %d tracks queued for encoding", job.id, len(rip_files))
 
-            # The episode numbers are spent now, so the next disc continues
-            # from where this one stopped. Doing this at insert time would mean
-            # guessing the count; doing it at completion would let a second
-            # drive hand out the same numbers in the meantime.
+            # The numbers were claimed above, before the plan was built. This
+            # only reports what happened.
             if plan.episodes:
-                after = seriesmode.advance(self._config, len(plan.episodes))
+                after = seriesmode.state(self._config)
                 if after["active"]:
                     job_log.append(
                         "detect",
@@ -1647,6 +1796,16 @@ class DrivePipeline:
             )
         finally:
             ripper.log_sink = None
+
+        # Cancel first, as the video and ISO paths already do. Killing
+        # cdparanoia makes the rip return unsuccessful, and without this the
+        # job someone deliberately stopped was recorded as an ERROR and sent a
+        # "job failed" notification — a red row and a phone alert for a button
+        # they pressed themselves.
+        if _cancelled(session, job):
+            log.append("rip", "Cancelled while ripping the CD.")
+            logger.info("Job %s cancelled during the audio CD rip", job.id)
+            return
 
         if not result.success:
             job.status = JobStatus.ERROR

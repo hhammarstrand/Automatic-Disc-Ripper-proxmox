@@ -233,12 +233,19 @@ fi
 # Persist in /etc/fstab (idempotent) and mount
 # ----------------------------------------------------------------------------- #
 FSTAB_LINE="${SRC}  ${NAS_MOUNTPOINT}  ${FSTYPE}  ${OPTS}  0  0"
+# A marker line above the entry, because uninstall.sh looks for exactly this
+# and nothing wrote it — so "remove the fstab entry?" was never offered and the
+# share stayed mounted at every boot after the container was gone. The two ends
+# of that conversation have to use the same words.
+FSTAB_MARKER="# Automatic Disc Ripper — NAS share for ${NAS_MOUNTPOINT}"
 if grep -qsF " ${NAS_MOUNTPOINT} " /etc/fstab; then
     msg_info "Replacing existing fstab entry for ${NAS_MOUNTPOINT}"
     sed -i "\# ${NAS_MOUNTPOINT} #d" /etc/fstab
 fi
+# The old marker too, so re-running does not stack them up.
+sed -i "\#^# Automatic Disc Ripper — NAS share for ${NAS_MOUNTPOINT}\$#d" /etc/fstab
 cp /etc/fstab "/etc/fstab.adr-backup.$$"
-echo "$FSTAB_LINE" >> /etc/fstab
+printf '%s\n%s\n' "$FSTAB_MARKER" "$FSTAB_LINE" >> /etc/fstab
 msg_ok "fstab updated (backup: /etc/fstab.adr-backup.$$)"
 
 systemctl daemon-reload 2>/dev/null || true

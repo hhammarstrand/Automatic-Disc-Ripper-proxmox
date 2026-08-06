@@ -19,6 +19,7 @@ shown only if its key is known to be harmless.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import platform
 import re
@@ -100,6 +101,12 @@ def scrub(text: str, config) -> str:
     except Exception:                             # noqa: BLE001 - never fatal
         logger.warning("Could not read settings to scrub the bundle", exc_info=True)
         settings = {}
+
+    # The values the application would actually use, not only the ones in the
+    # file: a key supplied through /etc/default/adr never reaches adr.yaml, so
+    # scrubbing by the file's contents alone had nothing to hunt for.
+    with contextlib.suppress(Exception):
+        settings = {**settings, **config.effective_secrets()}
 
     for key, value in settings.items():
         if key in SAFE_KEYS or not isinstance(value, str):
@@ -321,7 +328,13 @@ def _hardware(config) -> str:
 def _settings(config) -> str:
     """Every setting, with anything that could authenticate replaced."""
     lines = []
-    for key, value in sorted(config.as_dict().items()):
+    data = config.as_dict()
+    # An env-supplied key is set as far as the application is concerned, and
+    # reporting it as empty sent one diagnosis looking for a missing key that
+    # was there all along.
+    with contextlib.suppress(Exception):
+        data = {**data, **config.effective_secrets()}
+    for key, value in sorted(data.items()):
         if key in SAFE_KEYS:
             lines.append(f"{key} = {value!r}")
         else:

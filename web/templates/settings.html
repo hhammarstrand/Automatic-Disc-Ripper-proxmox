@@ -228,8 +228,18 @@
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Quality</label>
+                        <!-- The valid set is 0, or 15-35. min/max cannot express
+                             a hole, so the step attribute is left off and the
+                             server rule is authoritative; a number in the gap
+                             was accepted by the browser and then rejected the
+                             whole save, which reads as the page being broken. -->
                         <input type="number" class="form-control" name="video_quality"
-                               value="{{ config.video_quality }}" min="0" max="35">
+                               value="{{ config.video_quality }}" min="0" max="35"
+                               oninput="warnAboutQualityGap(this)">
+                        <div class="form-text text-warning d-none" id="qualityGapWarning">
+                            0 leaves it to the preset; otherwise it has to be
+                            between 15 and 35. Anything in between will be refused.
+                        </div>
                         <div class="form-text">
                             A quantiser: lower is better and bigger. Around 20–22 is
                             close to the source. Fixed-function GPU encoders need a
@@ -347,7 +357,9 @@
             <div class="mb-3">
                 <label class="form-label">Monitored drives</label>
                 <input type="text" class="form-control"
-                       name="drives" value="{{ config.drives }}">
+                       name="drives"
+                       value="{{ config.drives if config.drives is string
+                                 else config.drives | join(', ') }}">
                 <div class="form-text">"auto" for automatic detection, or comma-separated device paths (e.g. "/dev/sr0, /dev/sr1")</div>
             </div>
         </div>
@@ -781,14 +793,18 @@ function saveSettings(e) {
         }
     }
 
-    // Handle drives field: if comma-separated, convert to list
-    if (data.drives && data.drives !== 'auto') {
-        const parts = data.drives.split(',').map(s => s.trim()).filter(Boolean);
-        if (parts.length > 1) {
-            data.drives = parts;
-        } else if (parts.length === 1 && parts[0] !== 'auto') {
-            data.drives = parts;
-        }
+    // "auto", or a list of device paths.
+    //
+    // The field used to render a Python list straight into the value, so a
+    // saved list came back as "['/dev/sr0', '/dev/sr1']" and the next save
+    // split *that* on commas — turning the setting into device paths made of
+    // brackets and quotes, and the drives silently stopped being watched. The
+    // template joins now, and this is the matching parse.
+    if (typeof data.drives === 'string') {
+        const raw = data.drives.trim();
+        data.drives = raw === '' || raw === 'auto'
+            ? 'auto'
+            : raw.split(',').map(s => s.trim()).filter(Boolean);
     }
 
     // Checkboxes: not in FormData when unchecked, so set explicitly

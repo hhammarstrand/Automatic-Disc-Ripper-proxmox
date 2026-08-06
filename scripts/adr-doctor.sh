@@ -32,7 +32,7 @@ set -euo pipefail
 # "nothing wrong found", which is worse than failing: it is a clean bill of
 # health from a script that never looked. Compared against the container's own
 # version below.
-ADR_DOCTOR_VERSION="1.20.1"
+ADR_DOCTOR_VERSION="1.21.0"
 
 CT_MEDIA_PATH="${CT_MEDIA_PATH:-/mnt/media}"
 # The user the service runs as inside the container.
@@ -302,6 +302,12 @@ if [[ -d /dev/dri ]] && compgen -G "/dev/dri/renderD*" >/dev/null; then
                 if id -nG "$user" | tr " " "\n" | grep -qx "$group"; then exit 3; fi
                 usermod -aG "$group" "$user"
             ' _ "$node_gid" "$RUN_USER" >/dev/null 2>&1; then
+                # Counted as a problem as well as a repair, the way every
+                # other section does it. Without the note_problem, REPAIRED
+                # could exceed PROBLEMS and the summary printed "2 problems, 3
+                # repaired" — or claimed a clean bill on a container that had
+                # just been changed.
+                note_problem "${RUN_USER} could not use ${node} (gid ${node_gid})"
                 note_fixed "added ${RUN_USER} to the group owning ${node} (gid ${node_gid})"
                 NEEDS_RESTART=1
             else
@@ -661,9 +667,12 @@ if [[ "$PROBLEMS" -eq 0 ]]; then
     msg_ok "Nothing wrong found."
 elif [[ "$FIX" -eq 1 ]]; then
     msg_ok "${REPAIRED} of ${PROBLEMS} finding(s) repaired."
-    [[ "$NEEDS_RESTART" -eq 1 ]] && msg_warn "Restart the container to apply: pct reboot ${CTID}"
 else
     msg_warn "${PROBLEMS} finding(s). Re-run with --fix to repair:  $0 --fix ${CTID}"
 fi
+# Outside the verdict, not inside one branch of it. A change that needs a
+# restart to take effect has to be said whatever the counts came to — and it
+# was hidden in the one branch that assumed at least one problem was found.
+[[ "$NEEDS_RESTART" -eq 1 ]] && msg_warn "Restart the container to apply: pct reboot ${CTID}"
 echo
 exit 0

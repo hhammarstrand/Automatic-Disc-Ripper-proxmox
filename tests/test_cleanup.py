@@ -245,3 +245,64 @@ class TestDiscsThatAreNotFilms:
 
         for method in (DrivePipeline._run_audio_cd, DrivePipeline._run_data_disc):
             assert "output_path=" in inspect.getsource(method), method.__name__
+
+
+class TestTheDroppedTitlesActuallyStay:
+    """"Main feature only" with a scan that could not run rips the whole disc
+    and encodes one title, and the job log promises the rest are still in raw/.
+
+    _cleanup_raw deleted the directory the moment that one encode finished, so
+    the sentence was false and the fallback it describes impossible. The
+    evidence that titles were kept is arithmetic: more MKVs on disk than the
+    job has tracks.
+    """
+
+    def _worker(self, tmp_path):
+        import types
+
+        from adr.pipeline import EncoderWorker
+
+        obj = types.SimpleNamespace(
+            _config=types.SimpleNamespace(raw_path=tmp_path / "raw"),
+        )
+        obj._cleanup_raw = EncoderWorker._cleanup_raw.__get__(obj)
+        return obj
+
+    def _raw(self, tmp_path, job_id, count):
+        raw = tmp_path / "raw" / str(job_id)
+        raw.mkdir(parents=True)
+        for i in range(count):
+            (raw / f"title_t{i:02d}.mkv").write_bytes(b"x" * 2048)
+        return raw
+
+    def _session(self, track_count):
+        import types
+
+        class _Query:
+            def filter(self, *a):
+                return self
+
+            def count(self):
+                return track_count
+
+        return types.SimpleNamespace(query=lambda *a: _Query())
+
+    def test_titles_kept_on_purpose_are_not_deleted(self, tmp_path):
+        raw = self._raw(tmp_path, 42, 16)
+        self._worker(tmp_path)._cleanup_raw(42, self._session(1))
+        assert raw.is_dir(), "the fifteen titles the job log promised are gone"
+        assert len(list(raw.glob("*.mkv"))) == 16
+
+    def test_an_ordinary_job_still_cleans_up(self, tmp_path):
+        """One track per file: nothing was dropped, and 30 GB of MKVs must not
+        be left on the container disk."""
+        raw = self._raw(tmp_path, 43, 2)
+        self._worker(tmp_path)._cleanup_raw(43, self._session(2))
+        assert not raw.exists()
+
+    def test_no_session_falls_back_to_cleaning(self, tmp_path):
+        """Callers that cannot count tracks get the old behaviour rather than
+        an ever-growing raw directory."""
+        raw = self._raw(tmp_path, 44, 3)
+        self._worker(tmp_path)._cleanup_raw(44)
+        assert not raw.exists()

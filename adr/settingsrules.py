@@ -28,10 +28,6 @@ logger = logging.getLogger(__name__)
 #: anything useful in either.
 QUALITY_RANGE = (15, 35)
 
-#: Language codes as ISO 639 spells them, one form or the other.
-LANGUAGE_LENGTHS = (2, 3)
-
-
 def _integer(value, low, high, unit=""):
     try:
         number = int(value)
@@ -62,15 +58,6 @@ def _quality(value):
     return ""
 
 
-def _language(value):
-    code = str(value or "").strip()
-    if not code:
-        return ""
-    if len(code) not in LANGUAGE_LENGTHS or not code.isalpha():
-        return "must be a language code such as 'swe', 'eng' or 'sv' — or empty"
-    return ""
-
-
 def _port(value):
     return _integer(value, 1, 65535)
 
@@ -87,8 +74,61 @@ def _path_or_empty(value):
 
 #: name -> check. A check returns "" when the value is fine, or the half of a
 #: sentence that follows the setting's name.
+
+
+def _drives(value):
+    """"auto", or a list of device paths.
+
+    Worth a rule of its own because a malformed value here is invisible: the
+    watcher simply never sees a disc, and nothing on any page says why. The
+    field once round-tripped a Python list through the template and came back
+    as ``["['/dev/sr0',", "'/dev/sr1']"]`` — paths made of brackets, saved
+    without complaint.
+    """
+    if isinstance(value, str):
+        if value.strip() in ("", "auto"):
+            return ""
+        return "Monitored drives must be \"auto\" or a list of device paths."
+    if not isinstance(value, list) or not value:
+        return "Monitored drives must be \"auto\" or a list of device paths."
+    for item in value:
+        if not isinstance(item, str) or not item.strip().startswith("/dev/"):
+            return f"{item!r} is not a device path — they look like /dev/sr0."
+    return ""
+
+
+def _language(value):
+    """A language code both encoders can act on, or empty.
+
+    HandBrake resolves any ISO code; the ffmpeg backend matches against a
+    table of the eighteen two-letter codes people actually use. A code outside
+    it was accepted here and then matched nothing on one of the two backends —
+    so the same setting produced a Swedish film under HandBrake and an English
+    one under ffmpeg, with nothing anywhere saying why. Refusing at the point
+    of entry is the only place the difference is visible.
+    """
+    from adr.vaapi import _LANGUAGE_ALIASES, _LANGUAGE_EQUIVALENTS
+
+    code = str(value or "").strip().lower()
+    if not code:
+        return ""
+    known = (
+        set(_LANGUAGE_ALIASES)
+        | set(_LANGUAGE_ALIASES.values())
+        | set(_LANGUAGE_EQUIVALENTS)
+    )
+    if code in known:
+        return ""
+    return (
+        f"{value!r} is not a language code this application can match on both "
+        "encoders. Use a three-letter code as a disc spells it (swe, eng, "
+        "nor), or a two-letter one from the common set (sv, en, no)."
+    )
+
+
 RULES = {
     "web_port": _port,
+    "drives": _drives,
     "max_encode_jobs": lambda v: _integer(v, 1, 64),
     "watch_interval": lambda v: _integer(v, 1, 3600, " of seconds"),
     "min_title_length": lambda v: _integer(v, 0, 86_400, " of seconds"),

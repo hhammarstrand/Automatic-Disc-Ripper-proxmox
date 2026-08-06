@@ -103,7 +103,23 @@ def start(job, session, config, encode_queue) -> int:
         # Identical to a retry from raw, and deliberately the same code: two
         # implementations of "encode these files into this job" would drift,
         # and the naming rules alone are worth not duplicating.
-        return retry.requeue_encode(job, session, config, encode_queue)
+        #
+        # The previous output is not an input here, so it cannot be deleted
+        # per file the way the finished-file path does — but the job is about
+        # to point somewhere else, which would leave it in the library with
+        # nothing referencing it. Say where it is while the row still knows.
+        previous = str(job.output_path or "")
+        queued = retry.requeue_encode(job, session, config, encode_queue)
+        if queued and previous and previous != str(job.output_path or ""):
+            from adr.joblog import JobLog
+
+            JobLog(config, job.id).append(
+                "encode",
+                f"Encoding again from the raw rip into a new folder. The "
+                f"previous copy is still in {previous} — delete it by hand if "
+                "you do not want two.",
+            )
+        return queued
 
     return _requeue_finished(job, session, config, encode_queue,
                              [Path(p) for p in decision["files"]])
@@ -184,6 +200,11 @@ def _requeue_finished(job, session, config, encode_queue, sources: list[Path]) -
                 else f"{naming.folder} - pt{index + 1}"
             ),
             final_dir=final_dir,
+            # The file this replaces. Without it the previous copy stayed in
+            # the library, referenced by no row: the new tracks point at the
+            # new folder and job.output_path has moved, so cleanup.job_files
+            # could not see the old one and deleting the job left it behind.
+            supersedes=source,
             # Never passthrough. "Re-encode" that copies the file unchanged
             # would report success and change nothing, which is the worst
             # possible reading of the button.
