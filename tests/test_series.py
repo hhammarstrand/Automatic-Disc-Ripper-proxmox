@@ -553,3 +553,93 @@ class TestEpisodeNumbersAreClaimedAtomically:
         config = self._config(tmp_path)
         config.update({"series_mode": False})
         assert seriesmode.take_episodes(config, 4) is None
+
+
+class TestTheMergeDoesNotCostTheSeason:
+    """Three regressions the merge introduced, all found by re-reviewing it.
+
+    Merging means every disc of a box set shares one season folder. Three
+    places treated "the job's output folder" as "the job's files", and one
+    silently replaced an episode with another.
+    """
+
+    def _series_job(self, folder, tracks=()):
+        import types
+
+        return types.SimpleNamespace(
+            id=1, content_type="series", output_path=str(folder), plex_path=None,
+            tracks=[types.SimpleNamespace(output_path=str(p)) for p in tracks],
+        )
+
+    def _config(self, tmp_path):
+        import types
+
+        return types.SimpleNamespace(
+            completed_path=tmp_path, raw_path=tmp_path / "raw",
+            staging_path=tmp_path / "staging", plex_path="", tv_path=str(tmp_path),
+            music_path="", data_disc_path="",
+        )
+
+    def test_deleting_one_disc_does_not_delete_the_season(self, tmp_path):
+        from adr import cleanup
+
+        season = tmp_path / "The Wire (2002)" / "Season 02"
+        season.mkdir(parents=True)
+        mine, theirs = [], []
+        for n in range(1, 5):
+            p = season / f"The Wire (2002) - S02E0{n}.mp4"
+            p.write_bytes(b"x")
+            mine.append(p)
+        for n in range(5, 9):
+            p = season / f"The Wire (2002) - S02E0{n}.mp4"
+            p.write_bytes(b"x")
+            theirs.append(p)
+
+        job = self._series_job(season, mine)
+        found = cleanup.job_files(job, self._config(tmp_path))
+        assert sorted(found) == sorted(mine), (
+            "deleting disc 1 would have taken the other discs' episodes"
+        )
+
+    def test_a_film_still_gets_the_folder_fallback(self, tmp_path):
+        """Unchanged: a film's folder is its own, and a job interrupted before
+        its rows were written still needs the scan."""
+        import types
+
+        from adr import cleanup
+
+        folder = tmp_path / "The Matrix (1999)"
+        folder.mkdir()
+        (folder / "The Matrix (1999).mp4").write_bytes(b"x")
+        job = types.SimpleNamespace(
+            id=2, content_type="movie", output_path=str(folder),
+            plex_path=None, tracks=[],
+        )
+        assert len(cleanup.job_files(job, self._config(tmp_path))) == 1
+
+    def test_an_episode_is_never_silently_overwritten(self, tmp_path):
+        import types
+
+        from adr.pipeline import transfer_to_destination
+
+        library = tmp_path / "TV"
+        existing = library / "The Wire (2002)" / "Season 02"
+        existing.mkdir(parents=True)
+        clash = existing / "The Wire (2002) - S02E01.mp4"
+        clash.write_bytes(b"the first disc")
+
+        staged = tmp_path / "staging" / "The Wire (2002)" / "Season 02"
+        staged.mkdir(parents=True)
+        (staged / "The Wire (2002) - S02E01.mp4").write_bytes(b"the second disc")
+
+        job = types.SimpleNamespace(
+            id=9, content_type="series", output_path=str(staged),
+            tracks=[], error_message=None,
+        )
+        assert transfer_to_destination(
+            job, types.SimpleNamespace(commit=lambda: None), library) is True
+
+        assert clash.read_bytes() == b"the first disc", "an episode was replaced"
+        assert (existing / "The Wire (2002) - S02E01 (2).mp4").is_file(), (
+            "the arriving episode was lost instead of set aside"
+        )

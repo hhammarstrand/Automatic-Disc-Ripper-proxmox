@@ -111,7 +111,7 @@
       <label class="form-label">Run this on the Proxmox host (as root)</label>
       <div class="position-relative">
         <pre id="commandText" style="background:#0d1117;border:1px solid var(--adr-border);border-radius:6px;padding:1rem;white-space:pre-wrap;word-break:break-all;color:#79c0ff;"></pre>
-        <button class="btn btn-sm btn-outline-light position-absolute top-0 end-0 m-2" onclick="copyCommand()">
+        <button class="btn btn-sm btn-outline-light position-absolute top-0 end-0 m-2" onclick="copyCommand(this)">
           <i class="bi bi-clipboard"></i> Copy
         </button>
       </div>
@@ -286,14 +286,10 @@ function generateCommand() {
   });
 }
 
-function copyCommand() {
-  const t = document.getElementById('commandText').textContent;
-  navigator.clipboard.writeText(t).then(() => {
-    const b = event.target.closest('button');
-    const o = b.innerHTML;
-    b.innerHTML = '<i class="bi bi-check"></i> Copied';
-    setTimeout(() => b.innerHTML = o, 1500);
-  });
+function copyCommand(btn) {
+  // Shared helper: see the note in app.js. Plain http has no clipboard API.
+  copyToClipboard(document.getElementById('commandText').textContent.trim(), btn,
+                  '<i class="bi bi-check me-1"></i>Copied');
 }
 
 document.addEventListener('DOMContentLoaded', () => {

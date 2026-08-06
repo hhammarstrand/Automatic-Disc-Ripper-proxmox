@@ -46,10 +46,19 @@ def job_files(job, config) -> list[Path]:
 
     # And the folders the job used, for anything the tracks did not record —
     # a job interrupted before its rows were updated, or an older schema.
-    for folder in (getattr(job, "output_path", None), getattr(job, "plex_path", None)):
-        if folder:
-            for path in finished_files(folder):
-                add(path)
+    #
+    # Never for a series. Since box-set discs merge into one season folder,
+    # every disc's job points at the *same* directory — so this fallback turned
+    # "delete this job's files" into "delete the whole season", including the
+    # episodes five other jobs produced. A season folder is shared by
+    # construction, which is exactly the case the module docstring promises to
+    # leave intact. Series jobs have track rows, and the transfer keeps them
+    # accurate, so the precise pass above is the whole answer for them.
+    if (getattr(job, "content_type", None) or "movie") != "series":
+        for folder in (getattr(job, "output_path", None), getattr(job, "plex_path", None)):
+            if folder:
+                for path in finished_files(folder):
+                    add(path)
 
     return found
 

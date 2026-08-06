@@ -777,6 +777,14 @@ function refreshMakemkvKey() {
     });
 }
 
+// The valid set is 0, or 15-35 — a hole that no HTML validation attribute can
+// express. Saying so as it is typed beats refusing the whole form on save.
+function warnAboutQualityGap(input) {
+    const value = Number(input.value);
+    const bad = input.value !== '' && value !== 0 && (value < 15 || value > 35);
+    document.getElementById('qualityGapWarning').classList.toggle('d-none', !bad);
+}
+
 function saveSettings(e) {
     e.preventDefault();
     const form = document.getElementById('settingsForm');

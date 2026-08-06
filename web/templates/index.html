@@ -193,7 +193,7 @@
                                         </span>
                                         <span class="d-flex gap-2">
                                             <button class="btn btn-sm btn-outline-light"
-                                                    onclick="editSeries({{ job.id }}, {{ job.series_season or 1 }}, {{ job.series_first_episode or 1 }}, {{ (job.title or '') | tojson }}, {{ job.year or 'null' }})">
+                                                    onclick='editSeries({{ job.id }}, {{ job.series_season or 1 }}, {{ job.series_first_episode or 1 }}, {{ (job.title or '') | tojson }}, {{ job.year or 'null' }})'>
                                                 <i class="bi bi-pencil me-1"></i>Change
                                             </button>
                                             <button class="btn btn-sm btn-outline-light"
@@ -207,7 +207,7 @@
                                 {% elif job.status and job.status.value in ('identifying', 'ripping', 'ripped') %}
                                 <div class="mt-2">
                                     <button class="btn btn-sm btn-outline-secondary py-0 px-2"
-                                            onclick="editSeries({{ job.id }}, 1, 1, {{ (job.title or job.disc_label or '') | tojson }}, {{ job.year or 'null' }})"
+                                            onclick='editSeries({{ job.id }}, 1, 1, {{ (job.title or job.disc_label or '') | tojson }}, {{ job.year or 'null' }})'
                                             title="Name the output as episodes instead of a film">
                                         <i class="bi bi-collection-play me-1"></i>This is a TV disc
                                     </button>
@@ -282,7 +282,7 @@
                             <!-- Actions -->
                             <div class="col-auto d-flex flex-column gap-1 align-items-end">
                                 <div class="d-flex gap-1">
-                                    <button class="btn btn-outline-info btn-sm" onclick="openRematchModal({{ job.id }}, {{ job.display_title | tojson }})" title="Change movie (TMDb)">
+                                    <button class="btn btn-outline-info btn-sm" onclick='openRematchModal({{ job.id }}, {{ job.display_title | tojson }})' title="Change movie (TMDb)">
                                         <i class="bi bi-search"></i> Match
                                     </button>
                                     <button class="btn btn-outline-danger btn-sm" onclick="cancelJob({{ job.id }})">
@@ -397,7 +397,7 @@
                                     <td>
                                         {% if job.status and job.status.value == 'error' and job.error_message %}
                                         <span class="badge bg-danger" role="button" style="cursor:pointer;"
-                                            onclick="showError({{ job.id }}, {{ job.display_title | tojson }}, {{ job.error_message | tojson }})">
+                                            onclick='showError({{ job.id }}, {{ job.display_title | tojson }}, {{ job.error_message | tojson }})'>
                                             <i class="bi bi-exclamation-triangle me-1"></i>Error
                                         </span>
                                         {% else %}

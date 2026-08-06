@@ -347,6 +347,41 @@ def final_destination(job, config) -> tuple[Path, bool]:
     return Path(config.completed_path), False
 
 
+
+def _merge_into(src: Path, dest: Path, job, log_sink=None) -> None:
+    """Move the contents of *src* into an existing *dest*, clobbering nothing.
+
+    The season merge exists because disc 2 of a box set belongs in disc 1's
+    folder. What it must not do is quietly replace disc 1's episodes: two discs
+    that both claim S02E01 is a numbering mistake, and overwriting one with the
+    other turns a fixable mistake into a lost file. The incumbent is kept and
+    the arrival is set aside beside it under a suffixed name, which is visible
+    in a directory listing and undoable by renaming.
+    """
+    dest.mkdir(parents=True, exist_ok=True)
+    for item in sorted(src.iterdir()):
+        target = dest / item.name
+        if target.exists():
+            stem, suffix = target.stem, target.suffix
+            counter = 2
+            while (candidate := dest / f"{stem} ({counter}){suffix}").exists():
+                counter += 1
+            target = candidate
+            message = (
+                f"{item.name} already existed in {dest} — kept the earlier "
+                f"file and saved this one as {target.name}. Two discs claiming "
+                "the same episode number usually means the season or the "
+                "starting episode needs correcting."
+            )
+            logger.warning("Job %s: %s", getattr(job, "id", "?"), message)
+            if log_sink:
+                with contextlib.suppress(Exception):
+                    log_sink(message)
+        shutil.move(str(item), str(target))
+    with contextlib.suppress(OSError):
+        src.rmdir()          # only when it is now empty
+
+
 def transfer_to_destination(job, session, final_parent: Path) -> bool:
     """Move a finished job's folder from local staging to its real destination.
 
@@ -399,11 +434,7 @@ def transfer_to_destination(job, session, final_parent: Path) -> bool:
             # The contents, not the folder: shutil.move of a directory onto an
             # existing directory puts it *inside* it, which would give
             # Season 02/Season 02.
-            dest.mkdir(parents=True, exist_ok=True)
-            for item in sorted(src.iterdir()):
-                shutil.move(str(item), str(dest / item.name))
-            with contextlib.suppress(OSError):
-                src.rmdir()
+            _merge_into(src, dest, job)
         else:
             shutil.move(str(src), str(dest))
     except (OSError, shutil.Error) as exc:
@@ -493,11 +524,7 @@ def move_to_plex(job, session, config) -> bool:
 
     try:
         if merging:
-            dest.mkdir(parents=True, exist_ok=True)
-            for item in sorted(src.iterdir()):
-                shutil.move(str(item), str(dest / item.name))
-            with contextlib.suppress(OSError):
-                src.rmdir()
+            _merge_into(src, dest, job)
         else:
             shutil.move(str(src), str(dest))
         job.plex_path = str(dest)
@@ -792,13 +819,33 @@ class EncoderWorker(threading.Thread):
                 # move it into the library as an intact encode.
                 track.status = TrackStatus.ERROR
                 track.error_message = "Cancelled during encoding."
+
+                # Only a genuinely partial *encode*, and never a passthrough.
+                #
+                # With transcoding off, _passthrough MOVES the ripped MKV into
+                # place — the file at output_path is the complete rip and the
+                # source no longer exists, so unlinking it destroys the only
+                # copy. A successful result is finished by definition too,
+                # whichever path produced it: the cancel simply arrived after
+                # the encoder had already written the file.
                 partial = getattr(result, "output_path", None)
-                if partial:
+                if partial and not task.passthrough and not result.success:
                     try:
                         Path(partial).unlink()
                         logger.info("Removed the partial encode %s", partial)
                     except OSError:
                         logger.debug("Could not remove %s", partial, exc_info=True)
+                elif partial and result.success:
+                    # It finished. Say so on the track rather than calling a
+                    # complete file an error, so a retry can still resume the
+                    # transfer instead of encoding it all over again.
+                    track.status = TrackStatus.DONE
+                    track.output_path = str(partial)
+                    track.error_message = None
+                    logger.info(
+                        "Cancelled after track %s had already finished; keeping %s",
+                        track.track_number, partial,
+                    )
                 job.completed_at = utcnow()
                 session.commit()
                 return
@@ -957,12 +1004,30 @@ class EncoderWorker(threading.Thread):
         except OSError:
             on_disk = []
         tracks = 0
+        job_tracks = []
         if session is not None:
             with contextlib.suppress(Exception):
-                tracks = session.query(Track).filter(Track.job_id == job_id).count()
+                job_tracks = list(
+                    session.query(Track).filter(Track.job_id == job_id),
+                )
+                tracks = len(job_tracks)
 
-        if on_disk and tracks and len(on_disk) > tracks:
-            kept = len(on_disk) - tracks
+        # Count what was *ripped*, not what survives.
+        #
+        # With transcoding off, _passthrough moves each encoded track's MKV out
+        # of raw/ — so the files left behind are exactly the dropped ones and
+        # the comparison against the track count came out equal, deleting the
+        # very titles the job log promised. Adding back the tracks whose file
+        # has already left restores the original count.
+        moved_out = sum(
+            1 for t in (job_tracks or [])
+            if t and getattr(t, "output_path", None)
+            and not (raw_dir / Path(str(t.output_path)).name).exists()
+        ) if job_tracks else 0
+        ripped = len(on_disk) + moved_out
+
+        if on_disk and tracks and ripped > tracks:
+            kept = ripped - tracks
             megabytes = sum(f.stat().st_size for f in on_disk) / BYTES_PER_MB
             logger.info(
                 "Keeping %s: %d title(s) were ripped but not encoded (%.0f MB)",

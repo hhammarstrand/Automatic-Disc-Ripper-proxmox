@@ -242,8 +242,15 @@ if grep -qsF " ${NAS_MOUNTPOINT} " /etc/fstab; then
     msg_info "Replacing existing fstab entry for ${NAS_MOUNTPOINT}"
     sed -i "\# ${NAS_MOUNTPOINT} #d" /etc/fstab
 fi
-# The old marker too, so re-running does not stack them up.
-sed -i "\#^# Automatic Disc Ripper — NAS share for ${NAS_MOUNTPOINT}\$#d" /etc/fstab
+# The old marker too, so re-running does not stack them up. grep rather than
+# sed: the pattern begins with '#', which cannot also be sed's address
+# delimiter — that spelling aborted the script on every single run, after the
+# credentials file was written and the mountpoint made immutable, and before
+# fstab was touched at all.
+if grep -qxF "$FSTAB_MARKER" /etc/fstab 2>/dev/null; then
+    grep -vxF "$FSTAB_MARKER" /etc/fstab > "/etc/fstab.adr-tmp.$$" \
+        && mv "/etc/fstab.adr-tmp.$$" /etc/fstab
+fi
 cp /etc/fstab "/etc/fstab.adr-backup.$$"
 printf '%s\n%s\n' "$FSTAB_MARKER" "$FSTAB_LINE" >> /etc/fstab
 msg_ok "fstab updated (backup: /etc/fstab.adr-backup.$$)"

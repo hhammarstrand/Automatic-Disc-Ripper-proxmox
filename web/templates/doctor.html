@@ -211,11 +211,11 @@ function escapeHtml(s) {
 }
 
 function copyText(id, btn) {
-  navigator.clipboard.writeText(document.getElementById(id).textContent.trim()).then(() => {
-    const o = btn.innerHTML;
-    btn.innerHTML = '<i class="bi bi-check"></i>';
-    setTimeout(() => btn.innerHTML = o, 1500);
-  });
+  // Through the shared helper in app.js: navigator.clipboard is undefined over
+  // plain http, which is how this application is served, so this button did
+  // nothing at all on the deployment the README describes.
+  copyToClipboard(document.getElementById(id).textContent.trim(), btn,
+                  '<i class="bi bi-check me-1"></i>Copied');
 }
 
 // ------------------------------------------------------------------ //

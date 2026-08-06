@@ -98,32 +98,36 @@ def _drives(value):
 
 
 def _language(value):
-    """A language code both encoders can act on, or empty.
+    """A language code, in a form both encoders can act on.
 
-    HandBrake resolves any ISO code; the ffmpeg backend matches against a
-    table of the eighteen two-letter codes people actually use. A code outside
-    it was accepted here and then matched nothing on one of the two backends —
-    so the same setting produced a Swedish film under HandBrake and an English
-    one under ffmpeg, with nothing anywhere saying why. Refusing at the point
-    of entry is the only place the difference is visible.
+    The shape is the hard rule, because that is what is genuinely broken: two
+    or three letters. Beyond that only ONE case actually fails — a two-letter
+    code the ffmpeg backend cannot fold to its three-letter form, since
+    normalise_language passes an unknown code through unchanged and matching
+    then compares "hu" against a disc's "hun" and finds nothing.
+
+    A three-letter code always works on both, whether or not this application
+    has heard of it, and rejecting those locked people out of the settings
+    page entirely: the form posts every field on every save, so an install
+    with `hun` could not change any setting at all until it falsified its own
+    language. That is a worse failure than the divergence it was guarding.
     """
-    from adr.vaapi import _LANGUAGE_ALIASES, _LANGUAGE_EQUIVALENTS
-
     code = str(value or "").strip().lower()
     if not code:
         return ""
-    known = (
-        set(_LANGUAGE_ALIASES)
-        | set(_LANGUAGE_ALIASES.values())
-        | set(_LANGUAGE_EQUIVALENTS)
-    )
-    if code in known:
-        return ""
-    return (
-        f"{value!r} is not a language code this application can match on both "
-        "encoders. Use a three-letter code as a disc spells it (swe, eng, "
-        "nor), or a two-letter one from the common set (sv, en, no)."
-    )
+    if len(code) not in (2, 3) or not code.isalpha():
+        return "must be a language code such as 'swe', 'eng' or 'sv' — or empty"
+
+    if len(code) == 2:
+        from adr.vaapi import _LANGUAGE_ALIASES
+
+        if code not in _LANGUAGE_ALIASES:
+            return (
+                f"{value!r} is a two-letter code this application cannot expand "
+                "to the three-letter form discs actually use, so the GPU encoder "
+                f"would match nothing. Use the three-letter form instead."
+            )
+    return ""
 
 
 RULES = {

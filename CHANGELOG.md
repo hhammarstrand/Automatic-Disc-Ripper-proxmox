@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.21.1
+
+The thirty fixes in 1.21.0 were reviewed the same way they were found, and
+thirteen of them had problems — three that would have cost files. **Do not run
+1.21.0.** This is the version to update to.
+
+**Every button in the history and dashboard was dead.** 1.21.0 replaced
+`'{{ x | e }}'` with `{{ x | tojson }}` inside double-quoted `onclick`
+attributes. tojson escapes `<`, `>`, `&` and `'` — but not the double quote,
+and its output *begins* with one, so the attribute ended at `copyPath(` and
+every handler was a truncated syntax error for every job. Strictly worse than
+what it replaced. The attributes are single-quoted now, which is the one
+quoting tojson is safe inside.
+
+**Deleting one disc of a box set deleted the season.** The merge means every
+disc's job points at the same season folder, and `cleanup.job_files` falls back
+to listing that folder — so "delete this job's files" offered, and removed,
+every episode six jobs had produced. A series job's files are now exactly its
+track rows, which the transfer keeps accurate. The same widening fed "Encode
+again" and the file listing.
+
+**Cancelling a job with transcoding off destroyed the rip.** The cancel branch
+unlinked the encoder's output to clear a truncated file — but with transcoding
+off there is no encode: the ripped MKV is *moved* into place, so that path is
+the complete film and its source no longer exists. It now removes only a
+genuinely partial encode, and a cancel that arrives after the file is finished
+leaves the track DONE.
+
+**And the season merge silently overwrote episodes.** The comment claimed a
+collision would be "visible per file"; nothing implemented it. The incumbent is
+kept and the arrival set aside beside it, named and logged.
+
+Also: `setup-nas.sh` aborted on every run — a `sed` address delimited with `#`
+on a pattern beginning with `#` — after writing the credentials file and before
+touching fstab. The new language rule rejected valid ISO codes like `hun` and
+`ces`, and because the settings form posts every field on every save, an
+install with one could change no setting at all; only a two-letter code that
+cannot be expanded is refused now. `_cleanup_raw`'s arithmetic did not hold
+with transcoding off, where the encoded file has already left the raw
+directory. The quality warning called a function that was never added. And the
+two copy buttons defined in page-local scripts never got the plain-http guard.
+
 ## 1.21.0
 
 Every remaining finding from the review, fixed. Thirty of them, across the

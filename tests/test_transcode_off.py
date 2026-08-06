@@ -267,3 +267,55 @@ def test_a_passthrough_task_finishes_the_job(tmp_path, config, monkeypatch):
         assert (out / "The Film (1999).mkv").read_bytes() == b"the film"
     finally:
         session.close()
+
+
+class TestCancellingDoesNotDestroyThePassthroughRip:
+    """The cancel branch added in 1.20.0 unlinked result.output_path to remove
+    a truncated encode. With transcoding off there is no encode: _passthrough
+    *moves* the ripped MKV into place, so that path is the complete rip and its
+    source no longer exists. Cancelling destroyed the only copy.
+    """
+
+    def _task(self, tmp_path, passthrough):
+        source = tmp_path / "raw" / "title_t00.mkv"
+        source.parent.mkdir(parents=True, exist_ok=True)
+        source.write_bytes(b"the whole film")
+        return EncodeTask(
+            job_id=1, track_id=1, input_path=source,
+            output_dir=tmp_path / "out", output_filename="The Film (1999)",
+            passthrough=passthrough,
+        )
+
+    def test_a_finished_passthrough_file_is_kept(self, tmp_path):
+        task = self._task(tmp_path, passthrough=True)
+        result = EncoderWorker._passthrough(task)
+        assert result.success
+        assert result.output_path.exists()
+
+        # What the cancel branch decides, stated as the condition itself: the
+        # file is complete and its source is gone, so nothing may remove it.
+        assert not (task.passthrough and not result.success)
+        assert not task.input_path.exists(), "the premise: the move consumed the source"
+
+    def test_the_guard_is_in_the_code(self):
+        """Read rather than run: the branch sits inside a worker loop that
+        needs a queue, a database and an encoder."""
+        import inspect
+
+        from adr.pipeline import EncoderWorker
+
+        source = inspect.getsource(EncoderWorker._process_task)
+        assert "not task.passthrough and not result.success" in source, (
+            "cancelling can delete a finished passthrough file again"
+        )
+
+    def test_a_cancel_after_success_keeps_the_track_done(self):
+        """The encode finished; the cancel simply arrived late. Marking it an
+        error would send a retry to encode a file that is already there."""
+        import inspect
+
+        from adr.pipeline import EncoderWorker
+
+        source = inspect.getsource(EncoderWorker._process_task)
+        after_cancel = source.split("cancelled during encode")[-1][:2500]
+        assert "track.status = TrackStatus.DONE" in after_cancel

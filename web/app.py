@@ -1026,7 +1026,20 @@ def _register_api_routes(app: Flask) -> None:
                 # button empty on a job that had worked perfectly.
                 from adr.naming import finished_files
 
-                for f in finished_files(out):
+                # A series' season folder is shared by every disc of the box
+                # set, so listing the folder would show one job the whole
+                # season. The track rows are exact and the transfer keeps them
+                # accurate; the folder scan stays as the fallback for films.
+                if (job.content_type or "movie") == "series":
+                    candidates = [
+                        Path(t.output_path) for t in job.tracks if t.output_path
+                    ]
+                else:
+                    candidates = finished_files(out)
+
+                for f in candidates:
+                    if not f.is_file():
+                        continue
                     try:
                         size_mb = round(f.stat().st_size / BYTES_PER_MB, 1)
                     except OSError:

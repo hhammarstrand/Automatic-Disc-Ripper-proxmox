@@ -179,11 +179,21 @@ class TestALanguageBothEncodersCanHonour:
     def test_empty_passes(self):
         assert settingsrules.check({"audio_language": ""}) == []
 
-    def test_a_code_the_ffmpeg_backend_cannot_match_is_refused(self):
-        problems = settingsrules.check({"audio_language": "xy"})
-        assert problems
-        assert "both encoders" in problems[0]
+    def test_any_three_letter_code_is_accepted(self):
+        """normalise_language passes an unknown three-letter code through, so
+        the ffmpeg backend matches it against the disc's tag perfectly well.
+        Rejecting these locked people out of the whole settings page — the form
+        posts every field on every save."""
+        for code in ("hun", "ces", "tur", "ell", "heb", "ara", "hin", "vie"):
+            assert settingsrules.check({"audio_language": code}) == [], code
 
-    def test_the_message_says_what_would_work(self):
-        problems = settingsrules.check({"audio_language": "zzz"})
-        assert "swe" in problems[0]
+    def test_a_two_letter_code_that_cannot_be_expanded_is_refused(self):
+        """This is the one case that genuinely diverges: the matcher would
+        compare 'hu' against a disc's 'hun' and find nothing."""
+        problems = settingsrules.check({"audio_language": "hu"})
+        assert problems
+        assert "three-letter" in problems[0]
+
+    def test_malformed_is_still_malformed(self):
+        assert settingsrules.check({"audio_language": "swedish"})
+        assert settingsrules.check({"audio_language": "s1"})

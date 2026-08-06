@@ -354,3 +354,67 @@ class TestValuesFromDataNeverBreakTheHandler:
         start = source.index("function retryJob")
         body = source[start:start + 800]
         assert "notify(plan.reason, 'success')" not in body
+
+
+class TestTojsonNeedsASingleQuotedAttribute:
+    """The 1.21.0 fix replaced `'{{ x | e }}'` with `{{ x | tojson }}` and left
+    the attribute double-quoted. tojson escapes `<`, `>`, `&` and `'` — but not
+    the double quote, and its own output *starts* with one. So the attribute
+    ended at `copyPath(` and every handler in history.html and index.html was a
+    truncated syntax error for every job, not only ones with odd characters.
+
+    Strictly worse than what it replaced. The fix for the fix is the quoting.
+    """
+
+    TEMPLATES = ("web/templates/history.html", "web/templates/index.html")
+
+    def test_no_tojson_sits_in_a_double_quoted_attribute(self):
+        for path in self.TEMPLATES:
+            text = Path(path).read_text()
+            for line in text.splitlines():
+                if "tojson" not in line or "onclick" not in line:
+                    continue
+                assert 'onclick="' not in line, (
+                    f"{path}: tojson inside a double-quoted attribute again:\n{line}"
+                )
+
+    def test_every_awkward_title_survives_a_render(self):
+        """The characters that actually appear in film titles and paths, plus
+        the ones that would be an injection if they got out."""
+        from flask import Flask, render_template_string
+
+        app = Flask(__name__)
+        template = "<button onclick='copyPath({{ p | tojson }})'>x</button>"
+        with app.test_request_context():
+            for value in ("Ocean's Eleven (2001)",
+                          'The "Burbs (1989)',
+                          r"C:\temp\film",
+                          "line one\nline two",
+                          "</script><img src=x onerror=alert(1)>"):
+                out = render_template_string(template, p=value)
+                assert out.count("'") == 2, f"attribute broken by {value!r}: {out}"
+                assert "</script>" not in out
+                assert "onerror=" not in out.split("copyPath(")[0]
+
+    def test_the_quality_warning_function_exists(self):
+        """oninput named a function that was never added, so every keystroke in
+        the field threw a ReferenceError and the warning never appeared."""
+        text = Path("web/templates/settings.html").read_text()
+        if "warnAboutQualityGap(this)" in text:
+            assert "function warnAboutQualityGap" in text
+
+    def test_every_copy_button_goes_through_the_shared_helper(self):
+        """The plain-http guard landed in app.js only; the two buttons defined
+        in page-local scripts kept calling navigator.clipboard directly."""
+        for path in ("web/templates/doctor.html", "web/templates/storage.html"):
+            text = Path(path).read_text()
+            # Comments stripped: both files explain the guard at length, and an
+            # explanation naming the API is not a call to it.
+            code = "\n".join(
+                line for line in text.splitlines()
+                if not line.lstrip().startswith("//")
+            )
+            assert "navigator.clipboard" not in code, (
+                f"{path}: a copy button bypasses the secure-context guard"
+            )
+            assert "copyToClipboard(" in code

@@ -275,15 +275,26 @@ class TestTheDroppedTitlesActuallyStay:
             (raw / f"title_t{i:02d}.mkv").write_bytes(b"x" * 2048)
         return raw
 
-    def _session(self, track_count):
+    def _session(self, track_count, moved_out=0):
+        """*moved_out* stands for tracks whose file has already left raw/ —
+        which is what a passthrough job looks like, since _passthrough moves
+        the MKV rather than copying it."""
         import types
+
+        rows = [
+            types.SimpleNamespace(output_path=f"/elsewhere/gone{i}.mkv")
+            for i in range(moved_out)
+        ] + [
+            types.SimpleNamespace(output_path=None)
+            for _ in range(track_count - moved_out)
+        ]
 
         class _Query:
             def filter(self, *a):
                 return self
 
-            def count(self):
-                return track_count
+            def __iter__(self):
+                return iter(rows)
 
         return types.SimpleNamespace(query=lambda *a: _Query())
 
@@ -292,6 +303,14 @@ class TestTheDroppedTitlesActuallyStay:
         self._worker(tmp_path)._cleanup_raw(42, self._session(1))
         assert raw.is_dir(), "the fifteen titles the job log promised are gone"
         assert len(list(raw.glob("*.mkv"))) == 16
+
+    def test_a_passthrough_job_keeps_its_dropped_titles(self, tmp_path):
+        """With transcoding off the encoded MKV is *moved* out of raw/, so the
+        files left behind are exactly the dropped ones — and comparing what
+        survives against the track count came out equal, deleting them."""
+        raw = self._raw(tmp_path, 45, 15)      # one title already moved out
+        self._worker(tmp_path)._cleanup_raw(45, self._session(1, moved_out=1))
+        assert raw.is_dir()
 
     def test_an_ordinary_job_still_cleans_up(self, tmp_path):
         """One track per file: nothing was dropped, and 30 GB of MKVs must not
