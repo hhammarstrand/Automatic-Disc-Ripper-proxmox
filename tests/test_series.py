@@ -776,6 +776,44 @@ class TestADiscOfEpisodesAndOneClip:
         assert claimed == [5], f"claimed {claimed} for 5 episodes and 1 clip"
         assert config.series_mode_next_episode == 6
 
+    def test_the_scan_answers_when_the_rip_does_not(self, harness):
+        """The way this failed in the wild.
+
+        MakeMKV reports durations generously while scanning and sparsely
+        while ripping — often not at all. Reading only the rip left every
+        title with an unknown length, unknown counts as an episode by
+        design, and the 2:55 clip was filed as S01E06 between five real ones.
+        """
+        drive, config, encode_queue, tmp_path, monkeypatch, pipeline_mod = harness
+        from adr import seriesmode
+        from adr.ripper import RipResult
+
+        durations = [self.EPISODE] * 5 + [self.CLIP]
+        titles = {
+            index: {"filename": f"t{index:02d}.mkv", "duration": duration}
+            for index, duration in enumerate(durations)
+        }
+        monkeypatch.setattr(drive._ripper, "scan_disc", lambda d, job_id=None: titles)
+
+        def rip_without_durations(**kwargs):
+            out = self._rip(tmp_path, durations)
+            # Exactly what a real rip hands back: the names, and no clock.
+            out.title_info = {
+                index: {"filename": f"t{index:02d}.mkv"}
+                for index in range(len(durations))
+            }
+            return out
+
+        monkeypatch.setattr(drive._ripper, "rip", rip_without_durations)
+        monkeypatch.setattr(seriesmode, "take_episodes", lambda cfg, count: None)
+        drive._run_pipeline(None)
+
+        names = []
+        while not encode_queue.empty():
+            names.append(encode_queue.get().output_filename)
+        assert len([n for n in names if "S01E" in n]) == 5, names
+        assert len([n for n in names if n.startswith("Other/")]) == 1, names
+
     def test_a_disc_of_only_episodes_is_unchanged(self, harness):
         names, _ = self._run(harness, [self.EPISODE] * 4)
         assert len([n for n in names if "S01E" in n]) == 4

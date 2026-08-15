@@ -252,8 +252,16 @@ def only_the_feature(files, durations, main_index: int | None):
 DEFAULT_EPISODE_WINDOW = (15 * 60, 75 * 60)
 
 
+#: How small a title has to be, against the middle of the ones that look like
+#: episodes, before its size alone is taken as proof it is not one. A 100 MB
+#: clip beside five 1.1 GB episodes is 0.09 of them; a genuinely short episode
+#: of a variable-length series is nowhere near this low.
+SIZE_FLOOR_RATIO = 0.35
+
+
 def episode_mask(
     durations: list, window: tuple[int, int] | None = None,
+    sizes: list | None = None,
 ) -> list[bool]:
     """Which of these titles are episodes, and which are something else.
 
@@ -284,6 +292,28 @@ def episode_mask(
         True if seconds is None else bool(low <= float(seconds) <= high)
         for seconds in durations
     ]
+
+    # Size, only for the titles whose length nobody could tell us.
+    #
+    # "Unknown counts as an episode" is the right default against a single
+    # unreadable title, and the wrong one when the durations are *all*
+    # missing — which happens whenever MakeMKV reports them while scanning
+    # and not while ripping. Then every title is an episode, and a 2:55
+    # bonus clip is filed between five real ones. A file a fraction of the
+    # size of the others is not an episode, whatever nobody said about it.
+    if sizes and len(sizes) == len(durations):
+        known = [
+            size for size, seconds, keep in zip(sizes, durations, mask)
+            if keep and size
+        ]
+        if known:
+            middle = sorted(known)[len(known) // 2]
+            floor = middle * SIZE_FLOOR_RATIO
+            mask = [
+                keep and not (seconds is None and size and size < floor)
+                for keep, seconds, size in zip(mask, durations, sizes)
+            ]
+
     if not any(mask):
         return [True] * len(durations)
     return mask

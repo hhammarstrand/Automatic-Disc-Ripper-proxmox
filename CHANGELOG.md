@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.33.0
+
+**The bonus clip was still being filed as an episode.** 1.26 taught the split
+to tell a 2:55 clip from a 25-minute episode by its length — and then read the
+lengths from the wrong place. MakeMKV reports durations generously while
+*scanning* and sparsely while *ripping*, often not at all, and only the rip was
+consulted. Every title came back with an unknown length; unknown counts as an
+episode by design, so nothing was ever excluded and Saltkråkan's clip arrived as
+S01E06 between five real episodes.
+
+The scan already had the answer and was throwing it away. It is kept and asked
+second now. Behind it, file size is the last resort: when nobody can say how
+long the titles are, one that is a fraction of the size of the others is not an
+episode. A measured duration always wins — a long episode that compresses well
+is not demoted for being small, and a 2:55 clip in a huge file is still 2:55.
+
 ## 1.32.1
 
 **The rest of the places a drive is named.** 1.32.0 found them by grepping for

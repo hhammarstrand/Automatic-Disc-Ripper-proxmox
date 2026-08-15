@@ -140,3 +140,55 @@ class TestAShortClipIsNotAnEpisode:
         plan = naming.plan_output(movie, 1, episodes_mask=[True])
         assert plan.is_series is False
         assert plan.episodes == []
+
+
+class TestWhenNobodySaysHowLongTheTitlesAre:
+    """The gap the episode split fell through in the wild.
+
+    Durations come from MakeMKV's TINFO records, and MakeMKV reports them
+    generously while *scanning* and sparsely while *ripping* — often not at
+    all. The pipeline read only the rip, so every title came back with an
+    unknown length; unknown counts as an episode by design, and a 2:55 bonus
+    clip was filed as S01E06 between five real episodes of Saltkråkan.
+
+    The scan's records are consulted now, and size is the last resort behind
+    them.
+    """
+
+    def test_a_clip_is_caught_on_size_when_no_duration_is_known(self):
+        mask = naming.episode_mask(
+            [None] * 6, sizes=[1_100_000_000] * 5 + [100_000_000])
+        assert mask == [True] * 5 + [False]
+
+    def test_titles_of_similar_size_are_all_episodes(self):
+        """Nothing to distinguish them, so nothing is demoted."""
+        assert naming.episode_mask([None] * 6, sizes=[1_000_000_000] * 6) == [True] * 6
+
+    def test_a_genuinely_shorter_episode_survives(self):
+        """Episodes vary. The floor is a fraction of the middle one, not a
+        demand that they all match."""
+        mask = naming.episode_mask(
+            [None] * 4,
+            sizes=[1_000_000_000, 1_000_000_000, 900_000_000, 600_000_000])
+        assert mask == [True] * 4
+
+    def test_a_known_duration_beats_the_size(self):
+        """A long episode that happens to compress well must not be demoted
+        for being small — the length was measured, so size says nothing."""
+        mask = naming.episode_mask(
+            [25 * 60] * 3 + [25 * 60],
+            sizes=[1_000_000_000] * 3 + [50_000_000])
+        assert mask == [True] * 4
+
+    def test_size_never_promotes_a_title_the_clock_ruled_out(self):
+        """A 2:55 clip in a huge file is still 2:55."""
+        mask = naming.episode_mask(
+            [25 * 60] * 3 + [175],
+            sizes=[1_000_000_000] * 3 + [9_000_000_000])
+        assert mask == [True, True, True, False]
+
+    def test_without_sizes_the_old_behaviour_is_unchanged(self):
+        assert naming.episode_mask([None] * 6) == [True] * 6
+
+    def test_a_mismatched_size_list_is_ignored_rather_than_trusted(self):
+        assert naming.episode_mask([None] * 6, sizes=[1, 2]) == [True] * 6

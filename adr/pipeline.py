@@ -1424,6 +1424,10 @@ class DrivePipeline:
             # disc in can actually read.
             job_log = JobLog(self._config, job.id)
             selected_title_index = None
+            # The scan's title records, kept for after the rip. MakeMKV
+            # reports durations generously while scanning and sparsely while
+            # ripping, and the episode/extra split needs them — see below.
+            scan_titles: dict = {}
             if self._config.main_feature_only:
                 try:
                     logger.info("Main feature mode: scanning disc to find longest title...")
@@ -1761,14 +1765,28 @@ class DrivePipeline:
             # genuinely multi-part film. Getting that wrong in the extras
             # direction hides half a film; getting it wrong the other way makes
             # Plex stack a two-minute trailer onto the end of the movie.
-            durations = []
-            for mkv_file in rip_result.mkv_files:
-                seconds = None
-                for ti_info in rip_result.title_info.values():
-                    if ti_info.get("filename") == mkv_file.name:
-                        seconds = parse_duration(ti_info.get("duration", "0:00:00")) or None
-                        break
-                durations.append(seconds)
+            # The scan is asked second, and that is the whole point of
+            # keeping it. MakeMKV emits a full TINFO record set while
+            # *scanning* and a much thinner one while *ripping* — often with
+            # no duration at all — so reading only the rip left every title
+            # with an unknown length. Unknown counts as an episode, by
+            # design, and the result was a 2:55 bonus clip filed as S01E06
+            # between five real episodes.
+            def _seconds_for(name: str):
+                for source in (rip_result.title_info, scan_titles):
+                    for info in (source or {}).values():
+                        if info.get("filename") == name:
+                            value = parse_duration(info.get("duration", "0:00:00"))
+                            if value:
+                                return value
+                return None
+
+            durations = [_seconds_for(f.name) for f in rip_result.mkv_files]
+            if not any(durations):
+                logger.info(
+                    "Job %s: no title durations from either the rip or the "
+                    "scan; the episode split falls back to file size", job.id,
+                )
 
             rip_files = list(rip_result.mkv_files)
             # Sizes as the last resort. Duration comes from MakeMKV's TINFO
@@ -1841,7 +1859,7 @@ class DrivePipeline:
                 episodes_mask = episode_mask(durations, (
                     int(getattr(self._config, "series_min_minutes", 15)) * 60,
                     int(getattr(self._config, "series_max_minutes", 75)) * 60,
-                ))
+                ), sizes)
                 extras = [
                     (index, durations[index])
                     for index, keep in enumerate(episodes_mask) if not keep
