@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.35.0
+
+**The Doctor now checks the update mechanism itself.** Three links, and a break
+in any one is silent: the button writes a flag file, `adr-update.path` has to
+be running to notice it, and the service it starts has to have something to
+execute. 1.31 broke the third link for every installation updating from an
+older version, and the only symptom was the button doing nothing — no error, no
+log line, nothing on any page. It is a check now, named per broken link, with
+the one command that repairs all of it.
+
+Fittingly, this release exists to be the thing that update button installs.
+
 ## 1.34.2
 
 **Re-running the update from the host now always re-enables the watcher.**

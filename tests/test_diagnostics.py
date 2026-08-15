@@ -153,6 +153,7 @@ class TestRunChecks:
         assert ids == {
             "drives", "tools", "preset", "makemkv_key", "audio_tools",
             "hardware_encoding", "destination", "scratch", "database",
+            "update_chain",
         }
 
     def test_a_check_that_explodes_does_not_hide_the_others(self, tmp_path, monkeypatch):
@@ -161,7 +162,7 @@ class TestRunChecks:
         monkeypatch.setattr(diagnostics, "check_drives", _boom)
 
         result = diagnostics.run_checks(_config(tmp_path))
-        assert len(result["checks"]) == 9, "a broken drive must not hide a full disk"
+        assert len(result["checks"]) == 10, "a broken drive must not hide a full disk"
         drives = next(c for c in result["checks"] if c["id"] == "drives")
         assert drives["status"] == "warn"
         assert "sysfs went away" in drives["detail"]
@@ -543,3 +544,63 @@ class TestTheLogDoesNotGetTheSecretInTheFirstPlace:
         applog.quieten_request_logging()
         assert logging.getLogger("urllib3.connectionpool").level == logging.INFO
         assert logging.getLogger("urllib3").level == logging.INFO
+
+
+class TestTheUpdateChainReportsItself:
+    """The button writes a flag file, adr-update.path has to notice it, and
+    the service it starts has to have something to execute. A break in any
+    link is silent — the button simply does nothing — and 1.31 broke the third
+    one for every installation updating from an older version.
+    """
+
+    def _run(self, monkeypatch, *, unit=True, watcher=True, executable=True):
+        from pathlib import Path as _Path
+
+        from adr import diagnostics
+
+        real_exists = _Path.exists
+
+        def fake_exists(self):
+            if str(self) == "/etc/systemd/system/adr-update.service":
+                return unit
+            if str(self) == "/usr/local/lib/adr/update.sh":
+                return executable
+            return real_exists(self)
+
+        monkeypatch.setattr(_Path, "exists", fake_exists)
+        monkeypatch.setattr("adr.updater._unit_active", lambda u: watcher)
+        monkeypatch.setattr(diagnostics.os, "access", lambda p, m: executable)
+        return diagnostics.check_update_chain()
+
+    def test_a_healthy_chain_says_the_button_works(self, monkeypatch):
+        result = self._run(monkeypatch)
+        assert result["status"] == "ok"
+        assert "the button in the web UI works" in result["detail"]
+
+    def test_a_missing_executable_is_named(self, monkeypatch):
+        """The exact break 1.31 shipped: the unit installed, its ExecStart
+        absent, and nothing on screen saying so."""
+        result = self._run(monkeypatch, executable=False)
+        assert result["status"] == "fail"
+        assert "/usr/local/lib/adr/update.sh is missing" in result["detail"]
+        assert "update.sh" in result["fix"]
+
+    def test_a_stopped_watcher_is_named(self, monkeypatch):
+        result = self._run(monkeypatch, watcher=False)
+        assert result["status"] == "fail"
+        assert "would go unnoticed" in result["detail"]
+
+    def test_both_breaks_are_reported_together(self, monkeypatch):
+        """Fixing one and finding the other still broken is two trips to the
+        host."""
+        result = self._run(monkeypatch, watcher=False, executable=False)
+        assert "not running" in result["detail"]
+        assert "is missing" in result["detail"]
+
+    def test_an_install_predating_updates_is_a_warning_not_a_failure(
+        self, monkeypatch,
+    ):
+        """Nothing is broken there — the feature simply arrived later."""
+        result = self._run(monkeypatch, unit=False)
+        assert result["status"] == "warn"
+        assert "predates" in result["detail"]

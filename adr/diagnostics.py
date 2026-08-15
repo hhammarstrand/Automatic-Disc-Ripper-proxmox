@@ -89,6 +89,52 @@ def check_audio_tools(config) -> dict:
     )
 
 
+def check_update_chain() -> dict:
+    """Whether pressing Update in the web UI would actually do anything.
+
+    Three links, and a break in any one of them is silent. The button writes a
+    flag file; ``adr-update.path`` has to be running to notice it; the service
+    it starts has to have something to execute. 1.31 broke the third link for
+    every installation updating from an older version — the unit was installed
+    pointing at a copy of update.sh that the *previous* update.sh had never
+    been told to create — and the only visible symptom was the button doing
+    nothing at all, which is the worst way for this to fail.
+    """
+    from adr.updater import WATCH_UNIT, _unit_active
+
+    executable = Path("/usr/local/lib/adr/update.sh")
+    unit = Path("/etc/systemd/system/adr-update.service")
+
+    if not unit.exists():
+        return _check(
+            "update_chain", "In-app updates", "warn",
+            "This install predates in-app updates, so the button is not "
+            "available. One run from the host adds it.",
+            "pct exec {ctid} -- /opt/adr/scripts/update.sh",
+        )
+
+    broken = []
+    if not _unit_active(WATCH_UNIT):
+        broken.append(f"{WATCH_UNIT} is not running, so the request would go unnoticed")
+    if not (executable.exists() and os.access(executable, os.X_OK)):
+        broken.append(f"{executable} is missing, so the update service cannot start")
+
+    if broken:
+        return _check(
+            "update_chain", "In-app updates", "fail",
+            "; ".join(broken) + ". One run from the Proxmox host repairs all "
+            "of it — the copy of update.sh inside the container is already "
+            "the fixed one.",
+            "pct exec {ctid} -- /opt/adr/scripts/update.sh",
+        )
+
+    return _check(
+        "update_chain", "In-app updates", "ok",
+        "The watcher is running and the update service has something to run, "
+        "so the button in the web UI works.",
+    )
+
+
 def check_hardware_encoding(config) -> dict:
     """Whether a preset that wants a GPU can have one.
 
@@ -397,6 +443,7 @@ def run_checks(config) -> dict:
         ("destination", lambda: check_destination_path(config)),
         ("scratch", lambda: check_scratch(config)),
         ("database", lambda: check_database(config)),
+        ("update_chain", lambda: check_update_chain()),
     ):
         try:
             checks.append(fn())

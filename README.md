@@ -24,7 +24,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **No compilation:** MakeMKV from the `heyarje/makemkv-beta` PPA, HandBrakeCLI from Ubuntu universe.
 - **Automatic MakeMKV key:** fetches the current free beta key, or accepts your own.
 - **Web dashboard** (port 8080) with live progress, job history, a Storage page for NAS setup, settings, and in-browser playback.
-- **Doctor page** that self-diagnoses drives, tools, keys and storage — and updates the app from GitHub with one button.
+- **Doctor page** that self-diagnoses drives, tools, keys and storage — and updates the app from GitHub with one button. It also checks the update mechanism itself, because a break there is silent: the button writes a flag, a watcher has to notice it, and the service it starts has to have something to run.
 - **Logs page** with the service's own log, filterable by level and text — no `pct exec`, no journald, no shell.
 - **Test encoding** without a disc: encodes two seconds of video with whatever is actually configured, and says what the encoder objected to.
 - **Hardware encoding, and the ways it goes wrong**: the installer passes the host's GPU through and installs the driver stack — the right VA-API driver, and both Quick Sync runtimes, because they cover different processor generations. When Quick Sync still will not start, the encoder test finds out whether a driver name fixes it, whether ffmpeg can reach the same GPU, or whether software is the honest answer — by trying each, not by guessing — and the diagnostics bundle asks the oneVPL dispatcher which library it turned down.
