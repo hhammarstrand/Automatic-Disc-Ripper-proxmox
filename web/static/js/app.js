@@ -29,6 +29,45 @@
 // route ever forgets, instead of twenty-three copies of `data.error ||
 // 'Unknown error'` scattered across the front-end, each of which reads only
 // the key its author happened to know about.
+// A poster, or a tile that admits there is not one.
+//
+// TMDb has no poster for a great many of the things people actually own —
+// regional children's television especially — so the missing case is not an
+// edge case here, it is most of a Swedish library. A row that simply loses
+// its image column when the poster is absent makes the list ragged and the
+// titles stop lining up, which is worse than a plain grey tile.
+//
+// Built as elements rather than markup for the same reason the show list is:
+// a title with an apostrophe in it broke every handler on the page the last
+// time this was a template string.
+function posterPlaceholder(kind) {
+    const tile = document.createElement('div');
+    tile.className = 'adr-poster adr-poster-none';
+    const icon = document.createElement('i');
+    icon.className = kind === 'movie' ? 'bi bi-film' : 'bi bi-collection-play';
+    tile.appendChild(icon);
+    return tile;
+}
+
+function posterThumb(url, kind = 'tv') {
+    if (!url) return posterPlaceholder(kind);
+    const img = document.createElement('img');
+    img.className = 'adr-poster';
+    img.src = url;
+    img.alt = '';                    // decorative: the title is right beside it
+    img.loading = 'lazy';
+    // The dimensions are in the attributes as well as the stylesheet so the
+    // row reserves its space before the image arrives — over a phone's wifi
+    // the list otherwise reflows under the thumb as each poster lands.
+    img.width = 46;
+    img.height = 69;
+    // A dead or blocked URL renders as a broken-image glyph otherwise. The
+    // tile is what "no poster" looks like everywhere else in this list.
+    img.addEventListener('error', () => img.replaceWith(posterPlaceholder(kind)),
+                         {once: true});
+    return img;
+}
+
 function reasonFrom(payload, fallback = 'the server did not say why') {
     if (!payload) return fallback;
     return payload.error || payload.message || fallback;
@@ -1048,6 +1087,7 @@ function editSeries(jobId, season, firstEpisode, suggestedShow, suggestedYear) {
     document.getElementById('seriesFirstEpisode').value = firstEpisode;
     document.getElementById('seriesShowResults').innerHTML = '';
     document.getElementById('seriesShowResults').className = '';
+    document.getElementById('seriesPosterUrl').value = '';
     document.getElementById('seriesTmdbId').value = '';
     // Whatever the disc label parsed to, as a starting point. It is a guess
     // from a film search, which is exactly why the TMDb lookup is offered.
@@ -1083,6 +1123,9 @@ function editSeries(jobId, season, firstEpisode, suggestedShow, suggestedYear) {
                 document.getElementById('seriesShowName').value = d.show;
                 document.getElementById('seriesShowYear').value = d.year || '';
                 if (d.tmdb_id) document.getElementById('seriesTmdbId').value = d.tmdb_id;
+                // Disc 2 of a set gets disc 1's cover, so the answer that was
+                // filled in for you is one you can recognise rather than read.
+                if (d.poster) document.getElementById('seriesPosterUrl').value = d.poster;
             }
             if (d.reason) {
                 discHint.textContent = d.reason;
@@ -1150,7 +1193,8 @@ function searchSeriesShow(fromTyping = false) {
                 const button = document.createElement('button');
                 button.type = 'button';
                 button.className =
-                    'list-group-item list-group-item-action bg-transparent text-start';
+                    'list-group-item list-group-item-action bg-transparent '
+                    + 'text-start d-flex gap-2 align-items-start';
 
                 const name = document.createElement('strong');
                 name.textContent = s.name;
@@ -1161,9 +1205,17 @@ function searchSeriesShow(fromTyping = false) {
                 overview.className = 'small text-secondary';
                 overview.textContent = (s.overview || '').slice(0, 140);
 
-                button.append(name, year, overview);
-                button.addEventListener('click', () =>
-                    pickSeriesShow(s.tmdb_id, s.name, s.year || null));
+                // The poster the API has been sending all along. Two shows of
+                // the same name a few years apart is the ordinary case here —
+                // that is the whole reason this list exists — and the cover is
+                // what tells them apart at a glance where the year does not.
+                const text = document.createElement('div');
+                text.className = 'adr-poster-beside';
+                text.append(name, year, overview);
+                button.append(posterThumb(s.poster_url, 'tv'), text);
+
+                button.addEventListener('click', () => pickSeriesShow(
+                    s.tmdb_id, s.name, s.year || null, s.poster_url || ''));
                 return button;
             }));
             box.className = 'list-group';
@@ -1204,6 +1256,11 @@ function setSeriesStep(step) {
         const year = document.getElementById('seriesShowYear').value.trim();
         document.getElementById('seriesChosenName').textContent =
             name + (year ? ` (${year})` : '');
+        const slot = document.getElementById('seriesChosenPoster');
+        if (slot) {
+            slot.replaceChildren(posterThumb(
+                document.getElementById('seriesPosterUrl').value, 'tv'));
+        }
         chosen.classList.toggle('d-none', !name);
     }
 
@@ -1216,10 +1273,14 @@ function setSeriesStep(step) {
     }
 }
 
-function pickSeriesShow(tmdbId, name, year) {
+function pickSeriesShow(tmdbId, name, year, posterUrl) {
     document.getElementById('seriesTmdbId').value = tmdbId;
     document.getElementById('seriesShowName').value = name;
     document.getElementById('seriesShowYear').value = year || '';
+    // Carried so the confirm step can show which cover was chosen, and so
+    // saving can put it on the job — naming a series by hand used to leave
+    // the card with no image at all.
+    document.getElementById('seriesPosterUrl').value = posterUrl || '';
     // The list is cleared rather than replaced with "Using X": the chosen-show
     // row says that now, and on a phone it is the only one of the two the
     // confirm step shows.
@@ -1284,6 +1345,7 @@ function saveSeries() {
         show: document.getElementById('seriesShowName').value.trim(),
         year: parseInt(document.getElementById('seriesShowYear').value, 10) || null,
         tmdb_id: parseInt(document.getElementById('seriesTmdbId').value, 10) || null,
+        poster_url: document.getElementById('seriesPosterUrl').value || null,
     };
 
     // No job id: the modal was opened to start the mode rather than to fix a
@@ -1333,6 +1395,7 @@ function startSeriesMode() {
     if (discHint) { discHint.classList.add('d-none'); discHint.textContent = ''; }
     // Reuses the per-job series modal: same three questions, different verb.
     document.getElementById('seriesJobId').value = '';   // '' means "the mode"
+    document.getElementById('seriesPosterUrl').value = '';
     document.getElementById('seriesTmdbId').value = '';
     document.getElementById('seriesShowName').value = '';
     document.getElementById('seriesShowYear').value = '';

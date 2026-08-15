@@ -327,8 +327,14 @@ class TestValuesFromDataNeverBreakTheHandler:
         """JSON.stringify wraps its result in double quotes, which terminated
         the double-quoted attribute it was being written into."""
         source = Path("web/static/js/app.js").read_text()
+        # The function itself, not a fixed slice of characters after it. The
+        # window was 3000 characters, and adding a poster to each row pushed
+        # the handler past the end of it — so the test failed for growth
+        # rather than for the thing it is about, and would have passed just as
+        # readily if the handler had been deleted outright.
         start = source.index("function searchSeriesShow")
-        body = source[start:start + 3000]
+        end = source.index("\nfunction ", start + 1)
+        body = source[start:end]
         assert "onclick=" not in body, (
             "the show list builds inline handlers from data again"
         )
@@ -842,8 +848,11 @@ class TestTheSearchSheets:
 
     def test_choosing_a_show_moves_on(self):
         source = self.SOURCE.read_text()
+        # The function, not a character count after it: adding the poster to
+        # the row pushed the step change past an 800-character window and the
+        # test failed for length rather than for behaviour.
         start = source.index("function pickSeriesShow(")
-        body = source[start:start + 800]
+        body = source[start:source.index("\nfunction ", start + 1)]
         assert "setSeriesStep('confirm')" in body
 
     def test_the_choice_can_be_changed_without_starting_over(self):
@@ -1031,3 +1040,62 @@ def guard():
             capture_output=True, text=True)
         assert result.returncode == 0, result.stderr
         return json.loads(result.stdout)
+
+
+class TestThePickListsShowTheCover:
+    """Two shows of the same name a few years apart is the ordinary case in
+    this dialog — it is the reason the list exists — and the cover is what
+    tells them apart at a glance where the year does not. TMDb had been
+    sending a poster with every result all along; the row builder dropped it
+    on the floor while the film search beside it rendered one.
+    """
+
+    SOURCE = Path("web/static/js/app.js")
+
+    def _body(self, name: str) -> str:
+        source = self.SOURCE.read_text()
+        start = source.index(f"function {name}(")
+        return source[start:source.index("\nfunction ", start + 1)]
+
+    def test_the_show_rows_render_the_poster(self):
+        assert "posterThumb(s.poster_url" in self._body("searchSeriesShow")
+
+    def test_it_is_built_as_an_element_like_the_rest_of_the_row(self):
+        """The row builder was rewritten to elements because a title with an
+        apostrophe broke every handler on the page. An img in a template
+        string would walk straight back into that."""
+        body = self._body("posterThumb")
+        assert "createElement('img')" in body
+        assert "innerHTML" not in body
+
+    def test_a_show_with_no_poster_gets_a_tile_rather_than_a_gap(self):
+        """Most of a Swedish library, in practice. A row that loses its image
+        column makes the list ragged and the titles stop lining up."""
+        source = self.SOURCE.read_text()
+        assert "function posterPlaceholder(" in source
+        assert "return posterPlaceholder(kind)" in self._body("posterThumb")
+
+    def test_a_dead_url_falls_back_instead_of_showing_a_broken_image(self):
+        body = self._body("posterThumb")
+        assert "'error'" in body and "replaceWith" in body
+
+    def test_the_row_reserves_its_space_before_the_image_lands(self):
+        """Eight posters arriving one at a time over a phone's wifi otherwise
+        reflow the list under the thumb doing the tapping."""
+        body = self._body("posterThumb")
+        assert "img.width" in body and "img.height" in body
+        assert "loading" in body
+
+    def test_the_chosen_show_keeps_its_cover_on_the_confirm_step(self):
+        assert "seriesChosenPoster" in Path("web/templates/base.html").read_text()
+        assert "seriesChosenPoster" in self._body("setSeriesStep")
+
+    def test_the_cover_is_carried_to_the_job(self):
+        """Naming a series by hand nulled the poster and stopped there, so
+        every hand-named series had no image on a page where every film did."""
+        assert "poster_url" in self._body("saveSeries")
+        assert "seriesPosterUrl" in Path("web/templates/base.html").read_text()
+
+    @pytest.mark.parametrize("opener", ["editSeries", "startSeriesMode"])
+    def test_opening_the_dialog_drops_the_last_job_s_cover(self, opener):
+        assert "seriesPosterUrl').value = ''" in self._body(opener)

@@ -24,7 +24,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from adr import joblog
 from adr.config import Config
 from adr.disc import eject_drive, get_drive_models
-from adr.identify import TMDB_DETAIL_URL, TMDB_IMAGE_BASE, TMDB_IMAGE_BASE_SMALL, TMDB_SEARCH_URL
+from adr.identify import (
+    TMDB_DETAIL_URL,
+    TMDB_IMAGE_BASE,
+    TMDB_IMAGE_BASE_SMALL,
+    TMDB_IMAGE_PREFIX,
+    TMDB_SEARCH_URL,
+)
 from adr.models import (
     ACTIVE_STATUSES,
     ENCODE_PHASE_STATUSES,
@@ -158,6 +164,22 @@ def _preflight():
     )
     _preflight_cache = (now, result)
     return result
+
+
+def _tmdb_poster(value) -> str | None:
+    """A poster URL from the client, or None if it is not TMDb's.
+
+    The dashboard renders this straight into an ``img src``. Storing whatever
+    a request supplies would let anyone on the LAN — or any page the owner
+    happens to open, since a browser will send this request — plant a URL that
+    every later page load then fetches: a tracking pixel at best, and a probe
+    of whatever the container can reach at worst. Only the host these posters
+    actually come from is accepted.
+    """
+    text = str(value or "").strip()
+    if text.startswith(TMDB_IMAGE_PREFIX) and "\n" not in text and len(text) <= 512:
+        return text
+    return None
 
 
 def create_app(config: Config, pipeline_manager=None) -> Flask:
@@ -897,8 +919,12 @@ def _register_api_routes(app: Flask) -> None:
                     tmdb_id = data.get("tmdb_id")
                     if str(tmdb_id or "").isdigit():
                         job.tmdb_id = int(tmdb_id)
-                        # The poster is a film's; it no longer describes this job.
-                        job.poster_url = None
+                        # The film's poster no longer describes this job — but
+                        # clearing it and stopping there left every
+                        # hand-named series with no image at all, on a page
+                        # where every film has one. The dialog has just been
+                        # shown the show's own poster; it sends it back.
+                        job.poster_url = _tmdb_poster(data.get("poster_url"))
                 else:
                     # No show was picked, so whatever id is on the job came
                     # from the *film* search. TMDb's film and programme id

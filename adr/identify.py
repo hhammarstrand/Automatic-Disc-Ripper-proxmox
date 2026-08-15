@@ -21,6 +21,10 @@ TMDB_SEARCH_URL = "https://api.themoviedb.org/3/search/movie"
 TMDB_DETAIL_URL = "https://api.themoviedb.org/3/movie"  # append /{tmdb_id}
 TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p/w300"
 TMDB_IMAGE_BASE_SMALL = "https://image.tmdb.org/t/p/w200"
+#: What every poster URL this application stores has to start with. The
+#: dashboard renders these into an img src, and a URL from a request is a
+#: request from every later page load.
+TMDB_IMAGE_PREFIX = "https://image.tmdb.org/t/p/"
 
 
 # Minimum title similarity (0-1) required to trust a TMDb match for renaming.

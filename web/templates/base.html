@@ -280,6 +280,7 @@
                 <div class="modal-body">
                     <input type="hidden" id="seriesJobId">
                     <input type="hidden" id="seriesTmdbId">
+                    <input type="hidden" id="seriesPosterUrl">
 
                     <div class="alert alert-info small d-none" id="seriesDiscHint"></div>
 
@@ -318,9 +319,12 @@
                              filled in, so without this the sheet asks for a
                              season with nothing on it saying a season of what. -->
                         <div id="seriesChosenShow" class="alert alert-success d-flex justify-content-between align-items-center py-2 d-none">
-                            <span>
-                                <i class="bi bi-check-circle me-1"></i>Using
-                                <strong id="seriesChosenName"></strong>
+                            <span class="d-flex align-items-center gap-2">
+                                <span id="seriesChosenPoster"></span>
+                                <span>
+                                    <i class="bi bi-check-circle me-1"></i>Using
+                                    <strong id="seriesChosenName"></strong>
+                                </span>
                             </span>
                             <button type="button" class="btn btn-sm btn-outline-light" onclick="setSeriesStep('find')">
                                 Change

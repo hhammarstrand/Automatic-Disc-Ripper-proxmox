@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.44.0
+
+**The covers are back in the pick lists.** Picking the right show out of a
+TMDb result list is a recognition task, not a reading one — the poster of a
+1975 Swedish children's series settles the question in a glance, while three
+lines of grey text asking whether this is the 1975 one or the 2002 remake do
+not. The re-match dialog for films has always shown the artwork; the series
+search never did, and it is the search you are actually doing while standing
+at the drive with the box in your other hand. The image was already there:
+`search_series()` has returned `poster_url` since the day it was written, the
+endpoint passed it through untouched, and the row builder in the browser threw
+it away. It now renders a 46×69 thumbnail beside each result, with a bordered
+film-strip placeholder for the shows TMDb has no artwork for, so the rows stay
+the same height and the list does not comb.
+
+The cover follows the choice through the rest of the flow. Once a show is
+picked it stays visible on the confirm step, which is the step where you set
+the season and the first episode number and where "am I still naming the right
+series?" is a fair question. Disc 2 of a box set inherits it from disc 1
+along with the title it was already inheriting.
+
+**A show you name by hand keeps its cover too.** Setting the content type
+stored `poster_url = None` unconditionally, so a series you typed in yourself
+was left imageless everywhere afterwards, including on the dashboard card — a
+straightforward oversight, and the reason half the shelf looks artwork-less
+even though TMDb had the image all along. The browser now sends the poster it
+displayed and the server stores it, but only after checking it is genuinely a
+TMDb image address: the check is a prefix whitelist, one line, and it refuses
+anything else including a newline smuggled into an otherwise valid URL.
+
 ## 1.43.0
 
 **The last two dialogs that hold something long take the whole screen on a

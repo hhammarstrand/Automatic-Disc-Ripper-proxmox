@@ -312,3 +312,71 @@ class TestASubfolderOfAMountIsNotTheContainerDisk:
         paths = _client(config).get("/api/storage").get_json()["paths"]
         assert paths["plex"]["on_separate_filesystem"] is True
         assert paths["raw"]["on_separate_filesystem"] is False
+
+
+class TestTheShowPosterReachesTheJob:
+    """Naming a series by hand cleared the film's poster — correctly, it was a
+    film's — and then stopped, so every hand-named series sat on the dashboard
+    with no image at all while every film had one. The dialog has just been
+    shown the show's own poster; it sends it back."""
+
+    def _job(self):
+        from adr.models import Job, JobStatus, get_session, init_db
+        from adr.utils import utcnow
+
+        init_db()
+        session = get_session()
+        job = Job(disc_label="THE_WIRE_S02_D3", title="The Wire (2008 film)",
+                  year=2008, drive="/dev/sr0", status=JobStatus.RIPPED,
+                  started_at=utcnow(), tmdb_id=999,
+                  poster_url="https://image.tmdb.org/t/p/w300/film.jpg")
+        session.add(job)
+        session.commit()
+        job_id = job.id
+        session.close()
+        return job_id
+
+    def _post(self, tmp_path, job_id, poster):
+        client = _client(_make_config(tmp_path))
+        return client.post(f"/api/jobs/{job_id}/content-type", json={
+            "content_type": "series", "season": 2, "first_episode": 5,
+            "show": "The Wire", "year": 2002, "tmdb_id": 1438,
+            "poster_url": poster,
+        })
+
+    def _stored(self, job_id):
+        from adr.models import Job, get_session
+
+        session = get_session()
+        try:
+            return session.get(Job, job_id).poster_url
+        finally:
+            session.close()
+
+    def test_the_shows_own_poster_is_kept(self, tmp_path):
+        job_id = self._job()
+        wanted = "https://image.tmdb.org/t/p/w300/wire.jpg"
+        assert self._post(tmp_path, job_id, wanted).status_code == 200
+        assert self._stored(job_id) == wanted
+
+    def test_a_url_from_anywhere_else_is_refused(self, tmp_path):
+        """The dashboard renders this straight into an img src, so a stored
+        URL is a request every later page load makes. A browser will send this
+        POST on any page the owner happens to open."""
+        job_id = self._job()
+        assert self._post(
+            tmp_path, job_id, "https://evil.example/pixel.gif").status_code == 200
+        assert self._stored(job_id) is None, "a foreign host was stored"
+
+    def test_the_films_poster_is_still_dropped_when_none_is_offered(self, tmp_path):
+        """The old behaviour where there is nothing better: a film's cover
+        does not describe a season."""
+        job_id = self._job()
+        assert self._post(tmp_path, job_id, None).status_code == 200
+        assert self._stored(job_id) is None
+
+    def test_a_newline_cannot_ride_along(self, tmp_path):
+        job_id = self._job()
+        self._post(tmp_path, job_id,
+                   "https://image.tmdb.org/t/p/w300/a.jpg\nX-Evil: 1")
+        assert self._stored(job_id) is None

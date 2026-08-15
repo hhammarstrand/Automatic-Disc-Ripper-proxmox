@@ -1295,3 +1295,53 @@ class TestTheSeasonUsedForTheLookupIsTheOneReported:
             assert self._suggest(session, this)["show"] == "The Wire"
         finally:
             session.close()
+
+
+class TestTheSiblingDiscLendsItsCover:
+    """Disc 2 of a set has its show filled in from disc 1 already. The cover
+    was the one thing left out, so the answer that was filled in for you was
+    something to read rather than recognise."""
+
+    def _disc(self, session, label, season=None, title=None, poster=None,
+              episodes=(), content_type="series"):
+        from adr.models import Job, Track
+
+        job = Job(disc_label=label, drive="/dev/sr0", content_type=content_type,
+                  series_season=season, title=title, poster_url=poster)
+        session.add(job)
+        session.commit()
+        for number in episodes:
+            session.add(Track(job_id=job.id, track_number=number,
+                              filename=f"{label}-{number}.mkv",
+                              episode_number=number))
+        session.commit()
+        return job
+
+    def test_the_poster_comes_across(self, tmp_path):
+        from adr.models import get_session, init_db
+        from adr.series import suggest_numbering
+
+        init_db()
+        session = get_session()
+        try:
+            self._disc(session, "THE_WIRE_D1", season=1, title="The Wire",
+                       poster="https://image.tmdb.org/t/p/w300/wire.jpg",
+                       episodes=[1, 2, 3])
+            this = self._disc(session, "THE_WIRE_D2", content_type="movie")
+            out = suggest_numbering(session, this)
+            assert out["show"] == "The Wire"
+            assert out["poster"] == "https://image.tmdb.org/t/p/w300/wire.jpg"
+        finally:
+            session.close()
+
+    def test_no_earlier_disc_means_no_poster_rather_than_a_wrong_one(self, tmp_path):
+        from adr.models import get_session, init_db
+        from adr.series import suggest_numbering
+
+        init_db()
+        session = get_session()
+        try:
+            this = self._disc(session, "FIREFLY_D2", content_type="movie")
+            assert suggest_numbering(session, this)["poster"] is None
+        finally:
+            session.close()

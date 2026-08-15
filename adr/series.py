@@ -381,9 +381,13 @@ def suggest_numbering(session, job) -> dict:
     show = ""
     year = None
     tmdb_id = None
+    poster = None
     for other in _same_show_jobs(session, label["show"], job, season):
         if (other.title or "").strip():
             show, year, tmdb_id = other.title, other.year, other.tmdb_id
+            # The cover too. The show being filled in for you is easier to
+            # recognise than to read, and disc 1 already looked it up.
+            poster = other.poster_url
             break
 
     return {
@@ -395,6 +399,7 @@ def suggest_numbering(session, job) -> dict:
         "show": show,
         "year": year,
         "tmdb_id": tmdb_id,
+        "poster": poster,
         "show_from": "an earlier disc of this set" if show else "",
     }
 

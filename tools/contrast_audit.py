@@ -128,12 +128,15 @@ document.getElementById('seriesShowName').value = 'The Wire';
 const box = document.getElementById('seriesShowResults');
 box.className = 'list-group';
 box.replaceChildren(...[
-  ['The Wire', 2002, 'Baltimore drug scene, seen through the eyes of dealers and police.'],
-  ['The Wire', 2007, 'A documentary about the cable under the Atlantic.'],
-].map(([name, year, overview]) => {
+  ['The Wire', 2002, 'Baltimore drug scene, seen through the eyes of dealers and police.', 'x'],
+  // Poster-less on purpose: TMDb has none for a great many of the things
+  // people own, and the tile that stands in for it is a colour pair too.
+  ['Vi på Saltkråkan', 1964, 'Summers on an island in the Stockholm archipelago.', ''],
+].map(([name, year, overview, poster]) => {
   const button = document.createElement('button');
   button.type = 'button';
-  button.className = 'list-group-item list-group-item-action bg-transparent text-start';
+  button.className = 'list-group-item list-group-item-action bg-transparent '
+    + 'text-start d-flex gap-2 align-items-start';
   const strong = document.createElement('strong');
   strong.textContent = name;
   const span = document.createElement('span');
@@ -142,7 +145,14 @@ box.replaceChildren(...[
   const div = document.createElement('div');
   div.className = 'small text-secondary';
   div.textContent = overview;
-  button.append(strong, span, div);
+  const text = document.createElement('div');
+  text.className = 'adr-poster-beside';
+  text.append(strong, span, div);
+  // The real renderer's shape: a thumb, or the tile that admits there is
+  // none. A src that will not resolve exercises the same fallback.
+  const thumb = poster ? posterThumb('/static/icons/icon-192.png', 'tv')
+                       : posterPlaceholder('tv');
+  button.append(thumb, text);
   return button;
 }));
 """
