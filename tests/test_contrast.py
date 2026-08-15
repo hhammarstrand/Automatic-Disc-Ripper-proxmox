@@ -240,6 +240,60 @@ class TestButtonsOnAlerts:
         assert ".border-danger-subtle" in CSS.read_text()
 
 
+class TestTheBottomBarAndSheets:
+    """The phone's navigation is a bar of 11px labels on the darkest surface
+    in the application, which is the combination least likely to survive being
+    read at arm's length — and the one nobody would think to measure, because
+    the colours are the theme's own and each is correct somewhere else.
+
+    The sheet behind More is the first offcanvas here, and Bootstrap ships it
+    white for the same reason it shipped the modals and the active tab white:
+    it assumes a light page. That assumption is the single most repeated bug
+    in this file's history.
+    """
+
+    def test_the_bars_share_a_colour_that_can_be_checked(self, palette):
+        """It was a literal inside .navbar, which no test could read and the
+        second bar would have copied by hand."""
+        assert "adr-nav-bg" in palette
+        assert _declared(".navbar").get("background-color") == "var(--adr-nav-bg)"
+
+    def test_an_unselected_label_is_readable(self, palette):
+        """Muted grey is what four of the five items are, all of the time."""
+        assert contrast(palette["adr-text-muted"], palette["adr-nav-bg"]) >= AA_TEXT
+
+    def test_the_selected_label_is_readable(self, palette):
+        assert contrast(palette["adr-accent"], palette["adr-nav-bg"]) >= AA_TEXT
+
+    def test_ordinary_text_survives_on_the_bar_too(self, palette):
+        """The brand and the Online badge sit on the same ground up top."""
+        assert contrast(palette["adr-text"], palette["adr-nav-bg"]) >= AA_TEXT
+
+    def test_which_item_is_selected_is_not_only_a_colour(self):
+        """Blue against grey at 11px, on a screen held at arm's length in a
+        room with a disc drive in it."""
+        assert ".adr-bottomnav-item.active::before" in CSS.read_text()
+
+    def test_the_sheet_is_not_bootstraps_white_panel(self, palette):
+        declared = _declared(".offcanvas")
+        assert declared.get("background-color"), (
+            "the offcanvas keeps --bs-body-bg, which is #fff — a white card "
+            "sliding up over a dark application"
+        )
+        assert declared.get("color"), "the sheet sets no text colour"
+        assert contrast(
+            _resolve(declared["color"], palette),
+            _resolve(declared["background-color"], palette),
+        ) >= AA_TEXT
+
+    def test_the_bar_sits_under_every_overlay(self):
+        """Bootstrap's offcanvas is 1045 and its modal backdrop 1050. A bar
+        above either is live navigation drawn on top of a dialog that is in
+        the middle of asking a question."""
+        z = _declared(".adr-bottomnav").get("z-index")
+        assert z and int(z) < 1045
+
+
 class TestTheActiveTab:
     """The bug this file was written for."""
 

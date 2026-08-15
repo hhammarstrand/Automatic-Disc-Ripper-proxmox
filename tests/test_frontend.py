@@ -602,6 +602,85 @@ class TestARefreshDoesNotInterruptTyping:
         assert "location.reload()" in source
 
 
+class TestTheBottomNav:
+    """Six items behind a hamburger, at the top of a screen held in one hand.
+
+    Every page change cost two taps and a menu that covered the page being
+    left, and the reach was wrong: the top-left corner of a 6.1-inch phone is
+    the hardest place on it to get a thumb to. The four pages anyone moves
+    between are on screen now, at the bottom, and the two reference pages are
+    behind More.
+    """
+
+    def test_the_bar_is_there_and_is_a_phone_thing(self, client):
+        html = client.get("/").get_data(as_text=True)
+        assert "adr-bottomnav" in html
+        assert re.search(r'class="adr-bottomnav d-md-none"', html), (
+            "the bar has to disappear at md, where the topbar takes over"
+        )
+
+    @pytest.mark.parametrize("path", PAGES)
+    def test_every_page_says_which_one_it_is(self, client, path):
+        """Exactly one, on every page including the two behind More — a bar
+        with nothing lit says you are nowhere, and a bar with two lit is worse
+        than one with none."""
+        html = client.get(path).get_data(as_text=True)
+        assert html.count('aria-current="page"') == 1, (
+            f"{path} marks {html.count('aria-current=')} items as current"
+        )
+
+    @pytest.mark.parametrize("path,label", [
+        ("/", "Dashboard"), ("/history", "History"),
+        ("/settings", "Settings"), ("/doctor", "Doctor"),
+        ("/storage", "Storage"), ("/logs", "Logs"),
+    ])
+    def test_the_marked_item_is_the_page_you_are_on(self, client, path, label):
+        html = client.get(path).get_data(as_text=True)
+        marked = html.split('aria-current="page"')[1][:200]
+        assert label in marked
+
+    def test_the_two_remaining_pages_live_behind_more(self, client):
+        html = client.get("/").get_data(as_text=True)
+        sheet = html.split('id="moreSheet"')[1].split("</div>\n\n")[0]
+        assert 'href="/storage"' in sheet
+        assert 'href="/logs"' in sheet
+
+    def test_the_hamburger_is_gone_below_md(self, client):
+        """Two ways to the same six pages, one of them covering the page you
+        were reading."""
+        html = client.get("/").get_data(as_text=True)
+        toggler = re.search(r'<button class="navbar-toggler([^"]*)"', html).group(1)
+        assert "d-none d-md-block" in toggler
+
+    def test_whether_the_service_is_answering_is_visible_without_a_menu(self, client):
+        """#connBadge sat inside the collapse, so on a phone the answer to
+        "has the box stopped talking to me?" was behind the hamburger — asked
+        by people looking at a page that has stopped changing."""
+        html = client.get("/").get_data(as_text=True)
+        before_collapse = html.split('id="navContent"')[0]
+        assert 'id="connBadge"' in before_collapse
+
+    def test_the_doctor_count_reaches_the_phone(self, client):
+        html = client.get("/").get_data(as_text=True)
+        assert 'id="doctorBadgeMobile"' in html
+        assert "doctorBadgeMobile" in Path("web/static/js/app.js").read_text()
+
+    def test_the_bar_does_not_cover_the_end_of_the_page(self):
+        """It is fixed, so it is out of the flow and sits on top of whatever
+        the page ends with — the Save button on Settings, the last job in
+        History — and the toasts were rendering underneath it."""
+        css = Path("web/static/css/style.css").read_text()
+        mobile = css[css.index("max-width: 767.98px"):]
+        assert "padding-bottom: calc(64px" in mobile
+        assert "#toastHost" in mobile
+
+    def test_the_home_indicator_has_its_strip(self):
+        """The bottom of a notched iPhone belongs to the system. Labels drawn
+        into it are labels with a bar through them."""
+        css = Path("web/static/css/style.css").read_text()
+        assert css.count("env(safe-area-inset-bottom)") >= 2
+
+
 #: The script is run rather than read, because reading it is what a reviewer
 #: already did. It is loaded into a context with just enough of a browser to
 #: answer the three questions uiIsBusy asks, and then the reload is actually

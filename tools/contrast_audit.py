@@ -210,6 +210,12 @@ def main():
             time.sleep(0.25)
 
     pages = ["/", "/history", "/settings", "/storage", "/doctor", "/logs"]
+    # States that only exist after something is opened, and therefore have
+    # never been measured. Same blind spot as the series-mode banner: the
+    # markup is on every page and no default render shows any of it.
+    opened = [
+        ("more sheet", "/", "document.getElementById('moreNavBtn').click()"),
+    ]
     # Phone first: it is where the report came from, and a 390px viewport
     # reflows things onto backgrounds they never share on a desktop.
     viewports = [("iphone", 390, 844), ("desktop", 1440, 900)]
@@ -230,6 +236,23 @@ def main():
                 for item in page.evaluate(WALKER):
                     if item["ratio"] < item["need"]:
                         item["page"] = path
+                        item["viewport"] = vname
+                        findings.append(item)
+            for label, path, script in opened:
+                page.goto(f"http://127.0.0.1:{port}{path}", wait_until="networkidle")
+                page.wait_for_timeout(300)
+                # The bottom bar is display:none above md, so the button that
+                # opens this is not there to click on the desktop pass.
+                if not page.evaluate(
+                        "() => document.getElementById('moreNavBtn') "
+                        "&& getComputedStyle(document.getElementById('moreNavBtn'))"
+                        ".display !== 'none'"):
+                    continue
+                page.evaluate(script)
+                page.wait_for_timeout(600)     # the sheet slides in
+                for item in page.evaluate(WALKER):
+                    if item["ratio"] < item["need"]:
+                        item["page"] = f"{path} ({label})"
                         item["viewport"] = vname
                         findings.append(item)
             page.close()

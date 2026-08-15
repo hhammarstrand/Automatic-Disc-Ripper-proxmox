@@ -25,6 +25,13 @@
     /* Bootstrap writes code in #d63384, picked for a white page; on the card
        here that is 3.84:1. Same hue, lifted until it clears AA. */
     --adr-code: #ff7b9c;
+
+    /* The chrome at the top and the bottom of the screen: one shade below the
+       page, so a bar reads as frame rather than as content. A token rather
+       than the literal it used to be in .navbar, because two bars now share
+       it and the labels on the bottom one are small enough that the ratio
+       against it has to be checked rather than assumed. */
+    --adr-nav-bg: #010409;
 }
 
 body {
@@ -41,7 +48,7 @@ main {
 
 /* ---- Navbar ---- */
 .navbar {
-    background-color: #010409 !important;
+    background-color: var(--adr-nav-bg) !important;
     border-bottom: 1px solid var(--adr-border) !important;
 }
 .navbar-brand {
@@ -608,6 +615,95 @@ a.text-info:hover {
 .modal-header, .modal-footer {
     border-color: var(--adr-border) !important;
 }
+/* Bootstrap's offcanvas is a white panel, for the same reason the modals and
+ * the active tab were: it assumes a light page. The More sheet is the first
+ * thing here to use one, and left alone it would slide a white card up over
+ * a dark application with near-white text on it. */
+.offcanvas {
+    background-color: var(--adr-card) !important;
+    color: var(--adr-text) !important;
+    border-color: var(--adr-border) !important;
+}
+.offcanvas-header,
+.offcanvas-footer {
+    border-color: var(--adr-border) !important;
+}
+.offcanvas-title {
+    color: var(--adr-text) !important;
+}
+/* The sheet is only as tall as what is in it. Bootstrap's offcanvas-bottom is
+ * a fixed 30vh, which for two links is mostly empty space. */
+.offcanvas-bottom.adr-moresheet {
+    height: auto;
+    border-top-left-radius: 0.75rem;
+    border-top-right-radius: 0.75rem;
+    padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* ---- The bar at the bottom of a phone ----
+ *
+ * z-index 1030 is deliberate and is the whole of the stacking story: Bootstrap
+ * puts the offcanvas at 1045, the modal backdrop at 1050 and the modal at
+ * 1055, so the bar sits under every overlay in the application. A bar that
+ * floated over the backdrop would be a set of live navigation links on top of
+ * a dialog that is trying to ask a question.
+ */
+.adr-bottomnav {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1030;
+    display: flex;
+    background-color: var(--adr-nav-bg);
+    border-top: 1px solid var(--adr-border);
+    /* The home indicator's strip on a notched iPhone. Without this the labels
+       sit under it and the bottom row of pixels is unusable. */
+    padding-bottom: env(safe-area-inset-bottom);
+}
+.adr-bottomnav-item {
+    position: relative;
+    flex: 1 1 0;
+    min-height: 56px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 0.35rem 0.15rem;
+    border: 0;
+    background: transparent;
+    color: var(--adr-text-muted);
+    font-size: 0.68rem;
+    line-height: 1.1;
+    text-align: center;
+    text-decoration: none;
+}
+.adr-bottomnav-item .bi {
+    font-size: 1.2rem;
+    line-height: 1;
+}
+.adr-bottomnav-item.active {
+    color: var(--adr-accent);
+}
+/* Colour alone is not enough to say which one you are on — it is 11px text
+ * seen at arm's length in a room with a disc drive in it. */
+.adr-bottomnav-item.active::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 22%;
+    right: 22%;
+    height: 2px;
+    background: var(--adr-accent);
+}
+.adr-bottomnav-badge {
+    position: absolute;
+    top: 0.3rem;
+    left: 55%;
+    font-size: 0.6rem;
+}
+
 /* The detail pane in a confirmation: a list of file paths about to be
  * deleted, which has to be readable at a glance and scrollable when long. */
 #confirmDetail {
@@ -645,6 +741,19 @@ input, select, textarea, .list-group-item-action {
 }
 
 @media (max-width: 767.98px) {
+    /* The bottom bar is fixed, so it is not in the flow and covers whatever
+       the page ends with — which was the Save button on Settings and the
+       last job in History. The page gets the bar's height back as padding,
+       plus the home indicator's strip on a notched phone. */
+    body {
+        padding-bottom: calc(64px + env(safe-area-inset-bottom));
+    }
+    /* Toasts are pinned to the bottom right and were rendering underneath
+       the bar. A message nobody can see is the same as no message. */
+    #toastHost {
+        bottom: calc(64px + env(safe-area-inset-bottom)) !important;
+    }
+
     /* Fingers, not pointers. Apple's floor is 44px; the table rows'
        icon buttons were 26px, and the difference is mis-taps on the
        delete button beside the retry button. */

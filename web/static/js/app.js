@@ -1421,13 +1421,21 @@ function refreshDriveHealth() {
 // ------------------------------------------------------------------ //
 
 function refreshDoctorBadge() {
-    const badge = document.getElementById('doctorBadge');
-    if (!badge || window.location.pathname === '/doctor') return Promise.resolve();
+    // Both of them: the topbar's, and the one on the bottom bar's Doctor tab.
+    // The phone only ever sees the second, and a count that appears on the
+    // desktop and not on the device the application is driven from is a count
+    // nobody reads.
+    const badges = ['doctorBadge', 'doctorBadgeMobile']
+        .map(id => document.getElementById(id))
+        .filter(Boolean);
+    if (!badges.length || window.location.pathname === '/doctor') return Promise.resolve();
     return fetch('/api/doctor')
         .then(r => r.json())
         .then(d => {
-            badge.textContent = d.failing;
-            badge.classList.toggle('d-none', d.failing === 0);
+            badges.forEach(badge => {
+                badge.textContent = d.failing;
+                badge.classList.toggle('d-none', d.failing === 0);
+            });
         })
         .catch(err => { throw err; });
 }

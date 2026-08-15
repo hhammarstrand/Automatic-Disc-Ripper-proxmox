@@ -1,5 +1,43 @@
 # Changelog
 
+## 1.40.0
+
+**Navigation on a phone is a bar at the bottom, not a hamburger at the top.**
+Six items lived behind a menu button in the far top-left corner — the hardest
+place on a 6.1-inch screen to reach with the thumb of the hand holding it —
+and every page change cost two taps, the second of them aimed at a menu drawn
+over the page being left. The four pages anyone actually moves between are on
+screen now: Dashboard, History, Settings and Doctor, at the end of the thumb,
+with the Doctor's failing-check count on the tab where the phone can see it.
+Storage and Logs are behind More, because they are read once a month and
+neither is a place you go mid-disc.
+
+Which tab is lit is decided by the server, exactly as the topbar's already
+was. A bar that highlights itself in JavaScript is a bar that is wrong for as
+long as the script takes to run, on every load, which on this hardware is
+long enough to see.
+
+Between 768 and 991 pixels nothing changes: too wide for a bottom bar, too
+narrow for the full topbar, so the hamburger stays. Below 768 it is gone
+rather than duplicated — two routes to the same six pages is one more than
+anybody needs.
+
+**"Online" is visible without opening a menu.** The badge that says whether
+the service is still answering sat inside the collapsed navbar, so on a phone
+it could only be seen by someone who opened the hamburger — and the question
+it answers is asked by people staring at a page that has stopped changing,
+who are not opening menus. It sits in the bar itself now, at both widths.
+
+**The sheet, and the colour underneath both bars.** Bootstrap's offcanvas is a
+white panel: the same light-page assumption that made the active tab
+unreadable and hid two buttons inside an alert, arriving for the fourth time.
+It is restated, and the bar colour that was a literal inside `.navbar` is now
+a token both bars share — so the contrast of an 11px label against it is
+something a test can read rather than something a person assumed. The bar
+sits at z-index 1030, below every Bootstrap overlay, and the page gets its
+64px back as padding so the last job in History and the Save button on
+Settings are not underneath it. The toasts were.
+
 ## 1.39.0
 
 **The dashboard no longer reloads itself out from under you.** Three of the
