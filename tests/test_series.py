@@ -643,3 +643,140 @@ class TestTheMergeDoesNotCostTheSeason:
         assert (existing / "The Wire (2002) - S02E01 (2).mp4").is_file(), (
             "the arriving episode was lost instead of set aside"
         )
+
+
+class TestADiscOfEpisodesAndOneClip:
+    """End to end, through the real video path, because the two halves of this
+    have to agree and they live in different modules.
+
+    Saltkråkan's disc carried five episodes and a 2:55 clip. Numbering every
+    ripped title in disc order made the clip an episode, which shifted the
+    ones after it *and* claimed a sixth number from series mode — so the next
+    disc in the box set started one episode too high as well. Getting the
+    names right while claiming the wrong count would leave the season just as
+    broken, one disc later.
+    """
+
+    EPISODE = "0:25:00"
+    CLIP = "0:02:55"
+
+    @pytest.fixture
+    def harness(self, tmp_path, monkeypatch):
+        import queue
+
+        from adr import disctype
+        from adr import pipeline as pipeline_mod
+        from adr.config import Config
+        from adr.disctype import DiscInfo
+        from adr.models import init_db
+
+        path = tmp_path / "adr.yaml"
+        path.write_text(
+            f"raw_path: {tmp_path / 'raw'}\n"
+            f"completed_path: {tmp_path / 'completed'}\n"
+            f"staging_path: {tmp_path / 'staging'}\n"
+            f"tv_path: {tmp_path / 'tv'}\n"
+            "eject_after_rip: false\n"
+            "notify_enabled: false\n"
+            "require_completed_mount: false\n"
+            "transcode_enabled: false\n"
+            "main_feature_only: true\n"
+            "series_detection: true\n",
+        )
+        config = Config(str(path))
+        for name in ("raw", "completed", "staging", "tv"):
+            (tmp_path / name).mkdir(exist_ok=True)
+        init_db()
+
+        monkeypatch.setattr(
+            disctype, "classify",
+            lambda d: DiscInfo(kind=disctype.KIND_VIDEO, detail="Video."),
+        )
+        # No network, and no confident film match — a box-set disc must not
+        # be renamed into a movie halfway through this test.
+        from adr.identify import MovieInfo
+
+        monkeypatch.setattr(
+            pipeline_mod, "identify_disc",
+            lambda *a, **k: MovieInfo("Saltkrakan", confidence=0.0),
+        )
+
+        encode_queue = queue.Queue()
+        drive = pipeline_mod.DrivePipeline("/dev/sr0", config, encode_queue)
+        return drive, config, encode_queue, tmp_path, monkeypatch, pipeline_mod
+
+    def _rip(self, tmp_path, durations):
+        """A finished rip of len(durations) titles, on disk."""
+        from adr.ripper import RipResult
+
+        raw = tmp_path / "raw" / "1"
+        raw.mkdir(parents=True, exist_ok=True)
+        out = RipResult()
+        out.success = True
+        out.disc_name = "SALTKRAKAN"
+        out.mkv_files = []
+        out.title_info = {}
+        for index, duration in enumerate(durations):
+            path = raw / f"t{index:02d}.mkv"
+            path.write_bytes(b"M" * 4096)
+            out.mkv_files.append(path)
+            out.title_info[index] = {"filename": path.name, "duration": duration}
+        return out
+
+    def _run(self, harness, durations):
+        drive, config, encode_queue, tmp_path, monkeypatch, pipeline_mod = harness
+        from adr import seriesmode
+
+        claimed = []
+        real = seriesmode.take_episodes
+        monkeypatch.setattr(
+            seriesmode, "take_episodes",
+            lambda cfg, count: (claimed.append(count), real(cfg, count))[1],
+        )
+        titles = {
+            index: {"filename": f"t{index:02d}.mkv", "duration": duration}
+            for index, duration in enumerate(durations)
+        }
+        monkeypatch.setattr(drive._ripper, "scan_disc", lambda d, job_id=None: titles)
+        monkeypatch.setattr(
+            drive._ripper, "rip",
+            lambda **kw: self._rip(tmp_path, durations),
+        )
+        drive._run_pipeline(None)
+
+        names = []
+        while not encode_queue.empty():
+            names.append(encode_queue.get().output_filename)
+        return names, claimed
+
+    def test_the_clip_does_not_become_an_episode(self, harness):
+        names, _ = self._run(harness, [self.EPISODE] * 5 + [self.CLIP])
+        episodes = [n for n in names if "S01E" in n]
+        extras = [n for n in names if n.startswith("Other/")]
+        assert len(episodes) == 5, names
+        assert len(extras) == 1, names
+
+    def test_the_episodes_keep_consecutive_numbers(self, harness):
+        """A clip in the middle must not push the ones after it along."""
+        names, _ = self._run(
+            harness, [self.EPISODE] * 2 + [self.CLIP] + [self.EPISODE] * 2)
+        episodes = sorted(n for n in names if "S01E" in n)
+        assert [n[-3:] for n in episodes] == ["E01", "E02", "E03", "E04"], names
+
+    def test_series_mode_claims_episodes_not_files(self, harness):
+        """The half that only shows up on the *next* disc. Claiming one number
+        per ripped title starts the following disc an episode too high, and
+        nothing about this disc's own names would reveal it."""
+        drive, config, *_ = harness
+        config.update({
+            "series_mode": True, "series_mode_show": "Life on Seacrow Island",
+            "series_mode_season": 1, "series_mode_next_episode": 1,
+        })
+        _, claimed = self._run(harness, [self.EPISODE] * 5 + [self.CLIP])
+        assert claimed == [5], f"claimed {claimed} for 5 episodes and 1 clip"
+        assert config.series_mode_next_episode == 6
+
+    def test_a_disc_of_only_episodes_is_unchanged(self, harness):
+        names, _ = self._run(harness, [self.EPISODE] * 4)
+        assert len([n for n in names if "S01E" in n]) == 4
+        assert not [n for n in names if n.startswith("Other/")]

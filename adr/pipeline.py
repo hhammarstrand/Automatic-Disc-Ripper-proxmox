@@ -44,6 +44,7 @@ from adr.naming import (
     finished_files,
     only_the_feature,
     pick_main_feature,
+    episode_mask,
     plan_output,
     relative_folder,
 )
@@ -387,8 +388,11 @@ def _merge_into(src: Path, dest: Path, job, log_sink=None) -> None:
             message = (
                 f"{item.name} already existed in {dest} — kept the earlier "
                 f"file and saved this one as {target.name}. Two discs claiming "
-                "the same episode number usually means the season or the "
-                "starting episode needs correcting."
+                "the same episode number usually means every disc of the box "
+                "set is being numbered from 1: each one is detected on its "
+                "own and has no way of knowing what the last one used. "
+                "Settings → Series mode names the show once and carries the "
+                "episode number across discs, which is what stops this."
             )
             logger.warning("Job %s: %s", getattr(job, "id", "?"), message)
             if log_sink:
@@ -1691,15 +1695,49 @@ class DrivePipeline:
             # S02E01-E04, one overwriting the other in the same season folder.
             # Claiming is one atomic step now, and the number it returns is
             # what the plan is built from.
+            # Which of the ripped titles are actually episodes.
+            #
+            # Worked out before the numbers are claimed, because the count
+            # claimed has to be the count used: a disc carrying five episodes
+            # and one clip would otherwise take six numbers from series mode
+            # and start the next disc one episode too high, on top of
+            # misnaming its own.
+            episodes_mask = None
+            if is_series:
+                episodes_mask = episode_mask(durations, (
+                    int(getattr(self._config, "series_min_minutes", 15)) * 60,
+                    int(getattr(self._config, "series_max_minutes", 75)) * 60,
+                ))
+                extras = [
+                    (index, durations[index])
+                    for index, keep in enumerate(episodes_mask) if not keep
+                ]
+                for index, seconds in extras:
+                    job_log.append(
+                        "encode",
+                        f"Title {index + 1} ({format_duration(seconds)}) is not "
+                        f"episode-length, so it goes to {EXTRAS_FOLDER}/ instead "
+                        "of taking an episode number. Settings → Series sets "
+                        "what counts as an episode.",
+                    )
+                if extras:
+                    logger.info(
+                        "Job %s: %d of %d titles are extras, not episodes",
+                        job.id, len(extras), len(rip_files),
+                    )
+
             if (job.content_type or "movie") == "series":
-                claimed = seriesmode.take_episodes(self._config, len(rip_files))
+                claimed = seriesmode.take_episodes(
+                    self._config,
+                    sum(episodes_mask) if episodes_mask else len(rip_files),
+                )
                 if claimed is not None:
                     job.series_first_episode = claimed
                     session.commit()
 
             plan = plan_output(
                 job, len(rip_files), fallback_title, fallback_year,
-                main_index=main_index,
+                main_index=main_index, episodes_mask=episodes_mask,
             )
             plex_folder_name = plan.folder
             if main_index is not None:
@@ -1777,12 +1815,13 @@ class DrivePipeline:
 
             # The numbers were claimed above, before the plan was built. This
             # only reports what happened.
-            if plan.episodes:
+            numbered = [n for n in (plan.episodes or []) if n is not None]
+            if numbered:
                 after = seriesmode.state(self._config)
                 if after["active"]:
                     job_log.append(
                         "detect",
-                        f"Episodes {plan.episodes[0]}–{plan.episodes[-1]} used. "
+                        f"Episodes {numbered[0]}–{numbered[-1]} used. "
                         f"Next disc starts at episode {after['next_episode']}.",
                     )
 

@@ -246,9 +246,53 @@ def only_the_feature(files, durations, main_index: int | None):
     return [kept[main_index]], [length], None
 
 
+#: How long an episode runs, in seconds, when nobody has said otherwise.
+#: Mirrors the series-detection window on the settings page, because the
+#: question is the same one: is this title an episode of the programme?
+DEFAULT_EPISODE_WINDOW = (15 * 60, 75 * 60)
+
+
+def episode_mask(
+    durations: list, window: tuple[int, int] | None = None,
+) -> list[bool]:
+    """Which of these titles are episodes, and which are something else.
+
+    A box set disc is not only episodes. Saltkråkan shipped a 2:55 clip
+    alongside them, and because every ripped title was numbered in disc order
+    the clip became an episode — which does not merely add one bad file, it
+    shifts every episode after it by one and puts the rest of the disc out of
+    step with the season. The names are what Plex reads, so the whole run was
+    wrong from that point on.
+
+    Length is what separates them, and the window is the one the settings page
+    already uses to decide whether a disc is a series at all. A title too
+    short to be an episode is an extra; so is one too long, which is usually
+    the "play all" title holding the whole disc end to end and would otherwise
+    be filed as an episode of its own.
+
+    Two deliberate refusals to guess:
+
+    * a title whose length could not be read counts as an episode. Unknown is
+      not evidence, and demoting an episode loses it from the season, which is
+      worse than admitting an extra.
+    * if the rule leaves nothing at all, it is abandoned and everything is an
+      episode again. A disc of ten-minute cartoons against a fifteen-minute
+      floor would otherwise arrive as a folder of extras and no programme.
+    """
+    low, high = window or DEFAULT_EPISODE_WINDOW
+    mask = [
+        True if seconds is None else bool(low <= float(seconds) <= high)
+        for seconds in durations
+    ]
+    if not any(mask):
+        return [True] * len(durations)
+    return mask
+
+
 def plan_output(job, file_count: int, fallback_title: str = "",
                 fallback_year: int | None = None,
-                main_index: int | None = None) -> OutputPlan:
+                main_index: int | None = None,
+                episodes_mask: list[bool] | None = None) -> OutputPlan:
     """Work out folder and filenames for *file_count* ripped titles.
 
     *fallback_title* is used when the job has no confident title — the parsed
@@ -272,11 +316,34 @@ def plan_output(job, file_count: int, fallback_title: str = "",
         # the episode numbers then collide with real ones.
         season = int(1 if job.series_season is None else job.series_season)
         first = int(job.series_first_episode or 1)
-        numbers = episode_numbers(count, first)
+
+        # Which of these are episodes. Everything, unless the caller measured
+        # them — see episode_mask for why a 2:55 clip must not take a number.
+        mask = list(episodes_mask or [])
+        if len(mask) != count:
+            mask = [True] * count
+
+        numbers = iter(episode_numbers(sum(mask), first))
+        filenames: list[str] = []
+        episodes: list[int | None] = []
+        extra = 0
+        for is_episode in mask:
+            if is_episode:
+                number = next(numbers)
+                filenames.append(make_episode_filename(title, year, season, number))
+                episodes.append(number)
+            else:
+                # Not numbered, and not in the season folder's own listing:
+                # Plex reads "Other" as a local-extras folder, so it stays
+                # with the season without pretending to be part of it.
+                extra += 1
+                filenames.append(f"{EXTRAS_FOLDER}/Extra {extra}")
+                episodes.append(None)
+
         return OutputPlan(
             folder=f"{make_series_folder_name(title, year)}/{make_season_folder_name(season)}",
-            filenames=[make_episode_filename(title, year, season, n) for n in numbers],
-            episodes=numbers,
+            filenames=filenames,
+            episodes=episodes,
             is_series=True,
         )
 

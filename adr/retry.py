@@ -165,6 +165,12 @@ def requeue_encode(job, session, config, encode_queue) -> int:
         for t in (job.tracks or [])
         if t.filename and t.episode_number
     }
+    # And which files the first attempt had rows for at all. The difference
+    # between the two sets is the extras: a title the disc carried that was
+    # never an episode. Without this a retry re-plans them as episodes and
+    # shifts the whole season by one — the exact bug the first attempt had
+    # already got right.
+    known = {t.filename for t in (job.tracks or []) if t.filename}
 
     for track in list(job.tracks):
         session.delete(track)
@@ -210,26 +216,39 @@ def requeue_encode(job, session, config, encode_queue) -> int:
             )
             raw = kept
 
+    # What the first attempt decided about each file, when it saw all of them.
+    # Durations are not available here — these files are on disk with no
+    # MakeMKV records behind them — so the only evidence about which were
+    # episodes is what the old rows remember.
+    remembered = bool(known) and all(path.name in known for path in raw)
+    mask = [path.name in episode_of for path in raw] if remembered else None
+
     plan = plan_output(
         job, len(raw), fallback_title=job.disc_label or f"Job {job.id}",
-        main_index=main_index,
+        main_index=main_index, episodes_mask=mask,
     )
 
     # A series with a memory of its numbers keeps them. plan_output numbers
     # from series_first_episode by position, which is right for a fresh rip
     # and wrong for survivors of a partial one.
-    if plan.is_series and all(p.name in episode_of for p in raw):
+    if plan.is_series and remembered:
+        from adr.naming import EXTRAS_FOLDER
         from adr.series import make_episode_filename
 
-        numbers = [episode_of[p.name] for p in raw]
+        show = job.title or job.disc_label or f"Job {job.id}"
+        season = int(1 if job.series_season is None else job.series_season)
+        numbers = [episode_of.get(path.name) for path in raw]
+        filenames = []
+        extra = 0
+        for number in numbers:
+            if number is None:
+                extra += 1
+                filenames.append(f"{EXTRAS_FOLDER}/Extra {extra}")
+            else:
+                filenames.append(
+                    make_episode_filename(show, job.year, season, number))
         plan.episodes = numbers
-        plan.filenames = [
-            make_episode_filename(
-                job.title or job.disc_label or f"Job {job.id}",
-                job.year, int(job.series_season or 1), n,
-            )
-            for n in numbers
-        ]
+        plan.filenames = filenames
     dest_parent, _ = final_destination(job, config)
     staging = should_stage(dest_parent, config.stage_locally)
     if staging:

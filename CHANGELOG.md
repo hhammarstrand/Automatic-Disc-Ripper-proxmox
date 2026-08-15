@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.26.0
+
+**A two-minute clip on a box-set disc no longer becomes an episode.** Every
+ripped title was numbered in disc order, so the extra Saltkråkan ships
+alongside its episodes was filed as one — and that does not merely add one bad
+file. It shifts every episode after it by one, puts the disc out of step with
+the season, and the names are what Plex reads, so the whole run is wrong from
+that point on.
+
+Length decides, using the same window the settings page already uses to
+recognise a series at all. A title too short to be an episode is an extra; so
+is one too long, which is usually the "play all" title holding the whole disc
+end to end and was previously filed as an episode of its own. Extras go to
+`Other/`, which Plex reads as a local-extras folder, and the job log names each
+one and says why.
+
+Two refusals to guess: a title whose length could not be read stays an episode,
+because unknown is not evidence and losing a real episode is worse than
+admitting an extra — and if the rule would leave nothing at all, it is
+abandoned, so a disc of ten-minute cartoons does not arrive as a folder of
+extras and no programme.
+
+**Series mode now claims episode numbers, not files.** The count claimed has to
+be the count used: a disc with five episodes and one clip took six numbers and
+started the *next* disc an episode too high, which nothing about the current
+disc's own names would have revealed. A retry keeps the same split, rather than
+re-planning the extras back into episodes.
+
+**And the collision warning now names the fix.** Feeding a box set disc by disc
+with series mode off numbers every disc from 1, so each one collides with the
+last and lands as "(2)" and "(3)" files. The message said the season or
+starting episode needed correcting; it now says why it happens and points at
+the setting that carries the number across discs.
+
 ## 1.25.2
 
 **1.25.0 broke a button in exactly the way it fixed one.** The TV-series-mode

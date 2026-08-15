@@ -30,7 +30,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Hardware encoding, and the ways it goes wrong**: the installer passes the host's GPU through and installs the driver stack — the right VA-API driver, and both Quick Sync runtimes, because they cover different processor generations. When Quick Sync still will not start, the encoder test finds out whether a driver name fixes it, whether ffmpeg can reach the same GPU, or whether software is the honest answer — by trying each, not by guessing — and the diagnostics bundle asks the oneVPL dispatcher which library it turned down.
 - **One set of encoding settings** — spoken language, quality, height cap — told to whichever encoder runs, so switching encoder does not silently change the result.
 - **Copy diagnostics**: one button produces everything needed to diagnose the install as a single paste, with keys and tokens removed.
-- **Television discs**: box sets are recognised from title durations and named `Show (Year)/Season 02/Show (Year) - S02E05.mp4`.
+- **Television discs**: box sets are recognised from title durations and named `Show (Year)/Season 02/Show (Year) - S02E05.mp4` — and a bonus clip on the disc is filed as an extra instead of taking an episode number, which would shift every episode after it.
 - **Series mode**: set the show once, then feed a whole box set — the episode number carries across discs on its own.
 - **Notifications** to ntfy, Gotify, Discord or a webhook when a disc finishes or fails — the pipeline is unattended, so it tells you.
 - **Plex library refresh** the moment a film lands, instead of waiting for the next scheduled scan.
