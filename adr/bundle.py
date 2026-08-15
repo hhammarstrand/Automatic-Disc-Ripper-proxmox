@@ -370,7 +370,7 @@ def _raw_audio(config) -> str:
 
     from adr.encodingsettings import language
     from adr.models import Job, get_session
-    from adr.vaapi import audio_streams, language_matches
+    from adr.vaapi import audio_streams
 
     wanted = language(config)
     exe = getattr(config, "ffmpeg_path", "") or "ffmpeg"

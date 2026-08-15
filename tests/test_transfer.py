@@ -133,3 +133,92 @@ def test_pipeline_stages_only_for_network_destinations(monkeypatch, tmp_path):
     assert s.should_stage(tmp_path, enabled=True) is False
     monkeypatch.setattr(s, "describe_path", lambda p: {"is_network": True})
     assert s.should_stage(pathlib.Path("/mnt/nas"), enabled=True) is True
+
+
+class TestASecondDiscDoesNotStealTheFirstDiscsFiles:
+    """The merge sets a colliding arrival aside as "… (2).mkv" and then said
+    nothing about it, so _rebase_tracks rebuilt each path as the name the file
+    *would* have had — which is the name the previous disc's file already has.
+
+    Disc 2's rows then named disc 1's episodes. The Play button opened the
+    wrong file, and "delete this job with its files" unlinked the *earlier*
+    disc's episode while disc 2's own copy was left referenced by nothing and
+    invisible to every later preview. cleanup.job_files uses only the track
+    rows for a series, so there was no second opinion.
+    """
+
+    def _job(self, src, tracks):
+        import types
+
+        return types.SimpleNamespace(
+            id=2, content_type="series", output_path=str(src), plex_path=None,
+            tracks=[types.SimpleNamespace(output_path=str(p)) for p in tracks],
+        )
+
+    def test_a_colliding_episode_row_points_at_the_copy_it_made(self, tmp_path):
+        from adr.pipeline import _merge_into, _rebase_tracks
+
+        src, dest = tmp_path / "stage" / "Season 01", tmp_path / "tv" / "Season 01"
+        src.mkdir(parents=True)
+        dest.mkdir(parents=True)
+        (dest / "Show - S01E01.mkv").write_bytes(b"disc one")
+        arriving = src / "Show - S01E01.mkv"
+        arriving.write_bytes(b"disc two")
+
+        job = self._job(src, [arriving])
+        renames = _merge_into(src, dest, job)
+        _rebase_tracks(job, src, dest, renames)
+
+        assert (dest / "Show - S01E01 (2).mkv").read_bytes() == b"disc two"
+        assert (dest / "Show - S01E01.mkv").read_bytes() == b"disc one"
+        assert job.tracks[0].output_path == str(dest / "Show - S01E01 (2).mkv"), (
+            "the row names the earlier disc's file"
+        )
+
+    def test_an_episode_that_did_not_collide_is_rebased_normally(self, tmp_path):
+        from adr.pipeline import _merge_into, _rebase_tracks
+
+        src, dest = tmp_path / "stage" / "Season 01", tmp_path / "tv" / "Season 01"
+        src.mkdir(parents=True)
+        dest.mkdir(parents=True)
+        arriving = src / "Show - S01E06.mkv"
+        arriving.write_bytes(b"six")
+
+        job = self._job(src, [arriving])
+        renames = _merge_into(src, dest, job)
+        _rebase_tracks(job, src, dest, renames)
+        assert job.tracks[0].output_path == str(dest / "Show - S01E06.mkv")
+
+    def test_the_extras_folder_is_merged_rather_than_renamed(self, tmp_path):
+        """Other/ exists on every disc of a set. Treating it as a colliding
+        item gave disc 2 an "Other (2)/" folder, which is not a name Plex
+        recognises — so those extras stopped being extras."""
+        from adr.pipeline import _merge_into, _rebase_tracks
+
+        src, dest = tmp_path / "stage" / "Season 01", tmp_path / "tv" / "Season 01"
+        (src / "Other").mkdir(parents=True)
+        (dest / "Other").mkdir(parents=True)
+        (dest / "Other" / "Extra 1.mkv").write_bytes(b"disc one extra")
+        arriving = src / "Other" / "Extra 1.mkv"
+        arriving.write_bytes(b"disc two extra")
+
+        job = self._job(src, [arriving])
+        renames = _merge_into(src, dest, job)
+        _rebase_tracks(job, src, dest, renames)
+
+        assert not (dest / "Other (2)").exists(), "Plex does not read Other (2)"
+        assert (dest / "Other" / "Extra 1.mkv").read_bytes() == b"disc one extra"
+        assert (dest / "Other" / "Extra 1 (2).mkv").read_bytes() == b"disc two extra"
+        assert job.tracks[0].output_path == str(
+            dest / "Other" / "Extra 1 (2).mkv")
+
+    def test_a_new_extras_folder_still_arrives_whole(self, tmp_path):
+        from adr.pipeline import _merge_into
+
+        src, dest = tmp_path / "stage" / "Season 01", tmp_path / "tv" / "Season 01"
+        (src / "Other").mkdir(parents=True)
+        (src / "Other" / "Extra 1.mkv").write_bytes(b"x")
+        dest.mkdir(parents=True)
+
+        _merge_into(src, dest, self._job(src, []))
+        assert (dest / "Other" / "Extra 1.mkv").exists()

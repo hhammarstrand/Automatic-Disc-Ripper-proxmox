@@ -12,7 +12,6 @@ a gap in the middle that counting discs never would.
 """
 
 import types
-from pathlib import Path
 
 import pytest
 

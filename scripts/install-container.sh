@@ -263,6 +263,20 @@ chown "$RUN_USER:$RUN_USER" "$INSTALL_DIR"
 # ProtectSystem=full does not cover /opt, so nothing else stops it. That is the
 # whole privilege separation this application claims to have.
 chown -R root:root "$INSTALL_DIR/scripts" "$INSTALL_DIR/systemd" 2>/dev/null || true
+
+# Root-owning those two directories is necessary and not sufficient, which is
+# the part that was missing. $INSTALL_DIR itself is owned by the service user,
+# and a directory's owner may rename or replace the entries inside it however
+# those entries are owned — so the service user could move scripts/ aside,
+# drop its own update.sh, ask for an update, and have systemd execute it as
+# uid 0. The copy systemd actually runs therefore lives where only root can
+# write, and update.sh refreshes it from freshly-fetched source rather than
+# from anything under $INSTALL_DIR.
+install -d -o root -g root -m 0755 /usr/local/lib/adr
+install -o root -g root -m 0755 "$INSTALL_DIR/scripts/update.sh" \
+    /usr/local/lib/adr/update.sh
+# systemd writes the update log here as root, for the same reason.
+install -d -o root -g root -m 0755 /var/log/adr
 chmod 0755 "$INSTALL_DIR/scripts" 2>/dev/null || true
 chmod 0755 "$INSTALL_DIR"/scripts/*.sh 2>/dev/null || true
 chmod 0644 "$INSTALL_DIR"/systemd/* 2>/dev/null || true

@@ -281,7 +281,7 @@ def episode_after_previous_discs(
     )
 
 
-def earlier_discs(session, show: str, job) -> list[dict]:
+def earlier_discs(session, show: str, job, season: int | None = None) -> list[dict]:
     """What earlier discs of this show and season did: disc number and last episode.
 
     Identity comes from the *parsed* show name rather than the raw label,
@@ -294,7 +294,7 @@ def earlier_discs(session, show: str, job) -> list[dict]:
     was ripped as a film, has nothing to say about where the next one starts.
     """
     out: list[dict] = []
-    for other in _same_show_jobs(session, show, job):
+    for other in _same_show_jobs(session, show, job, season):
         numbers = [
             t.episode_number for t in (other.tracks or [])
             if t.episode_number
@@ -306,14 +306,26 @@ def earlier_discs(session, show: str, job) -> list[dict]:
     return out
 
 
-def _same_show_jobs(session, show: str, job) -> list:
-    """Earlier series jobs for this show and season, newest first."""
+def _same_show_jobs(session, show: str, job, season: int | None = None) -> list:
+    """Earlier series jobs for this show and season, newest first.
+
+    The season is passed in rather than read off *job*, because the caller
+    usually knows it before the row does. suggest_numbering answers for a disc
+    that has not been marked as a series yet — ``job.series_season`` is still
+    NULL — and takes the season off the label instead. Re-deriving it here
+    read NULL as season 1, so a season-2 box set looked up season-1 discs:
+    every set that was not season 1 was offered episode 1, and if season 1 of
+    the same show happened to be in the library it was offered that season's
+    numbers with a confident sentence about "this season".
+    """
     from adr.models import Job
 
     wanted = (show or "").strip().casefold()
     if not wanted:
         return []
-    season = int(1 if job.series_season is None else job.series_season)
+    if season is None:
+        season = 1 if job.series_season is None else job.series_season
+    season = int(season)
     try:
         candidates = (
             session.query(Job)
@@ -355,7 +367,7 @@ def suggest_numbering(session, job) -> dict:
         1 if job.series_season is None else int(job.series_season)
     )
     first, why = episode_after_previous_discs(
-        label["disc"], earlier_discs(session, label["show"], job),
+        label["disc"], earlier_discs(session, label["show"], job, season),
     )
     already = (
         (job.content_type or "movie") == "series"
@@ -367,7 +379,7 @@ def suggest_numbering(session, job) -> dict:
     show = ""
     year = None
     tmdb_id = None
-    for other in _same_show_jobs(session, label["show"], job):
+    for other in _same_show_jobs(session, label["show"], job, season):
         if (other.title or "").strip():
             show, year, tmdb_id = other.title, other.year, other.tmdb_id
             break

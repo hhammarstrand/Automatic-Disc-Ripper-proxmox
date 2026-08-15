@@ -417,7 +417,7 @@ def final_destination(job, config) -> tuple[Path, bool]:
 
 
 
-def _merge_into(src: Path, dest: Path, job, log_sink=None) -> None:
+def _merge_into(src: Path, dest: Path, job, log_sink=None, prefix=None) -> dict[str, str]:
     """Move the contents of *src* into an existing *dest*, clobbering nothing.
 
     The season merge exists because disc 2 of a box set belongs in disc 1's
@@ -426,10 +426,30 @@ def _merge_into(src: Path, dest: Path, job, log_sink=None) -> None:
     other turns a fixable mistake into a lost file. The incumbent is kept and
     the arrival is set aside beside it under a suffixed name, which is visible
     in a directory listing and undoable by renaming.
+
+    Returns ``{relative path as it arrived: relative path it ended up at}`` for
+    everything that had to be set aside. The caller needs it: the track rows
+    still name the path the file *would* have had, and rebuilding them from
+    that assumption pointed disc 2's rows at disc 1's episodes — after which
+    deleting disc 2 "with its files" unlinked disc 1's.
+
+    Directories are merged rather than renamed. ``Other/`` exists on every
+    disc of a set, so treating it as a colliding item gave disc 2 an
+    ``Other (2)/`` folder, which is not one of the names Plex recognises and
+    so is not an extras folder at all any more.
     """
+    prefix = prefix or Path()
+    renames: dict[str, str] = {}
     dest.mkdir(parents=True, exist_ok=True)
     for item in sorted(src.iterdir()):
         target = dest / item.name
+        if item.is_dir() and target.is_dir():
+            renames.update(
+                _merge_into(item, target, job, log_sink, prefix / item.name),
+            )
+            with contextlib.suppress(OSError):
+                item.rmdir()
+            continue
         if target.exists():
             stem, suffix = target.stem, target.suffix
             counter = 2
@@ -449,9 +469,13 @@ def _merge_into(src: Path, dest: Path, job, log_sink=None) -> None:
             if log_sink:
                 with contextlib.suppress(Exception):
                     log_sink(message)
+            renames[(prefix / item.name).as_posix()] = (
+                (prefix / target.name).as_posix()
+            )
         shutil.move(str(item), str(target))
     with contextlib.suppress(OSError):
         src.rmdir()          # only when it is now empty
+    return renames
 
 
 def transfer_to_destination(job, session, final_parent: Path) -> bool:
@@ -500,13 +524,14 @@ def transfer_to_destination(job, session, final_parent: Path) -> bool:
     size_mb = sum(f.stat().st_size for f in src.rglob("*") if f.is_file()) / BYTES_PER_MB
     logger.info("Transferring job %s to %s (%.0f MB)", job.id, dest, size_mb)
     started = time.monotonic()
+    renames: dict[str, str] = {}
     try:
         dest.parent.mkdir(parents=True, exist_ok=True)
         if merging:
             # The contents, not the folder: shutil.move of a directory onto an
             # existing directory puts it *inside* it, which would give
             # Season 02/Season 02.
-            _merge_into(src, dest, job)
+            renames = _merge_into(src, dest, job)
         else:
             shutil.move(str(src), str(dest))
     except (OSError, shutil.Error) as exc:
@@ -525,12 +550,12 @@ def transfer_to_destination(job, session, final_parent: Path) -> bool:
     )
 
     job.output_path = str(dest)
-    _rebase_tracks(job, src, dest)
+    _rebase_tracks(job, src, dest, renames)
     session.commit()
     return True
 
 
-def _rebase_tracks(job, src: Path, dest: Path) -> None:
+def _rebase_tracks(job, src: Path, dest: Path, renames: dict | None = None) -> None:
     """Point each track at where its file now is.
 
     Rebuilding the path as ``dest / Path(old).name`` drops any component
@@ -538,13 +563,21 @@ def _rebase_tracks(job, src: Path, dest: Path) -> None:
     ``Other/Extra 1.mp4``. The row then named a path that did not exist, so the
     delete preview could not see the extras and the Play button pointed at
     nothing. The part below the job folder is preserved instead.
+
+    *renames* is what the merge had to set aside. Without it this computed the
+    name the file would have had if nothing had collided — which is the name
+    the *previous* disc's file already has. Disc 2's rows then named disc 1's
+    episodes, so the Play button opened the wrong file and deleting disc 2
+    with its files unlinked disc 1's, leaving disc 2's own "(2)" copy
+    referenced by nothing and invisible to every later preview.
     """
     for t in job.tracks:
         if not t.output_path:
             continue
         old = Path(t.output_path)
         try:
-            t.output_path = str(dest / old.relative_to(src))
+            relative = old.relative_to(src).as_posix()
+            t.output_path = str(dest / (renames or {}).get(relative, relative))
         except ValueError:
             # Not below the folder we moved — an older row, or a path from
             # before staging existed. Its own name is the best guess left.
@@ -594,14 +627,15 @@ def move_to_plex(job, session, config) -> bool:
                     break
                 counter += 1
 
+    renames: dict[str, str] = {}
     try:
         if merging:
-            _merge_into(src, dest, job)
+            renames = _merge_into(src, dest, job)
         else:
             shutil.move(str(src), str(dest))
         job.plex_path = str(dest)
         job.output_path = str(dest)
-        _rebase_tracks(job, src, dest)
+        _rebase_tracks(job, src, dest, renames)
         session.commit()
         logger.info("Moved job %s to Plex: %s", job.id, dest)
         return True
@@ -738,7 +772,6 @@ class EncoderWorker(threading.Thread):
             # Query DB for accurate counts (other workers may have updated)
             total_tracks = session.query(Track).filter(Track.job_id == task.job_id).count()
 
-            _last_enc_pct = [0.0]  # mutable container for closure
             _last_enc_commit = [0.0]
             _fps_samples = []  # collect fps readings for avg
 
@@ -1106,10 +1139,19 @@ class EncoderWorker(threading.Thread):
         # the comparison against the track count came out equal, deleting the
         # very titles the job log promised. Adding back the tracks whose file
         # has already left restores the original count.
+        #
+        # The track's *source* filename is what decides that, and getting this
+        # wrong is expensive. It used to ask whether the track's OUTPUT name
+        # was in raw/ — which for an ordinary transcoded job is "Film
+        # (2020).mp4", never in raw/ by definition. So every track counted as
+        # moved out, ripped came to twice the track count, the "titles were
+        # deliberately kept" branch fired on every disc, and nothing was ever
+        # deleted: each disc left its whole rip on the container disk for
+        # ever, 20-40 GB at a time, on the same disk the database lives on.
         moved_out = sum(
             1 for t in (job_tracks or [])
-            if t and getattr(t, "output_path", None)
-            and not (raw_dir / Path(str(t.output_path)).name).exists()
+            if t and getattr(t, "filename", None)
+            and not (raw_dir / str(t.filename)).exists()
         ) if job_tracks else 0
         ripped = len(on_disk) + moved_out
 
@@ -1454,7 +1496,9 @@ class DrivePipeline:
                         # folder alone cannot.
                         first, why = episode_after_previous_discs(
                             guess["disc"],
-                            earlier_discs(session, guess["show"], job),
+                            earlier_discs(
+                                session, guess["show"], job, job.series_season,
+                            ),
                         )
                         job.series_first_episode = first
 

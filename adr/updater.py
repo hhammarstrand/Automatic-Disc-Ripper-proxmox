@@ -28,7 +28,20 @@ logger = logging.getLogger(__name__)
 INSTALL_DIR = Path(os.environ.get("ADR_INSTALL_DIR", "/opt/adr"))
 COMMIT_FILE = INSTALL_DIR / ".commit"
 REQUEST_FILE = INSTALL_DIR / ".update-requested"
-LOG_FILE = INSTALL_DIR / "update.log"
+#: Where adr-update.service writes. Outside INSTALL_DIR because systemd opens
+#: it as root and INSTALL_DIR is service-user-owned — a symlink planted there
+#: would have root truncate whatever it pointed at. The old location is still
+#: read so an installation that has not yet had its unit replaced keeps
+#: showing progress.
+LOG_FILE = Path("/var/log/adr/update.log")
+LEGACY_LOG_FILE = INSTALL_DIR / "update.log"
+
+
+def _log_path() -> Path:
+    """The update log this installation is actually writing to."""
+    if LOG_FILE.exists():
+        return LOG_FILE
+    return LEGACY_LOG_FILE
 UPDATE_UNIT = "adr-update.service"
 WATCH_UNIT = "adr-update.path"
 
@@ -245,7 +258,7 @@ def update_status() -> dict:
 
     log = ""
     try:
-        with open(LOG_FILE, "rb") as fh:
+        with open(_log_path(), "rb") as fh:
             fh.seek(0, os.SEEK_END)
             fh.seek(max(0, fh.tell() - _LOG_TAIL_BYTES))
             log = fh.read().decode("utf-8", "replace")

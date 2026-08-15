@@ -349,8 +349,18 @@ fi
 # Unit files may have changed between versions — and adr-update.* may not exist
 # at all on an install made before in-app updates.
 units_changed=0
+# The root-only copy systemd actually executes, refreshed from the source
+# just fetched rather than from $INSTALL_DIR/scripts — which the service user
+# can replace wholesale, because it owns the directory those entries live in.
+install -d -o root -g root -m 0755 /usr/local/lib/adr
+install -o root -g root -m 0755 "$TMP/src/scripts/update.sh" \
+    /usr/local/lib/adr/update.sh
+install -d -o root -g root -m 0755 /var/log/adr
+
 for unit in adr.service adr-update.service adr-update.path; do
-    src="$INSTALL_DIR/systemd/$unit"
+    # From the fetched source for the same reason.
+    src="$TMP/src/systemd/$unit"
+    [[ -f "$src" ]] || src="$INSTALL_DIR/systemd/$unit"
     [[ -f "$src" ]] || continue
     if ! cmp -s "$src" "/etc/systemd/system/$unit"; then
         install -m 0644 "$src" "/etc/systemd/system/$unit"
@@ -367,8 +377,13 @@ if [[ "$units_changed" -eq 1 ]]; then
 fi
 
 if [[ -n "$NEW_COMMIT" ]]; then
+    # rm first, and no chown. This runs as root in a directory the service
+    # user owns, so a symlink planted at .commit had the redirect truncate
+    # root's file and the chown — which follows symlinks without -h — hand
+    # that file to the service user. /etc/passwd would do.
+    rm -f "$INSTALL_DIR/.commit"
     echo "$NEW_COMMIT" > "$INSTALL_DIR/.commit"
-    chown "$RUN_USER:$RUN_USER" "$INSTALL_DIR/.commit" 2>/dev/null || true
+    chmod 0644 "$INSTALL_DIR/.commit" 2>/dev/null || true
 fi
 
 msg_info "Restarting service…"

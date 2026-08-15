@@ -273,3 +273,62 @@ class TestTheDriverIsAChoiceNotAList:
         for path in self.SCRIPTS:
             code = self._code(path)
             assert "libmfx1" in code and "libmfxgen1" in code, path
+
+
+class TestTheServiceUserCannotBecomeRoot:
+    """Root-owning scripts/ and systemd/ was necessary and not sufficient.
+
+    /opt/adr itself is owned by the service user, and a directory's owner may
+    rename or replace the entries inside it however those entries are owned.
+    So the service user could move scripts/ aside, drop its own update.sh, ask
+    for an update — POST /api/update/start does exactly that — and systemd
+    would execute the new bytes as uid 0. The web UI is unauthenticated by
+    design, and the settings page lets anyone point handbrake_path at another
+    binary, so "code execution as the service user" is not a high bar.
+
+    The fix is that nothing systemd runs as root comes from under /opt/adr.
+    """
+
+    @staticmethod
+    @pytest.fixture(scope="class")
+    def update() -> str:
+        return Path("scripts/update.sh").read_text()
+
+    @staticmethod
+    @pytest.fixture(scope="class")
+    def unit() -> str:
+        return Path("systemd/adr-update.service").read_text()
+
+    def test_the_unit_does_not_execute_from_the_writable_directory(self, unit):
+        assert "ExecStart=/opt/adr/scripts/update.sh" not in unit
+        assert "ExecStart=/usr/local/lib/adr/update.sh" in unit
+
+    def test_the_update_log_is_not_written_into_the_writable_directory(self, unit):
+        """systemd opens it as root, so a symlink planted there would have
+        root truncate whatever it points at."""
+        assert "/opt/adr/update.log" not in unit
+        assert "StandardOutput=truncate:/var/log/adr/update.log" in unit
+
+    @pytest.mark.parametrize("script", ["scripts/install-container.sh", "scripts/update.sh"])
+    def test_the_root_only_copy_is_installed(self, script):
+        text = Path(script).read_text()
+        assert "/usr/local/lib/adr" in text, (
+            f"{script} never installs the copy systemd executes"
+        )
+        assert "install -d -o root -g root -m 0755 /usr/local/lib/adr" in text
+
+    def test_the_update_refreshes_that_copy_from_fetched_source(self, update):
+        """Not from $INSTALL_DIR/scripts, which is the copy an attacker can
+        replace — refreshing from there would launder the replacement into the
+        root-only location on the next update."""
+        assert 'install -o root -g root -m 0755 "$TMP/src/scripts/update.sh"' in update
+        assert '"$INSTALL_DIR/scripts/update.sh" \\\n    /usr/local/lib' not in update
+
+    def test_the_units_are_installed_from_fetched_source(self, update):
+        assert 'src="$TMP/src/systemd/$unit"' in update
+
+    def test_the_commit_file_is_not_chowned_through_a_symlink(self, update):
+        """chown follows symlinks without -h, so chowning a path the service
+        user controls hands it ownership of whatever that path points at."""
+        assert 'chown "$RUN_USER:$RUN_USER" "$INSTALL_DIR/.commit"' not in update
+        assert 'rm -f "$INSTALL_DIR/.commit"' in update

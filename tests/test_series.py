@@ -1048,8 +1048,6 @@ class TestMarkingADiscAsASeriesByHand:
 
     def test_the_endpoint_answers_for_the_dialog(self, flask_client_factory=None):
         """Wired up, not merely written."""
-        import queue
-
         from adr.config import Config
         from adr.models import get_session, init_db
         from web.app import create_app
@@ -1144,3 +1142,119 @@ class TestTheDiscMarkerIsReadCorrectly:
 
     def test_dvd_with_no_number_is_not_a_disc_marker(self):
         assert self._parse("MY_DVD")["disc"] is None
+
+
+class TestTheSeasonUsedForTheLookupIsTheOneReported:
+    """The continuation worked only for season 1, and said so confidently.
+
+    suggest_numbering answers for a disc nobody has marked as a series yet, so
+    ``job.series_season`` is still NULL and it takes the season off the label.
+    The lookup behind it re-derived the season from the row, read NULL as 1,
+    and searched season 1 — so a season-2 box set found nothing and was
+    offered episode 1, and if season 1 of the same show happened to be in the
+    library it was offered *that* season's numbers under a sentence claiming
+    they came from "this season".
+
+    Three of the nine review dimensions found this independently, which is
+    what a genuinely load-bearing mistake looks like.
+    """
+
+    def _disc(self, session, label, season=None, episodes=(), content_type="series"):
+        from adr.models import Job, Track
+
+        job = Job(disc_label=label, drive="/dev/sr0", content_type=content_type,
+                  series_season=season)
+        session.add(job)
+        session.commit()
+        for number in episodes:
+            session.add(Track(job_id=job.id, track_number=number,
+                              filename=f"{label}-{number}.mkv",
+                              episode_number=number))
+        session.commit()
+        return job
+
+    def _suggest(self, session, job):
+        from adr.series import suggest_numbering
+
+        return suggest_numbering(session, job)
+
+    def test_a_season_two_box_set_continues(self, tmp_path):
+        from adr.models import get_session, init_db
+
+        init_db()
+        session = get_session()
+        try:
+            self._disc(session, "THE_WIRE_S02_D1", season=2, episodes=[1, 2, 3, 4, 5])
+            # Not yet marked as a series: series_season is NULL, which is the
+            # only state this endpoint is ever called in.
+            this = self._disc(session, "THE_WIRE_S02_D2", content_type="movie")
+            out = self._suggest(session, this)
+            assert out["season"] == 2
+            assert out["first_episode"] == 6, (
+                "the lookup used the row's season, not the label's"
+            )
+        finally:
+            session.close()
+
+    def test_another_season_of_the_same_show_is_not_borrowed_from(self, tmp_path):
+        """The worse half: season 1's numbers offered for a season-3 disc,
+        under a sentence saying they came from this season."""
+        from adr.models import get_session, init_db
+
+        init_db()
+        session = get_session()
+        try:
+            self._disc(session, "THE_WIRE_S01_D1", season=1,
+                       episodes=list(range(1, 14)))
+            this = self._disc(session, "THE_WIRE_S03_D2", content_type="movie")
+            out = self._suggest(session, this)
+            assert out["season"] == 3
+            assert out["first_episode"] == 1
+            assert "nothing from an earlier disc of this season" in out["reason"]
+        finally:
+            session.close()
+
+    def test_season_one_still_works(self, tmp_path):
+        """The half that always worked must keep working."""
+        from adr.models import get_session, init_db
+
+        init_db()
+        session = get_session()
+        try:
+            self._disc(session, "FIREFLY_D1", season=1, episodes=[1, 2, 3])
+            this = self._disc(session, "FIREFLY_D2", content_type="movie")
+            assert self._suggest(session, this)["first_episode"] == 4
+        finally:
+            session.close()
+
+    def test_earlier_discs_takes_the_season_it_is_given(self, tmp_path):
+        from adr.models import get_session, init_db
+        from adr.series import earlier_discs
+
+        init_db()
+        session = get_session()
+        try:
+            self._disc(session, "SHOW_S02_D1", season=2, episodes=[1, 2])
+            this = self._disc(session, "SHOW_S02_D2", content_type="movie")
+            assert earlier_discs(session, "Show", this, 2) == [
+                {"disc": 1, "last_episode": 2}]
+            assert earlier_discs(session, "Show", this, 1) == []
+        finally:
+            session.close()
+
+    def test_the_show_name_is_inherited_from_the_right_season(self, tmp_path):
+        """suggest_numbering also carries the show across discs, and it read
+        the same wrong season to find it."""
+        from adr.models import get_session, init_db
+
+        init_db()
+        session = get_session()
+        try:
+            first = self._disc(session, "THE_WIRE_S02_D1", season=2, episodes=[1, 2])
+            first.title = "The Wire"
+            first.year = 2002
+            session.commit()
+            this = self._disc(session, "THE_WIRE_S02_D2", content_type="movie")
+            assert self._suggest(session, this)["show"] == "The Wire"
+        finally:
+            session.close()

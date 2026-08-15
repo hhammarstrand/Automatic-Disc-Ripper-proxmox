@@ -13,11 +13,20 @@ EnvironmentFile=-/etc/default/adr
 # Clear the request first: the path unit re-arms as soon as the flag is gone, so
 # removing it up front prevents a failed update from triggering itself for ever.
 ExecStartPre=-/bin/rm -f /opt/adr/.update-requested
-ExecStart=/opt/adr/scripts/update.sh
+# NOT /opt/adr/scripts/update.sh. /opt/adr is owned by the service user, and
+# a directory's owner may rename or replace the entries inside it whatever
+# those entries are owned by — so root-owning scripts/ never protected it. The
+# service user could move scripts/ aside, drop its own update.sh, ask for an
+# update, and have systemd run it as uid 0. This copy lives where only root
+# can write, and update.sh refreshes it from the freshly-fetched source rather
+# than from /opt/adr.
+ExecStart=/usr/local/lib/adr/update.sh
 # World-readable so the unprivileged web UI can show progress live. update.sh
 # prints no secrets; the token, when one is used, arrives via the environment.
-StandardOutput=truncate:/opt/adr/update.log
-StandardError=append:/opt/adr/update.log
+# Also outside /opt/adr: systemd opens this as root, and a symlink planted at
+# an attacker-controlled path would have root truncate whatever it points at.
+StandardOutput=truncate:/var/log/adr/update.log
+StandardError=append:/var/log/adr/update.log
 TimeoutStartSec=1800
 
 [Install]

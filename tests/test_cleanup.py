@@ -276,17 +276,31 @@ class TestTheDroppedTitlesActuallyStay:
         return raw
 
     def _session(self, track_count, moved_out=0):
-        """*moved_out* stands for tracks whose file has already left raw/ —
-        which is what a passthrough job looks like, since _passthrough moves
-        the MKV rather than copying it."""
+        """*moved_out* stands for tracks whose source MKV has already left
+        raw/ — which is what a passthrough job looks like, since _passthrough
+        moves the MKV rather than copying it.
+
+        Every row carries both names, as a real Track does: ``filename`` is
+        the ripped MKV in raw/, ``output_path`` the encoded file elsewhere.
+        The first version of this fixture gave an ordinary finished track
+        ``output_path=None``, which never happens — a track is only DONE once
+        the encoder has written somewhere — and that single unrealistic field
+        is what let the raw directory leak past these tests for months.
+        """
         import types
 
         rows = [
-            types.SimpleNamespace(output_path=f"/elsewhere/gone{i}.mkv")
+            types.SimpleNamespace(
+                filename=f"gone{i}.mkv",
+                output_path=f"/elsewhere/gone{i}.mkv",
+            )
             for i in range(moved_out)
         ] + [
-            types.SimpleNamespace(output_path=None)
-            for _ in range(track_count - moved_out)
+            types.SimpleNamespace(
+                filename=f"title_t{i:02d}.mkv",
+                output_path=f"/staging/Film - pt{i}.mp4",
+            )
+            for i in range(track_count - moved_out)
         ]
 
         class _Query:
@@ -318,6 +332,31 @@ class TestTheDroppedTitlesActuallyStay:
         raw = self._raw(tmp_path, 43, 2)
         self._worker(tmp_path)._cleanup_raw(43, self._session(2))
         assert not raw.exists()
+
+    def test_a_transcoded_job_does_not_leave_its_rip_behind(self, tmp_path):
+        """The leak these tests were blind to.
+
+        An ordinary job's tracks name an encoded .mp4 that is not in raw/ by
+        definition, so counting "has the OUTPUT left raw/" made every track
+        look moved out, doubled the ripped count, and fired the
+        deliberately-kept branch on every disc there has ever been. Each one
+        left its whole rip — tens of gigabytes — on the container disk, on the
+        same disk the database lives on.
+        """
+        raw = self._raw(tmp_path, 46, 5)
+        self._worker(tmp_path)._cleanup_raw(46, self._session(5))
+        assert not raw.exists(), (
+            "the rip was kept although every ripped title was encoded"
+        )
+
+    def test_the_kept_branch_still_fires_when_titles_really_were_dropped(
+        self, tmp_path,
+    ):
+        """The other side of the same arithmetic: five ripped, two encoded."""
+        raw = self._raw(tmp_path, 47, 5)
+        self._worker(tmp_path)._cleanup_raw(47, self._session(2))
+        assert raw.is_dir()
+        assert len(list(raw.glob("*.mkv"))) == 5
 
     def test_no_session_falls_back_to_cleaning(self, tmp_path):
         """Callers that cannot count tracks get the old behaviour rather than

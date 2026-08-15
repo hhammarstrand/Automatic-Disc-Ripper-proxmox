@@ -28,6 +28,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Logs page** with the service's own log, filterable by level and text — no `pct exec`, no journald, no shell.
 - **Test encoding** without a disc: encodes two seconds of video with whatever is actually configured, and says what the encoder objected to.
 - **Hardware encoding, and the ways it goes wrong**: the installer passes the host's GPU through and installs the driver stack — the right VA-API driver, and both Quick Sync runtimes, because they cover different processor generations. When Quick Sync still will not start, the encoder test finds out whether a driver name fixes it, whether ffmpeg can reach the same GPU, or whether software is the honest answer — by trying each, not by guessing — and the diagnostics bundle asks the oneVPL dispatcher which library it turned down.
+- **Never encodes a film into silence.** HandBrake has no language fallback: a disc with no track in the language you asked for selects no audio, writes the film mute, and exits 0. The file is read first, and a disc that cannot answer in that language keeps the audio it does have. The output is checked against the source afterwards too, because an unsatisfiable passthrough and a refused mixdown both drop tracks the same silent way — audio in and none out is a failed job, not a finished film.
 - **One set of encoding settings** — spoken language, quality, height cap — told to whichever encoder runs, so switching encoder does not silently change the result.
 - **Copy diagnostics**: one button produces everything needed to diagnose the install as a single paste, with keys and tokens removed.
 - **Television discs**: box sets are recognised from title durations and named `Show (Year)/Season 02/Show (Year) - S02E05.mp4` — and a bonus clip on the disc is filed as an extra instead of taking an episode number, which would shift every episode after it.
@@ -359,12 +360,16 @@ title in the group must be close to every other, not merely to whichever one
 the scan started from, or a 16-minute featurette bridges into four 22-minute
 episodes.
 
-Detection only ever **annotates**. The dashboard shows the guess with its
-reasoning — including every title length it saw, so a wrong verdict is
-correctable rather than baffling — and you confirm the show, season and
-starting episode before encoding begins. Calling a film a series renames it
-into a season folder, which is much more annoying to undo than the reverse. Any
-job can also be marked as a TV disc by hand while it is still ripping.
+Detection **acts, and says what it did.** The dashboard shows the guess with
+its reasoning — including every title length it saw, so a wrong verdict is
+correctable rather than baffling — and the show, season and starting episode
+are editable from the moment the disc is recognised until encoding begins.
+Nothing waits for you: a disc left unattended is ripped and named on the
+strength of the guess, because the alternative is a machine that stops halfway
+through a box set at three in the morning. If the heuristic misfires on a
+film, the fix is to press *Not a series* before the encode starts, or to move
+the folder afterwards. Any job can equally be marked as a TV disc by hand
+while it is still ripping.
 
 The show is looked up against TMDb's **TV** catalogue, which is a different
 namespace from films: identification has already run a *film* search, and for a

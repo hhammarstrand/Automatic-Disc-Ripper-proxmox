@@ -1,5 +1,65 @@
 # Changelog
 
+## 1.31.0
+
+A full critical review of the repository — nine reviewers in parallel, every
+finding then handed to a skeptic told to refute it. 51 claims, 26 survived, 25
+were killed. These are the ones worth acting on.
+
+**Every disc left its whole rip on the container disk, for ever.** `_cleanup_raw`
+decides whether titles were deliberately kept by counting what was ripped
+against what was encoded, and it counted a track as "already moved out of raw/"
+by asking whether the track's *output* name was in raw/. For an ordinary
+transcoded job that is `Film (2020).mp4`, which is never in raw/ by definition —
+so every track counted as moved out, the ripped total came to twice the track
+count, the deliberately-kept branch fired on every disc there has ever been, and
+nothing was ever deleted. Visible in the wild as
+`Keeping /opt/adr/raw/72: 5 title(s) were ripped but not encoded (3796 MB)` on a
+job with exactly five tracks and nothing skipped. It compares the track's source
+filename now. The test that should have caught this modelled a finished track as
+having no output path at all, which never happens.
+
+**Deleting the second disc of a box set deleted the first disc's episodes.**
+When two discs claim the same episode number the merge keeps the incumbent and
+sets the arrival aside as "… (2).mkv" — then said nothing about it, so the track
+rows were rebuilt with the name the file *would* have had, which is the name the
+earlier disc's file already has. Disc 2's rows named disc 1's episodes: the Play
+button opened the wrong file, and deleting disc 2 "with its files" unlinked disc
+1's while disc 2's own copy was left referenced by nothing. The merge now reports
+what it renamed.
+
+**Extras stopped being extras on the second disc.** `Other/` exists on every disc
+of a set, and the merge treated the directory as a colliding item, so disc 2 got
+an `Other (2)/` folder — not a name Plex recognises. Directories are merged.
+
+**The disc-to-disc episode numbering only ever worked for season 1.** It reported
+the season from the disc label but looked earlier discs up under the season on
+the job row, which is still empty for a disc nobody has marked yet. A season-2
+box set was offered episode 1; worse, with season 1 of the same show in the
+library it was offered *that* season's numbers under a sentence claiming they
+came from this one. Three of the nine reviewers found this independently.
+
+**Two ways for the service user to become root, closed.** Root-owning `scripts/`
+and `systemd/` was necessary and not sufficient: `/opt/adr` itself is owned by
+the service user, and a directory's owner may replace the entries inside it
+whatever those entries are owned by. So the service user could move `scripts/`
+aside, drop its own `update.sh`, ask for an update — an unauthenticated POST does
+exactly that — and systemd would run it as uid 0. Nothing systemd executes as
+root now comes from under `/opt/adr`: the update script is installed to
+`/usr/local/lib/adr/`, refreshed from freshly-fetched source rather than from the
+copy an attacker can replace, and the units are installed from there too. The
+update log moves to `/var/log/adr/`, because systemd opened it as root at a path
+the service user could have made a symlink. And `.commit` is no longer chowned —
+`chown` follows symlinks without `-h`, so that handed the service user ownership
+of whatever the link pointed at.
+
+**The README promised a confirmation step that does not exist.** It said you
+confirm the show, season and starting episode before encoding begins. Nothing
+waits for anyone: a detected series is ripped and named on the strength of the
+guess, which is the right behaviour for an unattended box set at three in the
+morning, but it is not what the page said. Corrected, along with the audio fix
+finally appearing in the feature list.
+
 ## 1.30.0
 
 **After every box-set disc, it says whether that was all of them.** Feeding a
