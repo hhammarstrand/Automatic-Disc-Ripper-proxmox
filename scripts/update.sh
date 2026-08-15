@@ -370,11 +370,15 @@ for unit in adr.service adr-update.service adr-update.path; do
 done
 if [[ "$units_changed" -eq 1 ]]; then
     systemctl daemon-reload
-    # Enabling is idempotent, and this is what turns on updating from the web UI
-    # for an install that predates it.
-    systemctl enable --now adr-update.path >/dev/null 2>&1 \
-        || msg_warn "Could not enable adr-update.path — updates stay host-side."
 fi
+# Unconditionally, and not only when a unit file changed. Enabling is
+# idempotent, and this is the one command that repairs the state the Doctor
+# reports as "adr-update.path is not running, so an update request would go
+# unnoticed" — which can be true with the unit files already byte-identical.
+# Running the script from the host is what someone does *because* of that
+# message, so it has to fix it.
+systemctl enable --now adr-update.path >/dev/null 2>&1 \
+    || msg_warn "Could not enable adr-update.path — updates stay host-side."
 
 if [[ -n "$NEW_COMMIT" ]]; then
     # rm first, and no chown. This runs as root in a directory the service

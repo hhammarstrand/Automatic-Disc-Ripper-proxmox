@@ -386,3 +386,14 @@ class TestTheUpdateMechanismSurvivesItsOwnMigration:
         for script in ("scripts/install-container.sh", "scripts/update.sh"):
             text = Path(script).read_text()
             assert "/usr/local/lib/adr" in text, script
+
+    def test_the_watch_unit_is_enabled_even_when_no_unit_changed(self):
+        """Running the script from the host is what someone does *because* the
+        Doctor said the path unit is not running — and that can be true with
+        the unit files already byte-identical. Gating the enable on a file
+        change meant the repair did nothing in exactly that case."""
+        text = Path("scripts/update.sh").read_text()
+        gated = text.index('if [[ "$units_changed" -eq 1 ]]; then')
+        enable = text.index("systemctl enable --now adr-update.path")
+        closing = text.index("fi", gated)
+        assert enable > closing, "the enable is still inside the changed-only branch"

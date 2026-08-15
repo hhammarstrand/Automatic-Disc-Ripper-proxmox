@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.34.2
+
+**Re-running the update from the host now always re-enables the watcher.**
+`systemctl enable --now adr-update.path` was inside the "a unit file changed"
+branch — but running the script from the Proxmox host is exactly what someone
+does *because* the Doctor said the path unit is not running, and that can be
+true with the unit files already byte-identical. The one command that repairs
+it was skipped in precisely the case it exists for. Enabling is idempotent, so
+it runs every time now.
+
 ## 1.34.1
 
 **I broke in-app updates in 1.31 for everyone updating from an older
