@@ -74,6 +74,74 @@ class TestBodyText:
         assert contrast(palette[role], palette["adr-card"]) >= AA_LARGE
 
 
+class TestAlerts:
+    """The second bug this file caught, and the one it should have caught first.
+
+    Only ``.alert-secondary`` was ever restated for the dark theme. The other
+    four kept Bootstrap's light-theme colours — pale background, dark text —
+    which on its own merely looks out of place. What it did in practice was
+    hide things: ``.btn-outline-light`` is themed here to near-white for the
+    dark ground it is normally on, and the TV-disc banner puts two of them
+    inside an ``.alert-info``. Near-white on Bootstrap's ``#cff4fc`` measures
+    1.01:1. The "Change" and "Not a series" buttons were rendered, focusable
+    and clickable, and could not be read at all.
+    """
+
+    VARIANTS = ["info", "success", "warning", "danger"]
+
+    def test_every_variant_has_a_dark_background_of_its_own(self, palette):
+        """Not just the one that had the bug. A variant left at Bootstrap's
+        default is a pale box that anything light placed on it disappears
+        into, and nothing in the markup would say so."""
+        for name in self.VARIANTS:
+            assert f"adr-{name}-bg" in palette, (
+                f"alert-{name} has no dark background and will inherit "
+                "Bootstrap's light-theme one"
+            )
+
+    @pytest.mark.parametrize("variant", VARIANTS)
+    def test_ordinary_text_on_an_alert_is_readable(self, palette, variant):
+        assert contrast(palette["adr-text"], palette[f"adr-{variant}-bg"]) >= AA_TEXT
+
+    @pytest.mark.parametrize("variant", VARIANTS)
+    def test_a_button_inside_an_alert_is_readable(self, palette, variant):
+        """The actual failure. .btn-outline-light takes --adr-text, so this is
+        the ratio those two buttons were rendered at."""
+        assert contrast(palette["adr-text"], palette[f"adr-{variant}-bg"]) >= AA_TEXT
+
+    @pytest.mark.parametrize("variant", VARIANTS)
+    def test_a_link_inside_an_alert_is_readable(self, palette, variant):
+        assert contrast(palette["adr-accent"], palette[f"adr-{variant}-bg"]) >= AA_TEXT
+
+    @pytest.mark.parametrize("variant", VARIANTS)
+    def test_the_icon_that_carries_the_variant_is_visible(self, palette, variant):
+        """The left bar and the icon are what is left of the variant once the
+        background stops being the thing that signals it."""
+        role = "adr-accent" if variant == "info" else f"adr-{variant}"
+        assert contrast(palette[role], palette[f"adr-{variant}-bg"]) >= AA_LARGE
+
+    def test_muted_text_in_an_alert_is_lifted_off_the_lighter_ground(self):
+        """.text-muted resolves against the page, and every alert ground is
+        lighter than the page, so muted text sits closer to its background
+        inside an alert than anywhere else."""
+        text = CSS.read_text()
+        assert ".alert .text-muted" in text
+
+    def test_the_alerts_are_restated_at_all(self):
+        text = CSS.read_text()
+        for name in self.VARIANTS:
+            assert f".alert-{name}" in text, f"alert-{name} is still Bootstrap's"
+
+    def test_the_variant_survives_as_something_other_than_the_background(self):
+        """Four alerts on one dark background would otherwise be four
+        identical grey boxes, and which one is the warning would be a matter
+        of reading it."""
+        text = CSS.read_text()
+        block = text[text.index("/* ---- Alerts ----"):]
+        block = block[:block.index("/* ---- Progress")]
+        assert "border-left-color" in block
+
+
 class TestTheActiveTab:
     """The bug this file was written for."""
 

@@ -1,5 +1,56 @@
 # Changelog
 
+## 1.25.0
+
+**The pale boxes were hiding things.** Only some Bootstrap components were ever
+restated for the dark theme; the rest kept their light-theme colours, which on
+a dark page ranges from out of place to genuinely invisible. On a TV disc the
+"Change" and "Not a series" buttons sit inside an `alert-info` — near-white
+text on Bootstrap's pale cyan, measured at **1.01:1**. They were rendered,
+focusable and clickable, and could not be read.
+
+Measured in a real browser rather than reasoned about, because these failures
+are products of the cascade and invisible in any single rule. Chromium found
+**160** text/background pairs below WCAG AA across the six pages at phone and
+desktop widths. All of them are now above it. The worst were not the reported
+one: the Logs page printed its log at **1.12:1**, the percentage inside a
+ripping progress bar sat at **1.63:1**, and the Doctor page's checks were white
+boxes on a dark page because `.list-group-item` still carried `--bs-list-group-bg`.
+
+Alerts keep their meaning as a coloured left bar and icon — the idiom the
+toasts already used — rather than as a background that nothing can be placed
+on. Also restated: `pre` and `code`, list groups, progress-bar labels, status
+pills, the semantic `.text-*` colours, content links, and the outline buttons
+other than the two that had been done. `.text-dark` is deliberately untouched:
+it is what makes the light badge fills readable.
+
+**Fixes to 1.24.0, from reviewing it.** The new "did the audio survive" check
+could fail a perfectly good encode: `audio_streams` returns an empty list for
+"no audio" and for "could not look" alike, and the guard covered only the
+source. An output written straight to a NAS and slow to probe was read as
+silent. It now needs a duration off the output before it accuses anything.
+
+A silent *extra* no longer strands the film. Extras are ordinary tracks of the
+same job and one failed track fails the job, so a ninety-second featurette
+coming out quiet left the feature in staging, never transferred and never
+announced. It is said in the log and the disc carries on.
+
+A silent main feature is now deleted rather than left behind. It was a
+complete, playable file under the name the finished film should have, so the
+retry found the name taken and wrote the good encode to "Film (2)" — a
+misnamed library folder plus a silent copy no database row pointed at and no
+cleanup could ever find.
+
+The job log no longer names a language that never reached HandBrake:
+`handbrake_extra_args` is appended after the overrides so that it wins, and a
+`--audio-lang-list` typed in there decides. One encode also spawned ffprobe
+three times to answer one question; it now asks once. The re-encode page's
+silence check is bounded to three files, since it runs on the request thread.
+
+And the load-bearing line of 1.24.0 — the encoder passing the file it is about
+to encode — had no test at all: deleting it reverted half the fix with the
+whole suite still green. It is now asserted against the real argv.
+
 ## 1.24.0
 
 **Some films encoded with no audio at all, and the job said Done.** *The Black

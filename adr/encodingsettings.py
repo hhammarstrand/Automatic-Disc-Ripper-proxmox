@@ -56,7 +56,7 @@ def clamp_quality(value: object) -> int:
     return max(QUALITY_RANGE[0], min(QUALITY_RANGE[1], quality))
 
 
-def handbrake_overrides(config, input_path=None) -> list[str]:
+def handbrake_overrides(config, input_path=None, streams=None) -> list[str]:
     """The command-line flags that impose the shared settings on HandBrake.
 
     HandBrake applies its own flags *after* the preset, so each of these
@@ -70,10 +70,12 @@ def handbrake_overrides(config, input_path=None) -> list[str]:
 
     *input_path* is the file about to be encoded, when there is one. It is
     what makes the language list safe — see :func:`audio_language_list`.
+    *streams* is that file's audio tracks, when the caller has already read
+    them, so one encode does not spawn ffprobe three times for one answer.
     """
     args: list[str] = []
 
-    wanted = audio_language_list(config, input_path)
+    wanted = audio_language_list(config, input_path, streams)
     if wanted:
         # The list only. How many matching tracks to take is the preset's
         # AudioTrackSelectionBehavior, and forcing --all-audio here would
@@ -108,7 +110,7 @@ def handbrake_overrides(config, input_path=None) -> list[str]:
 ANY_LANGUAGE = "any"
 
 
-def audio_language_list(config, input_path=None) -> str:
+def audio_language_list(config, input_path=None, streams=None) -> str:
     """What to put in ``--audio-lang-list``: a language the file actually has.
 
     HandBrake does not fall back, and this is not an oversight that a flag
@@ -145,8 +147,9 @@ def audio_language_list(config, input_path=None) -> str:
 
     from adr.vaapi import audio_streams, language_matches
 
-    exe = getattr(config, "ffmpeg_path", "") or "ffmpeg"
-    streams = audio_streams(exe, Path(input_path))
+    if streams is None:
+        exe = getattr(config, "ffmpeg_path", "") or "ffmpeg"
+        streams = audio_streams(exe, Path(input_path))
     if not streams:
         return wanted
     if any(language_matches(s.get("language", ""), wanted) for s in streams):
@@ -160,17 +163,25 @@ def audio_language_list(config, input_path=None) -> str:
     return ANY_LANGUAGE
 
 
-def requested_language(overrides: list[str]) -> str:
-    """The language a built override list ends up asking HandBrake for.
+def requested_language(args: list[str]) -> str:
+    """The language a built command ends up asking HandBrake for.
 
     Reading it back off the arguments rather than working it out a second time
     keeps the job log and the command that ran in step, and saves probing the
     file twice to answer one question.
+
+    The *last* one wins, and the caller is expected to pass the whole command
+    rather than just the overrides. ``handbrake_extra_args`` is appended after
+    them precisely so a hand-written flag beats the settings page, so a
+    ``--audio-lang-list`` typed in there is the one that decides — and a log
+    line that read only the overrides would name a language that never
+    reached HandBrake, while pointing away from the setting that did.
     """
-    try:
-        return overrides[overrides.index("--audio-lang-list") + 1]
-    except (ValueError, IndexError):
-        return ""
+    found = ""
+    for index, arg in enumerate(args):
+        if arg == "--audio-lang-list" and index + 1 < len(args):
+            found = args[index + 1]
+    return found
 
 
 def describe(config) -> str:

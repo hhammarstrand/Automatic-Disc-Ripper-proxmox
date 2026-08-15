@@ -11,6 +11,20 @@
     --adr-warning: #d29922;
     --adr-danger: #f85149;
     --adr-info: #58a6ff;
+
+    /* Alert backgrounds: the accent colour sunk into the dark ground rather
+       than laid on top of it. Solid rather than a translucent overlay so the
+       result does not depend on what an alert happens to be sitting on — an
+       alert appears both on the page and inside a card, and a colour that
+       shifts between the two cannot be checked. */
+    --adr-info-bg: #10243e;
+    --adr-success-bg: #0f2417;
+    --adr-warning-bg: #2b2413;
+    --adr-danger-bg: #2d1618;
+
+    /* Bootstrap writes code in #d63384, picked for a white page; on the card
+       here that is 3.84:1. Same hue, lifted until it clears AA. */
+    --adr-code: #ff7b9c;
 }
 
 body {
@@ -146,11 +160,69 @@ main {
     color: var(--adr-text-muted) !important;
 }
 
-/* ---- Alerts ---- */
-.alert-secondary {
+/* ---- Alerts ----
+ *
+ * Every variant, because only one of them was ever themed and the other four
+ * stayed as Bootstrap ships them: pale backgrounds with dark text, in an
+ * application that is dark throughout.
+ *
+ * On its own a pale box is merely out of place. What it actually did was hide
+ * things. .btn-outline-light is themed here to near-white (--adr-text, for the
+ * dark ground it is normally on), and the TV-disc banner puts two of them
+ * inside an .alert-info — #e6edf3 on Bootstrap's #cff4fc, a contrast ratio of
+ * 1.06:1. The "Change" and "Not a series" buttons were rendered, focusable and
+ * clickable, and could not be read at all.
+ *
+ * So the fix belongs here rather than at that banner. The banner's markup is
+ * perfectly ordinary; anyone adding a button to any other alert would have
+ * written the same bug, with nothing in the markup to warn them.
+ *
+ * The variant stays legible as a left bar and a coloured icon — the idiom the
+ * toasts below already use — instead of as a background nothing can be placed
+ * on. */
+.alert {
     background-color: var(--adr-card) !important;
-    color: var(--adr-text-muted) !important;
+    color: var(--adr-text) !important;
     border-color: var(--adr-border) !important;
+    border-left-width: 4px !important;
+    border-left-style: solid !important;
+}
+.alert-secondary {
+    color: var(--adr-text-muted) !important;
+    border-left-color: var(--adr-border) !important;
+}
+.alert-info {
+    background-color: var(--adr-info-bg) !important;
+    border-left-color: var(--adr-info) !important;
+}
+.alert-success {
+    background-color: var(--adr-success-bg) !important;
+    border-left-color: var(--adr-success) !important;
+}
+.alert-warning {
+    background-color: var(--adr-warning-bg) !important;
+    border-left-color: var(--adr-warning) !important;
+}
+.alert-danger {
+    background-color: var(--adr-danger-bg) !important;
+    border-left-color: var(--adr-danger) !important;
+}
+.alert-info .bi    { color: var(--adr-info); }
+.alert-success .bi { color: var(--adr-success); }
+.alert-warning .bi { color: var(--adr-warning); }
+.alert-danger .bi  { color: var(--adr-danger); }
+/* Bootstrap colours these for its own light alerts, which is now the wrong
+   ground. A link in an alert is still a link. */
+.alert .alert-link,
+.alert a {
+    color: var(--adr-accent) !important;
+}
+/* .text-muted inside an alert resolves against the page, not the alert, and
+   the tinted grounds are lighter than the page — so muted text lands closer
+   to its background here than anywhere else. */
+.alert .text-muted,
+.alert .text-secondary {
+    color: #a9b4c0 !important;
 }
 
 /* ---- Progress bars ---- */
@@ -188,6 +260,143 @@ main {
 .btn-outline-danger:hover {
     background-color: var(--adr-danger) !important;
     color: #fff !important;
+}
+
+/* ---- The rest of Bootstrap ----
+ *
+ * Everything below is one bug with many faces: Bootstrap ships light-theme
+ * colours, this application is dark, and only the components someone happened
+ * to look at were ever restated. The others were not wrong in a way anybody
+ * could see in the markup — they were wrong on screen.
+ *
+ * Measured in a real browser rather than reasoned about, because the failures
+ * are products of the cascade and not visible in any one rule. The ratios in
+ * the comments are what Chromium computed before the fix; WCAG AA wants 4.5.
+ */
+
+/* Log output was #212529 on #161b22 — 1.12:1. The Logs page existed to be
+   read and its text was the same colour as the card behind it. */
+pre {
+    background-color: var(--adr-bg) !important;
+    color: var(--adr-text) !important;
+    border: 1px solid var(--adr-border);
+    border-radius: 6px;
+}
+/* Bootstrap's #d63384 on the card is 3.84:1. Lighter, and still recognisably
+   the colour code is written in. */
+code {
+    color: var(--adr-code) !important;
+}
+/* A block of code is not one long identifier; inside pre it reads as text. */
+pre code {
+    color: inherit !important;
+}
+kbd {
+    background-color: var(--adr-border) !important;
+    color: var(--adr-text) !important;
+}
+
+/* The Doctor page's checks were white boxes on a dark page: .list-group-item
+   keeps --bs-list-group-bg, which is #fff, and nothing here had replaced it.
+   Muted text on that measured 3.08:1. */
+.list-group-item {
+    background-color: var(--adr-card) !important;
+    color: var(--adr-text) !important;
+    border-color: var(--adr-border) !important;
+}
+.list-group-item-action:hover,
+.list-group-item-action:focus {
+    background-color: #1c2129 !important;
+    color: var(--adr-text) !important;
+}
+
+/* The percentage inside the bar. White on #ffc107 is 1.63:1 and on #0dcaf0 is
+   1.96:1 — the two fills a job actually spends its time in, ripping and
+   encoding, were the two nobody could read. Dark text on those and white
+   everywhere else, because reversing it costs contrast on the dark fills. */
+.progress-bar {
+    color: #fff;
+}
+.progress-bar.bg-warning,
+.progress-bar.bg-info,
+.progress-bar.bg-light {
+    color: var(--adr-bg) !important;
+}
+
+/* Status pills. The background override below carries !important, which
+   defeats .bg-opacity-25 and left every not-yet-reached step at full
+   strength with muted text on it: 3.97:1. Dimmed here instead, where the
+   text colour can be raised to match. */
+.badge.bg-secondary {
+    background-color: #262c34 !important;
+    color: #a9b4c0 !important;
+}
+
+/* Bootstrap's semantic text colours are chosen for white. On the card they
+   run 3.4:1 to 3.9:1 — the failure reason under a job in History was one of
+   them. The palette already has a readable version of each. */
+.text-danger  { color: var(--adr-danger) !important; }
+.text-success { color: var(--adr-success) !important; }
+.text-warning { color: var(--adr-warning) !important; }
+.text-info    { color: var(--adr-info) !important; }
+.text-primary { color: var(--adr-accent) !important; }
+/* .text-dark is deliberately untouched: it is what makes the light badge
+   fills (bg-warning, bg-info) readable, and "fixing" it would invert a pair
+   that is already correct. */
+
+/* Content links. Bootstrap's #0d6efd on the card is 3.84:1. Buttons and nav
+   items are excluded — they are anchors too, and they have their own rules
+   below. */
+a:not(.btn):not(.nav-link):not(.navbar-brand):not(.dropdown-item):not(.page-link) {
+    color: var(--adr-accent);
+}
+
+/* Outline buttons other than the two that were already done. #6c757d and
+   #0d6efd on these grounds measure 3.3:1 to 4.0:1. */
+.btn-outline-secondary {
+    color: var(--adr-text-muted) !important;
+    border-color: var(--adr-border) !important;
+}
+.btn-outline-secondary:hover,
+.btn-outline-secondary:focus {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+    color: var(--adr-text) !important;
+}
+.btn-outline-primary {
+    color: var(--adr-accent) !important;
+    border-color: var(--adr-accent) !important;
+}
+.btn-outline-primary:hover,
+.btn-outline-primary:focus {
+    background-color: var(--adr-accent) !important;
+    color: var(--adr-bg) !important;
+}
+.btn-outline-success {
+    color: var(--adr-success) !important;
+    border-color: var(--adr-success) !important;
+}
+.btn-outline-success:hover,
+.btn-outline-success:focus {
+    background-color: var(--adr-success) !important;
+    color: var(--adr-bg) !important;
+}
+.btn-outline-warning {
+    color: var(--adr-warning) !important;
+    border-color: var(--adr-warning) !important;
+}
+.btn-outline-warning:hover,
+.btn-outline-warning:focus {
+    background-color: var(--adr-warning) !important;
+    color: var(--adr-bg) !important;
+}
+.btn-outline-info {
+    color: var(--adr-info) !important;
+    border-color: var(--adr-info) !important;
+}
+.btn-outline-info:hover,
+.btn-outline-info:focus {
+    background-color: var(--adr-info) !important;
+    color: var(--adr-bg) !important;
 }
 
 /* ---- Spinning disc animation ---- */

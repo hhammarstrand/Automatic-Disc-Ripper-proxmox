@@ -52,7 +52,19 @@ def _last_meaningful(lines: list[str]) -> str:
     return candidates[-1]
 
 
-def describe_audio_request(config, input_path=None, overrides=None) -> str:
+def _is_extra(output_filename: str | None) -> bool:
+    """Whether this output is a bonus feature rather than the film.
+
+    Extras are written into a subfolder — ``Other/Extra 1`` — which is one of
+    the names Plex recognises, and is the only thing that distinguishes them
+    here. See ``adr.naming``, which decides it.
+    """
+    return "/" in (output_filename or "")
+
+
+def describe_audio_request(
+    config, input_path=None, overrides=None, streams=None,
+) -> str:
     """What HandBrake has been told about audio, for the job log.
 
     HandBrake's language rules live in the preset — a JSON file nobody opens
@@ -82,7 +94,7 @@ def describe_audio_request(config, input_path=None, overrides=None) -> str:
         else f"the preset '{preset}', since Settings → Encoding leaves it blank"
     )
     if overrides is None:
-        overrides = handbrake_overrides(config, input_path)
+        overrides = handbrake_overrides(config, input_path, streams)
     asked = requested_language(overrides)
 
     # The interesting case, and the one that used to produce a silent film:
@@ -90,16 +102,17 @@ def describe_audio_request(config, input_path=None, overrides=None) -> str:
     # what is, because "why is this in English" and "why is this mute" are the
     # same question and this line answers both.
     if asked and asked != wanted:
-        streams = audio_streams(
-            getattr(config, "ffmpeg_path", "") or "ffmpeg", Path(input_path),
-        ) if input_path else []
+        if streams is None:
+            streams = audio_streams(
+                getattr(config, "ffmpeg_path", "") or "ffmpeg", Path(input_path),
+            ) if input_path else []
         listing = ", ".join(
             f"{index}:{stream.get('language') or 'untagged'}"
             for index, stream in enumerate(streams)
         ) or "no readable tracks"
         return (
             f"Audio: '{wanted}' was asked for (from {source}), but this file "
-            f"has no track in it — it carries {listing}. So HandBrake is being "
+            f"has no track in that language — it carries {listing}. So HandBrake is being "
             f"asked for '{asked}' instead and will keep what the disc does "
             "have. Left as it was it would have matched nothing and written "
             "the film with no sound at all."
@@ -256,6 +269,17 @@ class HandBrakeEncoder:
         if input_path.suffix.lower() == ".iso":
             cmd.append("--main-feature")
 
+        # What this file actually carries, read once and used three times: to
+        # pick the language list, to explain the choice in the job log, and to
+        # judge the output afterwards. Each of those asked ffprobe the same
+        # question separately, which is three subprocess spawns per encode on
+        # a path where one of them can already be waiting sixty seconds on a
+        # stalled mount.
+        from adr.vaapi import audio_streams
+
+        ffmpeg = getattr(self._config, "ffmpeg_path", "") or "ffmpeg"
+        source_streams = audio_streams(ffmpeg, input_path)
+
         # The settings that mean the same thing whichever encoder runs.
         # HandBrake applies its own flags after the preset, so each of these
         # replaces one preset value and leaves the rest of it intact.
@@ -263,13 +287,13 @@ class HandBrakeEncoder:
         # The input file goes along because the audio flag depends on it: a
         # language list matching nothing on this disc makes HandBrake write
         # the film with no sound and exit 0.
-        overrides = handbrake_overrides(self._config, input_path)
+        overrides = handbrake_overrides(self._config, input_path, source_streams)
         cmd.extend(overrides)
 
         # Append extra args if configured — last, so a hand-written argument
         # still wins over anything the settings page produced.
-        if self._extra_args:
-            cmd.extend(self._extra_args.split())
+        extra = self._extra_args.split() if self._extra_args else []
+        cmd.extend(extra)
 
         logger.info("Starting HandBrake encode: %s -> %s", input_path.name, output_path)
         logger.debug("HandBrake cmd: %s", " ".join(cmd))
@@ -281,10 +305,16 @@ class HandBrakeEncoder:
         # comes out in the wrong language there is nothing on screen saying
         # what was asked for — and the setting, the preset and the disc are
         # three different places it could have gone wrong.
+        #
+        # The extra args go in too. They are appended after the overrides and
+        # therefore win, so a handbrake_extra_args carrying its own
+        # --audio-lang-list decides the language — and a log line reading only
+        # the overrides would confidently name a language that never reached
+        # HandBrake, while pointing away from the setting that did.
         if self.log_sink:
-            self.log_sink(
-                describe_audio_request(self._config, input_path, overrides)
-            )
+            self.log_sink(describe_audio_request(
+                self._config, input_path, overrides + extra, source_streams,
+            ))
 
         env = encode_env(self._config)
         if env is not None:
@@ -441,14 +471,36 @@ class HandBrakeEncoder:
                 from adr.vaapi import audio_went_missing
 
                 silent = audio_went_missing(
-                    getattr(self._config, "ffmpeg_path", "") or "ffmpeg",
-                    input_path, output_path,
+                    ffmpeg, input_path, output_path, source_streams,
                 )
-                if silent:
+                if silent and _is_extra(output_filename):
+                    # An extra is a trailer or a featurette, and failing the
+                    # track fails the job — which leaves the *film* sitting in
+                    # staging, never transferred, never announced, because a
+                    # ninety-second bonus clip came out quiet. That trade is
+                    # the wrong way round. Say it and carry on.
+                    logger.warning("Extra encoded with no audio: %s", output_path)
+                    if self.log_sink:
+                        self.log_sink(
+                            f"{silent} This is an extra rather than the main "
+                            "feature, so the disc is not held up for it."
+                        )
+                    result.success = True
+                elif silent:
                     result.error = silent
                     logger.error("Encode produced no audio: %s", output_path)
                     if self.log_sink:
                         self.log_sink(silent)
+                    # Take it away. It is a complete, playable file under the
+                    # name the finished film should have, and leaving it there
+                    # meant the retry found the name taken and wrote the good
+                    # encode to "Film (2)" — a misnamed library folder, plus a
+                    # silent copy that no database row points at and no
+                    # cleanup can ever find.
+                    try:
+                        output_path.unlink()
+                    except OSError:
+                        logger.debug("Could not remove %s", output_path, exc_info=True)
                 else:
                     result.success = True
                     logger.info("Encode complete: %s (%.1f MB)", output_path, output_path.stat().st_size / BYTES_PER_MB)

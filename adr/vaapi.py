@@ -234,31 +234,46 @@ def describe_audio_choice(streams: list[dict], wanted: str) -> str:
     )
 
 
-def audio_went_missing(exe: str, source: Path, produced: Path) -> str:
+def audio_went_missing(
+    exe: str, source: Path, produced: Path, source_streams: list[dict] | None = None,
+) -> str:
     """Why the encode should be treated as failed, or "" if the audio survived.
 
-    An encoder can drop every audio track and still exit 0: HandBrake does it
-    whenever the language list matches nothing on the disc. The result is a
-    film that plays perfectly, in silence, reported as a success — and the
-    only thing that notices is somebody sitting down to watch it a week later,
-    by which time the raw files have been cleaned up and the disc is back on
-    the shelf.
+    An encoder can drop every audio track and still exit 0. HandBrake does it
+    whenever the language list matches nothing on the disc, and twice more
+    besides — an Auto Passthru it cannot satisfy, a mixdown at a samplerate it
+    will not take. The result is a film that plays perfectly, in silence,
+    reported as a success; the only thing that notices is somebody sitting
+    down to watch it a week later, with the raw files cleaned up and the disc
+    back on the shelf.
 
-    So the output is asked what it ended up with. The source is asked too,
-    because the two facts are only worth anything together: a disc that never
-    had sound is not a fault, and refusing to finish one would be a new bug
-    replacing the old one. The complaint is made only when audio existed and
-    then did not.
+    So the output is asked what it ended up with, and the source is asked too,
+    because neither fact means anything on its own: a disc that never had
+    sound is not a fault, and refusing to finish one would be a new bug
+    replacing the old one.
 
-    Anything unreadable — no ffprobe, an odd container — counts as no
-    complaint. This exists to catch a definite loss, not to block an encode
-    over a question it could not answer.
+    **Both answers have to be positive before this accuses anything.**
+    ``audio_streams`` returns an empty list for "no audio" and for "could not
+    look" alike — no ffprobe, a timeout on a stalled mount, a container it
+    does not know — so an empty answer about the *output* is not evidence that
+    anything was lost. The duration settles it: a file that reports one was
+    read successfully, and only then does an empty audio list mean what it
+    says. Without that this failed perfectly good encodes whenever the output
+    was the thing it could not read, and an output written straight to a NAS
+    is not a rare shape.
+
+    *source_streams* lets a caller that has already probed the source pass the
+    answer in rather than paying for it twice.
     """
     if not source.exists() or not produced.exists():
         return ""
-    if not audio_streams(exe, source):
+    streams = audio_streams(exe, source) if source_streams is None else source_streams
+    if not streams:
         return ""
     if audio_streams(exe, produced):
+        return ""
+    if not probe_duration(exe, produced):
+        logger.debug("Could not read %s, so its audio is unknown", produced)
         return ""
     return (
         f"The encode finished with no audio at all: {source.name} has sound "
@@ -610,7 +625,9 @@ class VaapiEncoder:
             # mapping here always keeps a track, but a codec that refused
             # halfway would still leave ffmpeg happy and the film mute, and
             # that is not a thing to find out a week later.
-            silent = audio_went_missing(self._exe, input_path, output_path)
+            silent = audio_went_missing(
+                self._exe, input_path, output_path, streams,
+            )
             if silent:
                 result.error = silent
                 logger.error("Encode produced no audio: %s", output_path)

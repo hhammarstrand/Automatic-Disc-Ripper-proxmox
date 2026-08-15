@@ -32,6 +32,10 @@ SOURCE_RAW = "raw"
 SOURCE_FINISHED = "finished"
 SOURCE_NONE = "none"
 
+#: How many finished files _all_silent will open before answering. It runs
+#: on the request thread, and each file costs two subprocess spawns.
+INSPECT_LIMIT = 3
+
 
 def _all_silent(files: list[Path], config) -> bool:
     """Whether every finished file carries no audio whatsoever.
@@ -51,13 +55,20 @@ def _all_silent(files: list[Path], config) -> bool:
     Neither call raises: both answer with a falsy value when ffprobe is
     missing, times out or refuses the file, which is the same answer this
     wants for those cases anyway.
+
+    Only the first few files, because this runs on the request thread while
+    someone waits for a page. Each file costs two subprocess spawns with a
+    sixty-second timeout apiece, and probe_duration falls back to running
+    ffmpeg itself — so an unbounded loop over a twenty-episode season could
+    hold a click for minutes. Three files is enough to tell a job that
+    encoded silent throughout from one that did not.
     """
     from adr.vaapi import audio_streams, probe_duration
 
     exe = getattr(config, "ffmpeg_path", "") or "ffmpeg"
     if not files:
         return False
-    for path in files:
+    for path in files[:INSPECT_LIMIT]:
         if audio_streams(exe, path):
             return False
         if not probe_duration(exe, path):

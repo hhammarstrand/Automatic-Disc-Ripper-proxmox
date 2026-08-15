@@ -613,7 +613,11 @@ def _encode_step(
     # surface forty minutes into a rip instead of here.
     from adr.encodingsettings import handbrake_overrides
 
-    cmd += handbrake_overrides(config)
+    # The sample goes in because the language flag depends on the file:
+    # a source with no track in the wanted language is sent as 'any', and
+    # that is the flag a real encode would carry. Testing without it
+    # vouches for a command real encodes do not run.
+    cmd += handbrake_overrides(config, sample)
     extra = getattr(config, "handbrake_extra_args", "") or ""
     if extra:
         cmd += extra.split()
