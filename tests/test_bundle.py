@@ -5,6 +5,8 @@ bundle is made to be pasted somewhere public, so nothing that could
 authenticate as the user may survive in it. Those tests come first.
 """
 
+from pathlib import Path
+
 import pytest
 
 from adr import applog, bundle
@@ -231,3 +233,75 @@ def test_every_fix_in_the_bundle_is_a_command_someone_can_run(config, quiet_driv
     text = bundle.build(config)
     assert "{ctid}" not in text
     assert "adr-doctor --fix 108" in text
+
+
+class TestTheAudioOnTheDiscsStillOnDisk:
+    """"Why did this come out with no sound" was answered three times by
+    asking someone to run ffprobe by hand and paste the result. The bundle
+    carries it now, because the answer decides between two different problems:
+    a disc with no track in the wanted language, which the encoder handles by
+    asking for 'any' instead — and a disc that has one, which means the audio
+    was lost later and is a bug."""
+
+    def _job_with_raw(self, config, tmp_path, monkeypatch, streams):
+        from adr import vaapi
+        from adr.models import Job, JobStatus, get_session
+
+        session = get_session()
+        job = Job(disc_label="SALTKRAKAN", title="Life on Seacrow Island",
+                  year=1964, drive="/dev/sr0", status=JobStatus.DONE)
+        session.add(job)
+        session.commit()
+        job_id = job.id
+        session.close()
+
+        raw = Path(config.raw_path) / str(job_id)
+        raw.mkdir(parents=True, exist_ok=True)
+        (raw / "title_t00.mkv").write_bytes(b"x")
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: streams)
+        return job_id
+
+    def test_an_untagged_track_is_shown_as_untagged(self, config, tmp_path, monkeypatch):
+        """The whole point. A Swedish disc whose only track carries no
+        language tag looks identical to a disc with no Swedish on it, and
+        nothing but the tag itself tells them apart."""
+        self._job_with_raw(config, tmp_path, monkeypatch,
+                           [{"codec": "ac3", "language": ""}])
+        text = bundle.build(config)
+        assert "Audio on the discs still in raw" in text
+        assert "untagged" in text
+
+    def test_it_says_what_the_wanted_language_is(self, config, tmp_path, monkeypatch):
+        self._job_with_raw(config, tmp_path, monkeypatch,
+                           [{"codec": "ac3", "language": "eng"}])
+        config.update({"audio_language": "swe"})
+        text = bundle.build(config)
+        assert "'swe'" in text
+        assert "do not count" in text
+
+    def test_a_tagged_track_is_named(self, config, tmp_path, monkeypatch):
+        self._job_with_raw(config, tmp_path, monkeypatch,
+                           [{"codec": "ac3", "language": "swe"}])
+        text = bundle.build(config)
+        assert "0:swe (ac3)" in text
+
+    def test_nothing_on_disk_says_so_rather_than_failing(self, config):
+        text = bundle.build(config)
+        assert "Audio on the discs still in raw" in text
+        assert "No ripped files are still on disk" in text
+
+    def test_a_broken_probe_does_not_take_the_bundle_down(
+        self, config, tmp_path, monkeypatch,
+    ):
+        """Every other section still has to arrive."""
+        from adr import vaapi
+
+        self._job_with_raw(config, tmp_path, monkeypatch, [])
+
+        def boom(exe, path):
+            raise RuntimeError("ffprobe exploded")
+
+        monkeypatch.setattr(vaapi, "audio_streams", boom)
+        text = bundle.build(config)
+        assert "could not be gathered" in text
+        assert "=== Settings ===" in text

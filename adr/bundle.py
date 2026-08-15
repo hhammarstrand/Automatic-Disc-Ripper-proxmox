@@ -153,6 +153,7 @@ def build(config, pipeline_manager=None) -> str:
     section("Optical drives", lambda: _drives())
     section("Hardware encoding", lambda: _hardware(config))
     section("Settings", lambda: _settings(config))
+    section("Audio on the discs still in raw", lambda: _raw_audio(config))
     section(f"Last {FAILED_JOBS} failures", lambda: _failures(config))
     section(f"Service log (last {SERVICE_LOG_LINES} lines)", lambda: _service_log(config))
     # Last, over the whole thing, and not per section on purpose. The settings
@@ -340,6 +341,89 @@ def _settings(config) -> str:
         else:
             lines.append(f"{key} = {'<set, redacted>' if value else '<empty>'}")
     return "\n".join(lines)
+
+
+#: How many jobs' raw directories to look inside, and how many files in each.
+#: This spawns ffprobe per file, on the request thread, for a page someone is
+#: waiting on.
+RAW_AUDIO_JOBS = 3
+RAW_AUDIO_FILES = 4
+
+
+def _raw_audio(config) -> str:
+    """What audio the ripped files actually carry, for the discs still on disk.
+
+    Added because "the film came out with no sound" was answered three times
+    by asking someone to run ffprobe by hand and paste the result. The answer
+    is one line per file and it decides between two completely different
+    problems: a disc that has no track in the wanted language, which the
+    encoder now handles by asking for 'any' instead — and a disc that does
+    have one, which means the audio was lost somewhere later and is a bug.
+
+    Saltkråkan is why the distinction matters. It is a Swedish series, so
+    "there is no Swedish track" sounds absurd — until you notice that plenty
+    of Nordic DVDs carry a single audio track with no language tag at all, and
+    an untagged track matches 'swe' exactly as poorly as an English one does.
+    Nothing but the tags themselves tells those two apart.
+    """
+    from pathlib import Path
+
+    from adr.encodingsettings import language
+    from adr.models import Job, get_session
+    from adr.vaapi import audio_streams, language_matches
+
+    wanted = language(config)
+    exe = getattr(config, "ffmpeg_path", "") or "ffmpeg"
+    session = get_session()
+    try:
+        jobs = session.query(Job).order_by(Job.id.desc()).limit(30).all()
+        blocks = []
+        for job in jobs:
+            if len(blocks) >= RAW_AUDIO_JOBS:
+                break
+            raw_dir = Path(config.raw_path) / str(job.id)
+            if not raw_dir.is_dir():
+                continue
+            try:
+                files = sorted(p for p in raw_dir.glob("*.mkv") if p.is_file())
+            except OSError:
+                continue
+            if not files:
+                continue
+
+            lines = [f"--- job #{job.id}: {job.display_title} ---"]
+            for path in files[:RAW_AUDIO_FILES]:
+                streams = audio_streams(exe, path)
+                if not streams:
+                    lines.append(f"  {path.name}: no audio tracks readable")
+                    continue
+                listing = ", ".join(
+                    f"{index}:{stream.get('language') or 'untagged'}"
+                    f" ({stream['codec']})"
+                    for index, stream in enumerate(streams)
+                )
+                lines.append(f"  {path.name}: {listing}")
+            if len(files) > RAW_AUDIO_FILES:
+                lines.append(f"  ... and {len(files) - RAW_AUDIO_FILES} more")
+            blocks.append("\n".join(lines))
+
+        if not blocks:
+            return "No ripped files are still on disk to inspect."
+
+        if wanted:
+            blocks.append(
+                f"Wanted language: '{wanted}'. A track has to be tagged with it "
+                "to be matched — 'untagged' and 'und' do not count, which is "
+                "how a Swedish disc ends up with no Swedish track to find."
+            )
+        else:
+            blocks.append(
+                "No spoken language is set, so the disc's own track order "
+                "decides and nothing here can fail to match."
+            )
+        return "\n\n".join(blocks)
+    finally:
+        session.close()
 
 
 def _failures(config) -> str:

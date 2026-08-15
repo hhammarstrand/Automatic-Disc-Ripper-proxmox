@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.25.1
+
+**The diagnostics bundle now says what audio the ripped discs actually
+carry.** "The film came out with no sound" had been answered three times by
+asking someone to run ffprobe by hand and paste the result, and the answer
+decides between two completely different problems: a disc with no track in the
+wanted language, which the encoder handles by asking for `any` instead — or a
+disc that has one, in which case the audio was lost later and it is a bug.
+
+Saltkråkan is why the distinction matters. It is a Swedish series, so "there
+is no Swedish track" sounds absurd — until you notice how many Nordic DVDs
+carry a single audio track with no language tag at all. An untagged track
+matches `swe` exactly as poorly as an English one does, and nothing but the
+tags themselves tells those two cases apart. The section lists every raw
+file's tracks and names the language being matched against.
+
 ## 1.25.0
 
 **The pale boxes were hiding things.** Only some Bootstrap components were ever
