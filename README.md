@@ -24,6 +24,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **No compilation:** MakeMKV from the `heyarje/makemkv-beta` PPA, HandBrakeCLI from Ubuntu universe.
 - **Automatic MakeMKV key:** fetches the current free beta key, or accepts your own.
 - **Web dashboard** (port 8080) with live progress, job history, a Storage page for NAS setup, settings, and in-browser playback.
+- **Built for the phone you are holding at the drives.** That is where this is actually used — feeding discs, naming what came out — so the phone gets a bar of tabs at the bottom rather than a menu button in the far corner, and the two TMDb searches (naming a TV disc, re-matching a film) are full-screen flows that search as you type instead of a form the keyboard covers half of. Add it to the home screen and it opens as its own application, on its own dark ground. The page no longer reloads itself while a dialog is open, which is exactly when it used to: putting the next disc in is what creates the job that triggered the reload, and it took the half-typed show name with it.
 - **Doctor page** that self-diagnoses drives, tools, keys and storage — and updates the app from GitHub with one button. It also checks the update mechanism itself, because a break there is silent: the button writes a flag, a watcher has to notice it, and the service it starts has to have something to run.
 - **Logs page** with the service's own log, filterable by level and text — no `pct exec`, no journald, no shell.
 - **Test encoding** without a disc: encodes two seconds of video with whatever is actually configured, and says what the encoder objected to.
@@ -1116,8 +1117,9 @@ itself and says what to do about each failure:
 | Local scratch space | A container disk too small for a dual-layer DVD plus its encode |
 | Job database | An unwritable database, where nothing gets recorded |
 
-A count of failures rides along in the navbar on every page, so a problem finds
-you before the failed rip does.
+A count of failures rides along on every page — in the top bar on a desktop, on
+the Doctor tab of the bottom bar on a phone — so a problem finds you before the
+failed rip does.
 
 ### Testing a drive
 

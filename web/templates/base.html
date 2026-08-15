@@ -218,8 +218,12 @@
     </div>
 
     <!-- Error Detail Modal -->
+    <!-- Two <pre> panes of tool output, which is the longest text in the
+         application. In a 358px-wide dialog inside a 390px screen it is a
+         column of about forty characters; full screen it is a column of
+         sixty, and the sixty are what someone is reading it for. -->
     <div class="modal fade" id="errorModal" tabindex="-1" aria-labelledby="errorModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-md-down">
             <div class="modal-content" style="background-color: var(--adr-card); color: var(--adr-text); border: 1px solid var(--adr-border);">
                 <div class="modal-header" style="border-bottom-color: var(--adr-border);">
                     <h5 class="modal-title" id="errorModalLabel">
@@ -352,8 +356,11 @@
     </div>
 
     <!-- Video Player Modal -->
+    <!-- Video, edge to edge. A 16:9 frame inside a dialog inside a phone is
+         about half the screen wide, which is a poor way to check whether the
+         encode came out right — which is the only reason this player exists. -->
     <div class="modal fade" id="playerModal" tabindex="-1" aria-labelledby="playerModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-xl modal-dialog-centered">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-fullscreen-md-down">
             <div class="modal-content" style="background-color: #000; color: var(--adr-text); border: 1px solid var(--adr-border);">
                 <div class="modal-header" style="border-bottom-color: var(--adr-border); background: var(--adr-card);">
                     <h5 class="modal-title" id="playerModalLabel">

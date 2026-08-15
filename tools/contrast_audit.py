@@ -122,7 +122,7 @@ WALKER = r"""
 
 #: The series sheet as it looks with an answer in it: two results in the list,
 #: which is the state the search step exists for and which no page load makes.
-SERIES_SHEET_WITH_RESULTS = r"""
+_SERIES_SHEET_WITH_RESULTS = r"""
 startSeriesMode();
 document.getElementById('seriesShowName').value = 'The Wire';
 const box = document.getElementById('seriesShowResults');
@@ -146,6 +146,66 @@ box.replaceChildren(...[
   return button;
 }));
 """
+
+
+def _open_more_sheet(page):
+    """The bottom bar's More sheet — a phone-only thing that has to be asked
+    for, so it is skipped where the bar itself is display:none."""
+    if not page.evaluate(
+            "() => { const b = document.getElementById('moreNavBtn');"
+            " return !!b && getComputedStyle(b).display !== 'none'; }"):
+        return False
+    page.evaluate("document.getElementById('moreNavBtn').click()")
+    page.wait_for_timeout(600)          # it slides in
+    return True
+
+
+def _open_series_sheet(page):
+    page.evaluate(_SERIES_SHEET_WITH_RESULTS)
+    page.wait_for_timeout(600)
+    return True
+
+
+def _open_series_confirm(page):
+    page.evaluate("startSeriesMode(); pickSeriesShow(1438, 'The Wire', 2002)")
+    page.wait_for_timeout(600)
+    return True
+
+
+def _open_rematch_sheet(page):
+    page.evaluate("openRematchModal(1, 'Jumanji')")
+    page.wait_for_timeout(600)
+    return True
+
+
+def _open_error_modal(page):
+    page.evaluate(
+        "showError(1, 'The Black Cauldron (1985)',"
+        " 'The encode finished with no audio at all.')")
+    page.wait_for_timeout(600)
+    return True
+
+
+#: (label, path, prepare). prepare runs after the page has loaded and returns
+#: False when the state it wants does not exist at this width.
+#:
+#: Everything below the plain pages is a state that only exists after somebody
+#: opened something, and every one of them was unmeasured until it was listed
+#: here — which is the same blind spot the series-mode banner had. When you add
+#: a state that changes colours, add it here as well as to seed().
+PAGES = [
+    ("/", "/", None),
+    ("/history", "/history", None),
+    ("/settings", "/settings", None),
+    ("/storage", "/storage", None),
+    ("/doctor", "/doctor", None),
+    ("/logs", "/logs", None),
+    ("/ (more sheet)", "/", _open_more_sheet),
+    ("/ (series sheet, find)", "/", _open_series_sheet),
+    ("/ (series sheet, confirm)", "/", _open_series_confirm),
+    ("/history (re-match sheet)", "/history", _open_rematch_sheet),
+    ("/history (error detail)", "/history", _open_error_modal),
+]
 
 
 def seed(config):
@@ -237,23 +297,6 @@ def main():
         except OSError:
             time.sleep(0.25)
 
-    pages = ["/", "/history", "/settings", "/storage", "/doctor", "/logs"]
-    # States that only exist after something is opened, and therefore have
-    # never been measured. Same blind spot as the series-mode banner: the
-    # markup is on every page and no default render shows any of it.
-    # (label, path, script, only-when). The last is for state that does not
-    # exist at every width: the bottom bar is display:none above md, so its
-    # More button is not there to click on the desktop pass.
-    visible = ("() => { const b = document.getElementById('moreNavBtn');"
-               " return b && getComputedStyle(b).display !== 'none'; }")
-    opened = [
-        ("more sheet", "/", "document.getElementById('moreNavBtn').click()", visible),
-        # The series sheet with results in it. The rows are injected rather
-        # than searched for, because this measures what the cascade does to a
-        # result row and TMDb is neither reachable nor deterministic here.
-        ("series sheet", "/", SERIES_SHEET_WITH_RESULTS, None),
-        ("rematch sheet", "/history", "openRematchModal(1, 'Jumanji')", None),
-    ]
     # Phone first: it is where the report came from, and a 390px viewport
     # reflows things onto backgrounds they never share on a desktop.
     viewports = [("iphone", 390, 844), ("desktop", 1440, 900)]
@@ -268,24 +311,14 @@ def main():
         )
         for vname, width, height in viewports:
             page = browser.new_page(viewport={"width": width, "height": height})
-            for path in pages:
+            for label, path, prepare in PAGES:
                 page.goto(f"http://127.0.0.1:{port}{path}", wait_until="networkidle")
                 page.wait_for_timeout(400)
-                for item in page.evaluate(WALKER):
-                    if item["ratio"] < item["need"]:
-                        item["page"] = path
-                        item["viewport"] = vname
-                        findings.append(item)
-            for label, path, script, only_when in opened:
-                page.goto(f"http://127.0.0.1:{port}{path}", wait_until="networkidle")
-                page.wait_for_timeout(300)
-                if only_when and not page.evaluate(only_when):
+                if prepare is not None and prepare(page) is False:
                     continue
-                page.evaluate(script)
-                page.wait_for_timeout(600)     # the sheet slides in
                 for item in page.evaluate(WALKER):
                     if item["ratio"] < item["need"]:
-                        item["page"] = f"{path} ({label})"
+                        item["page"] = label
                         item["viewport"] = vname
                         findings.append(item)
             page.close()

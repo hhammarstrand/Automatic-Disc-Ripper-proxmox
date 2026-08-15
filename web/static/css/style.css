@@ -892,6 +892,25 @@ input, select, textarea, .list-group-item-action {
         overflow-x: auto;
     }
 
+    /* The player fills the sheet rather than a fixed 75% of the window: the
+       inline max-height was written for a dialog floating on a desktop page,
+       and inside a full-screen sheet it leaves a band of black under the
+       video and the controls halfway up the screen. */
+    #playerModal .modal-body {
+        display: flex;
+        align-items: center;
+    }
+    #videoPlayer {
+        max-height: 100% !important;
+    }
+    /* The error panes were capped at 400px and 300px, which inside a
+       full-screen sheet is two small scrolling boxes with empty space under
+       them. The sheet already scrolls. */
+    #errorModalText,
+    #errorModalLog {
+        max-height: none !important;
+    }
+
     /* A row of search results is a list of things to hit with a thumb. */
     #seriesShowResults .list-group-item {
         min-height: 44px;

@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.43.0
+
+**The last two dialogs that hold something long take the whole screen on a
+phone.** The error detail is two panes of tool output, which is the longest
+text in this application: in a 358px dialog inside a 390px screen that is a
+column of about forty characters, and the panes were capped at 400 and 300
+pixels each, so it was two small scrolling boxes inside a scrolling box. The
+player is there to check whether an encode came out right, which a 16:9 frame
+at half the screen's width does not help anybody do. Both are full screen now,
+and the video fills the sheet instead of stopping at 75% of a window it is no
+longer in.
+
+The confirmation deliberately does not. "Delete job #12?" as a full-screen
+takeover reads as something far graver than it is — and a full-screen system
+dialog for a small question is exactly what these replaced.
+
+**The contrast audit can measure a state, not just a page.** Its own blind spot
+was always state: it sees what a page load renders, and everything added in
+this rework — the More sheet, both steps of the series sheet, the re-match
+sheet, the error detail — exists only after somebody opened it. Six of the ten
+things it now checks were invisible to it a version ago, which is the same hole
+the series-mode banner fell through in 1.32. Pages are `(label, path, prepare)`
+now, prepare being whatever has to happen after the load, and every state is
+measured at both widths. It still ends at zero failures.
+
 ## 1.42.0
 
 **Settings is usable at 390 pixels.** Five tabs are about 470px of labels in a

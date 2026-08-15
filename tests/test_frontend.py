@@ -602,6 +602,42 @@ class TestARefreshDoesNotInterruptTyping:
         assert "location.reload()" in source
 
 
+class TestTheRemainingDialogs:
+    """Which dialogs take the whole screen is a judgement per dialog, not a
+    class applied to all of them.
+
+    The two that hold something long — the tool output, and a video — get the
+    screen. The confirmation does not: "Delete job #12?" in a full-screen
+    sheet reads as something far more serious than it is, and the dialog it
+    replaced was a system alert doing exactly that.
+    """
+
+    @pytest.mark.parametrize("name", ["errorModal", "playerModal"])
+    def test_the_long_ones_take_the_screen(self, name):
+        text = Path("web/templates/base.html").read_text()
+        block = text[text.index(f'id="{name}"'):][:400]
+        assert "modal-fullscreen-md-down" in block
+
+    def test_the_confirmation_stays_a_dialog(self):
+        text = Path("web/templates/base.html").read_text()
+        block = text[text.index('id="confirmModal"'):][:400]
+        assert "modal-fullscreen-md-down" not in block
+        assert "modal-dialog-centered" in block
+
+    def test_the_video_fills_the_sheet(self):
+        """The inline max-height was written for a dialog floating on a
+        desktop page; inside a full-screen sheet it leaves a band of black
+        under the video with the controls halfway up the screen."""
+        css = Path("web/static/css/style.css").read_text()
+        mobile = css[css.index("max-width: 767.98px"):]
+        assert "#videoPlayer" in mobile
+
+    def test_the_error_panes_stop_being_boxes_inside_a_box(self):
+        css = Path("web/static/css/style.css").read_text()
+        mobile = css[css.index("max-width: 767.98px"):]
+        assert "#errorModalLog" in mobile
+
+
 class TestSettingsFitsAPhone:
     """Five tabs are about 470px of labels in a 390px window.
 
