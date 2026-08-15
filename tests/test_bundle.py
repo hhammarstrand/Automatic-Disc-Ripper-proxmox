@@ -305,3 +305,125 @@ class TestTheAudioOnTheDiscsStillOnDisk:
         text = bundle.build(config)
         assert "could not be gathered" in text
         assert "=== Settings ===" in text
+
+
+class TestTheEjectPictureIsInOnePlace:
+    """"Why isn't the tray ejected?" could not be answered from a bundle at
+    all: the setting was in one section, the drive in another, and what
+    actually happened was in neither."""
+
+    def test_it_names_the_setting_per_drive(self, config):
+        config.update({"drive_labels": {"/dev/sr0": "Internal"},
+                       "eject_after_rip": True})
+        text = bundle.build(config)
+        assert "=== Auto-eject ===" in text
+        assert "Internal" in text
+        assert "auto-eject : on" in text
+
+    def test_a_drive_excluded_from_auto_eject_says_so(self, config):
+        config.update({"drive_labels": {"/dev/sr0": "Internal"},
+                       "eject_after_rip": True, "no_eject_drives": ["/dev/sr0"]})
+        text = bundle.build(config)
+        assert "OFF — Settings → Drives" in text
+
+    def test_it_asks_the_drive_whether_it_even_has_a_tray(self, config, monkeypatch):
+        """A slot loader and a caddy both accept the eject command and neither
+        has a tray to open — which looks exactly like a software fault."""
+        from adr import disc
+
+        monkeypatch.setattr(
+            disc, "eject_capability",
+            lambda d: {"ok": True, "can_eject": False, "detail": "lock door"},
+        )
+        config.update({"drive_labels": {"/dev/sr0": "Internal"}})
+        text = bundle.build(config)
+        assert "CANNOT OPEN A TRAY" in text
+
+    def test_it_never_ejects_anything_while_reporting(self, config, monkeypatch):
+        """A diagnostic that opened the tray as a side effect would be a
+        surprising thing to run while a disc is being read."""
+        from adr import disc
+
+        ejected = []
+        monkeypatch.setattr(disc, "eject_drive", lambda d: ejected.append(d))
+        config.update({"drive_labels": {"/dev/sr0": "Internal"}})
+        bundle.build(config)
+        assert ejected == []
+
+    def test_it_points_at_where_the_outcome_is_recorded(self, config):
+        config.update({"drive_labels": {"/dev/sr0": "Internal"}})
+        assert "Could not eject" in bundle.build(config)
+
+
+class TestTheJobsThatSucceededWrongly:
+    """Every question this bundle has been sent to answer was about a job that
+    *succeeded* and did the wrong thing — a film encoded silent, a two-minute
+    clip filed as an episode, a tray that stayed shut. The failures section
+    cannot show any of them, because none of them failed."""
+
+    def _job(self, **values):
+        from adr.models import Job, JobStatus, Track, get_session
+
+        session = get_session()
+        job = Job(disc_label="SALTKRAKAN_D2", title="Show", year=1964,
+                  drive="/dev/sr0", status=JobStatus.DONE,
+                  content_type="series", series_season=1, series_first_episode=6)
+        session.add(job)
+        session.commit()
+        session.add(Track(job_id=job.id, track_number=1, filename="t00.mkv",
+                          duration_seconds=1500, episode_number=6, size_mb=980.0,
+                          output_path="/tv/Show - S01E06.mp4"))
+        session.add(Track(job_id=job.id, track_number=2, filename="t01.mkv",
+                          duration_seconds=175, episode_number=None, size_mb=35.0,
+                          output_path="/tv/Other/Extra 1.mp4"))
+        session.commit()
+        session.close()
+
+    def test_a_finished_job_is_described(self, config):
+        self._job()
+        text = bundle.build(config)
+        assert "whatever their status" in text
+        assert "[done]" in text
+
+    def test_the_durations_are_there(self, config):
+        """The number that decides whether a title is an episode, and the one
+        I had to infer from HandBrake frame counts three times."""
+        self._job()
+        text = bundle.build(config)
+        assert "25m 0s" in text
+        assert "2m 55s" in text
+
+    def test_the_episode_numbers_are_there(self, config):
+        self._job()
+        text = bundle.build(config)
+        assert "E06" in text
+        assert "not an episode" in text, "an extra must be visible as one"
+
+    def test_the_season_and_starting_episode_are_there(self, config):
+        self._job()
+        text = bundle.build(config)
+        assert "season 1" in text
+        assert "from episode 6" in text
+
+
+class TestWhatTheRawFolderIsHolding:
+    def test_it_reports_per_job_and_a_total(self, config, tmp_path):
+        raw = Path(config.raw_path) / "70"
+        raw.mkdir(parents=True, exist_ok=True)
+        (raw / "a.mkv").write_bytes(b"x" * 2_000_000)
+        text = bundle.build(config)
+        assert "job 70:" in text
+        assert "total:" in text
+
+    def test_an_empty_folder_says_so(self, config):
+        assert "is empty" in bundle.build(config)
+
+
+class TestTheNewSectionsKeepTheirSecrets:
+    def test_nothing_new_leaks_a_token(self, config):
+        """The whole document is scrubbed, and these sections print paths and
+        labels — but the rule is the rule."""
+        config.update({"tmdb_api_key": "abcdef0123456789abcdef0123456789",
+                       "drive_labels": {"/dev/sr0": "Internal"}})
+        text = bundle.build(config)
+        assert "abcdef0123456789abcdef0123456789" not in text

@@ -432,6 +432,59 @@ def get_drive_models() -> dict[str, str]:
 CDROMEJECT = 0x5309
 CDROM_LOCKDOOR = 0x5329
 
+#: What the kernel says this drive can physically do. Worth asking before
+#: blaming software for a tray that never moves: a slot loader and a caddy
+#: drive both accept CDROMEJECT and neither has a tray to open.
+CDROM_GET_CAPABILITY = 0x5331
+_CAPABILITIES = (
+    (0x1, "open tray"),
+    (0x2, "close tray"),
+    (0x4, "lock door"),
+    (0x8, "select speed"),
+    (0x20, "media changed"),
+    (0x100, "play audio"),
+)
+
+
+def eject_capability(device: str) -> dict:
+    """What the drive says about ejecting. ``{"ok", "can_eject", "detail"}``.
+
+    Read-only: it asks the kernel what the drive is capable of, and never
+    ejects anything. A diagnostic that opened the tray as a side effect would
+    be a surprising thing to run while a disc is being read.
+    """
+    try:
+        fd = os.open(device, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError as exc:
+        return {
+            "ok": False, "can_eject": None,
+            "detail": f"could not open it ({errno.errorcode.get(exc.errno, exc.errno)})",
+        }
+    import fcntl
+
+    try:
+        flags = fcntl.ioctl(fd, CDROM_GET_CAPABILITY, 0)
+    except OSError as exc:
+        return {
+            "ok": False, "can_eject": None,
+            "detail": (
+                "the drive does not answer CDROM_GET_CAPABILITY "
+                f"({errno.errorcode.get(exc.errno, exc.errno)})"
+            ),
+        }
+    finally:
+        os.close(fd)
+
+    if flags < 0:
+        return {"ok": False, "can_eject": None, "detail": "the kernel returned no capabilities"}
+
+    named = [name for bit, name in _CAPABILITIES if flags & bit]
+    return {
+        "ok": True,
+        "can_eject": bool(flags & 0x1),
+        "detail": ", ".join(named) or "nothing it will admit to",
+    }
+
 
 def _eject_ioctl(drive: str) -> str:
     """Ask the kernel directly. Returns "" on success, else why it failed.

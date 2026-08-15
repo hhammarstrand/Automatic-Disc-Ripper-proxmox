@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.38.0
+
+**Three things the diagnostics bundle could never answer, and had to be asked
+for by hand every time.**
+
+**Auto-eject, in one place.** "Why isn't the tray ejected?" needed the setting
+from one section, the drive from another, and what actually happened from
+neither. There is a section for it now: the setting per drive, the current
+state of each, and — read straight from the kernel — whether the drive says it
+can open a tray at all. A slot loader and a caddy both accept the eject
+command and neither has a tray to open, which looks exactly like a software
+fault and is not one. Nothing in it ejects anything; a diagnostic that opened
+the tray as a side effect would be a surprising thing to run mid-rip.
+
+**The last few jobs, whatever their status.** Every question this bundle has
+been sent to answer was about a job that *succeeded* and did the wrong thing —
+a film encoded silent, a two-minute clip filed as an episode, a tray that
+stayed shut. The failures section could show none of them, because none of
+them failed. Each job now arrives with its tracks: duration, episode number,
+size and output name, which is what the naming decisions were actually made
+from, plus the tail of its own log. The 2:55 clip that caused three rounds of
+questions is a line of text now instead of something to infer from HandBrake
+frame counts.
+
+**What the raw folder is holding**, per job and in total. Until 1.31 nothing
+was ever deleted from it, and the bundle reported free space without ever
+saying what had taken the rest.
+
 ## 1.37.0
 
 **The eject now says what happened.** Five call sites ejected the disc and threw

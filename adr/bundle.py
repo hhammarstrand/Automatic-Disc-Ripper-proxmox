@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import contextlib
 import logging
+from pathlib import Path
 import platform
 import re
 import sys
@@ -154,6 +155,9 @@ def build(config, pipeline_manager=None) -> str:
     section("Hardware encoding", lambda: _hardware(config))
     section("Settings", lambda: _settings(config))
     section("Audio on the discs still in raw", lambda: _raw_audio(config))
+    section("Auto-eject", lambda: _auto_eject(config))
+    section("What the raw folder is holding", lambda: _raw_usage(config))
+    section(f"Last {RECENT_JOBS} jobs, whatever their status", lambda: _recent_jobs(config))
     section(f"Last {FAILED_JOBS} failures", lambda: _failures(config))
     section(f"Service log (last {SERVICE_LOG_LINES} lines)", lambda: _service_log(config))
     # Last, over the whole thing, and not per section on purpose. The settings
@@ -424,6 +428,173 @@ def _raw_audio(config) -> str:
         return "\n\n".join(blocks)
     finally:
         session.close()
+
+
+#: How many recent jobs to describe in full, and how many tracks of each.
+RECENT_JOBS = 4
+RECENT_TRACKS = 8
+
+
+def _auto_eject(config) -> str:
+    """Everything that decides whether the tray opens, in one place.
+
+    Added because "why isn't the tray ejected?" could not be answered from a
+    bundle at all: the setting was in one section, the drive in another, and
+    what actually happened was in neither. Nothing here ejects anything — a
+    diagnostic that opened the tray as a side effect would be a surprising
+    thing to run while a disc is being read.
+    """
+    import shutil
+
+    from adr.disc import eject_capability, media_status
+
+    # Every drive the machine has, not only the ones someone named — an
+    # unnamed drive is exactly as likely to be the one that will not open.
+    from adr.disc import list_optical_drives
+
+    try:
+        drives = sorted(d["drive"] for d in list_optical_drives())
+    except OSError:
+        drives = []
+    for named in sorted(getattr(config, "drive_labels", {}) or {}):
+        if named not in drives:
+            drives.append(named)
+    if not drives:
+        return "No optical drives to report on."
+
+    lines = []
+    for device in drives:
+        label = config.drive_label(device) or "(unnamed)"
+        on = "on" if config.should_eject(device) else "OFF — Settings → Drives"
+        capability = eject_capability(device)
+        if capability["can_eject"] is True:
+            tray = "the drive says it can open its tray"
+        elif capability["can_eject"] is False:
+            tray = (
+                "THE DRIVE SAYS IT CANNOT OPEN A TRAY — a slot loader or a "
+                "caddy accepts the command and has nothing to open"
+            )
+        else:
+            tray = f"could not ask: {capability['detail']}"
+        state = media_status(device)
+        lines.append(
+            f"{device}  {label}\n"
+            f"    auto-eject : {on}\n"
+            f"    tray       : {tray}\n"
+            f"    right now  : {state['state']} — {state['detail']}"
+        )
+
+    binary = shutil.which("eject") or "/usr/bin/eject"
+    have = "present" if Path(binary).exists() else "MISSING"
+    lines.append(
+        f"eject command: {binary} ({have}). The kernel is tried first and this "
+        "is the fallback — in an LXC the command usually fails on its own, "
+        "because it consults udev and there is none."
+    )
+    lines.append(
+        "What actually happened is in each job's own log, on the History "
+        "page: 'Ejected the disc from …', 'Could not eject … ' or 'Leaving "
+        "the disc in …'. The most recent are below."
+    )
+    return "\n".join(lines)
+
+
+def _recent_jobs(config) -> str:
+    """The last few jobs whatever their status, with what came off the disc.
+
+    Every question this bundle has been sent to answer was about a job that
+    *succeeded* and did the wrong thing — a film encoded silent, a two-minute
+    clip filed as an episode, a tray that stayed shut. The failures section
+    cannot show any of those, because none of them failed. This is the part
+    that was missing: the durations and the episode numbers, which is what
+    the naming decisions were actually made from.
+    """
+    from adr import joblog
+    from adr.models import Job, get_session
+    from adr.utils import format_duration
+
+    session = get_session()
+    try:
+        jobs = (
+            session.query(Job).order_by(Job.id.desc()).limit(RECENT_JOBS).all()
+        )
+        if not jobs:
+            return "No jobs yet."
+
+        blocks = []
+        for job in jobs:
+            status = getattr(job.status, "value", job.status)
+            head = [
+                f"--- job #{job.id}: {job.display_title} "
+                f"[{status}] on {job.drive} ({job.content_type or 'movie'}) ---",
+                f"label: {job.disc_label or '(none)'}"
+                + (f"   season {job.series_season}" if job.series_season is not None else "")
+                + (f"   from episode {job.series_first_episode}"
+                   if job.series_first_episode else ""),
+            ]
+            tracks = list(job.tracks or [])
+            if tracks:
+                head.append(f"{len(tracks)} track(s):")
+                for track in tracks[:RECENT_TRACKS]:
+                    length = (
+                        format_duration(track.duration_seconds)
+                        if track.duration_seconds else "length unknown"
+                    )
+                    episode = (
+                        f"E{track.episode_number:02d}"
+                        if track.episode_number else "not an episode"
+                    )
+                    name = Path(track.output_path).name if track.output_path else "—"
+                    head.append(
+                        f"  {track.filename or '?'}  {length}  {episode}  "
+                        f"{track.size_mb or 0:.0f} MB  -> {name}"
+                    )
+                if len(tracks) > RECENT_TRACKS:
+                    head.append(f"  ... and {len(tracks) - RECENT_TRACKS} more")
+            else:
+                head.append("no tracks recorded")
+
+            tail = joblog.read(config, job.id).splitlines()[-JOB_LOG_LINES:]
+            head.append("job log:")
+            head.extend(f"  {line}" for line in tail or ["(the log is empty)"])
+            blocks.append("\n".join(head))
+        return "\n\n".join(blocks)
+    finally:
+        session.close()
+
+
+def _raw_usage(config) -> str:
+    """What the raw directory is holding, per job.
+
+    Until 1.31 nothing was ever deleted from it — every disc left its whole
+    rip behind — and the bundle reported free space without ever saying what
+    had taken the rest.
+    """
+    root = Path(config.raw_path)
+    if not root.is_dir():
+        return f"{root} does not exist."
+    rows = []
+    total = 0
+    try:
+        for child in sorted(root.iterdir()):
+            if not child.is_dir():
+                continue
+            size = sum(
+                f.stat().st_size for f in child.rglob("*") if f.is_file()
+            )
+            total += size
+            rows.append((child.name, size / 1024 / 1024))
+    except OSError as exc:
+        return f"Could not read {root}: {exc}"
+
+    if not rows:
+        return f"{root} is empty."
+    rows.sort(key=lambda r: r[1], reverse=True)
+    lines = [f"job {name}: {mb:,.0f} MB" for name, mb in rows[:12]]
+    if len(rows) > 12:
+        lines.append(f"... and {len(rows) - 12} more")
+    lines.append(f"total: {total / 1024 / 1024:,.0f} MB in {len(rows)} job folder(s)")
+    return "\n".join(lines)
 
 
 def _failures(config) -> str:
