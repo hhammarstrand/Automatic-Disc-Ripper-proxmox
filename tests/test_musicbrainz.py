@@ -212,3 +212,56 @@ def test_empty_release_list_is_not_an_identification(monkeypatch):
 def test_garbage_shapes_do_not_raise(monkeypatch):
     _patch_get(monkeypatch, _Response(200, payload={"releases": "not a list"}))
     assert not musicbrainz.lookup(_toc_from_offsets([150], leadout=40000)).identified
+
+
+class TestEnhancedCDsGetTheRightDiscId:
+    """An Enhanced CD — an album with a bonus data session, which describes
+    half the CDs pressed after the mid-nineties — carries a trailing data
+    track. MusicBrainz computes IDs from the audio session alone: the data
+    track is excluded and the lead-out becomes the data session's start minus
+    11400 frames. Hashing the whole TOC produced an ID no release has, so
+    every Enhanced CD ripped as "Unidentified CD <hash>"."""
+
+    def _toc(self, tracks, leadout):
+        from adr.disctype import Toc, TocTrack
+
+        # The dataclasses carry LBAs; frame offsets are LBA + 150. The test
+        # speaks frames, as the disc-ID algorithm does, so convert back.
+        toc_tracks = [
+            TocTrack(number=n, lba=off - 150, is_audio=audio)
+            for n, off, audio in tracks
+        ]
+        return Toc(
+            first=min(t[0] for t in tracks), last=max(t[0] for t in tracks),
+            leadout_lba=leadout - 150, tracks=toc_tracks,
+        )
+
+    def test_a_plain_audio_cd_is_unchanged(self):
+        from adr.musicbrainz import compute_disc_id
+
+        plain = self._toc([(1, 150, True), (2, 20000, True)], 100000)
+        assert len(compute_disc_id(plain)) == 28
+
+    def test_the_data_track_does_not_change_the_id(self):
+        """The audio half of an Enhanced CD must hash like the plain pressing
+        of the same album, or the lookup finds nothing."""
+        from adr.musicbrainz import compute_disc_id
+
+        plain = self._toc([(1, 150, True), (2, 20000, True)], 50000)
+        enhanced = self._toc(
+            [(1, 150, True), (2, 20000, True), (3, 61400, False)],
+            90000,
+        )
+        # 61400 - 11400 = 50000: the audio session's true lead-out.
+        assert compute_disc_id(enhanced) == compute_disc_id(plain)
+
+    def test_last_counts_audio_tracks_only(self):
+        from adr.musicbrainz import compute_disc_id
+
+        two_audio = self._toc(
+            [(1, 150, True), (2, 20000, True), (3, 61400, False)], 90000,
+        )
+        three_audio = self._toc(
+            [(1, 150, True), (2, 20000, True), (3, 40000, True)], 50000,
+        )
+        assert compute_disc_id(two_audio) != compute_disc_id(three_audio)

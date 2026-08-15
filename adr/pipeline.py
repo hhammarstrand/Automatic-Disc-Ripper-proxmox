@@ -1862,12 +1862,32 @@ class DrivePipeline:
             job.year = album.year
         if not job.disc_label:
             job.disc_label = album.display
+        # Committed before the cancel check, not after: _cancelled() refreshes
+        # the row, and a refresh throws away pending changes — the title and
+        # year just set would silently vanish for every album, cancelled or
+        # not.
+        session.commit()
+        if _cancelled(session, job):
+            log.append("rip", "Cancelled before the rip started.")
+            return
         job.status = JobStatus.RIPPING
         session.commit()
 
         ripper = AudioCDRipper(self._config, process_registry=process_registry)
         ripper.log_sink = log.sink("rip")
         try:
+            cancel_check = {"at": 0.0, "value": False}
+
+            def _audio_cancelled() -> bool:
+                # Throttled the same way the ISO path throttles it: the loop
+                # asks between every track and a database read per question
+                # would contend with the progress commits.
+                now = time.time()
+                if now - cancel_check["at"] >= 2.0:
+                    cancel_check["at"] = now
+                    cancel_check["value"] = process_registry.is_cancelled(job.id)
+                return cancel_check["value"]
+
             result = ripper.rip(
                 device=self.drive,
                 job_id=job.id,
@@ -1875,6 +1895,7 @@ class DrivePipeline:
                 album=album,
                 output_root=self._config.music_path,
                 progress_callback=_progress_committer(job, session, "ripping"),
+                should_cancel=_audio_cancelled,
             )
         finally:
             ripper.log_sink = None
@@ -1949,6 +1970,35 @@ class DrivePipeline:
             return
 
         log = JobLog(self._config, job.id)
+
+        # The same destination gate every video disc passes. The data-disc
+        # branch forks off before destination_blocker runs, so with the NAS
+        # unmounted a video disc was refused up front while a data disc wrote
+        # an 8 GB image onto the container's own root disk through the dead
+        # mountpoint — filling the disk SQLite lives on, which takes every
+        # other running job down with it.
+        from adr.storage import check_destination
+
+        iso_dir = str(self._config.data_disc_path or "")
+        # The folder legitimately does not exist until the first data disc;
+        # creating it is not the risk the gate exists for. What the gate is
+        # for is the parent being a dead mountpoint or an unwritable share.
+        with contextlib.suppress(OSError):
+            Path(iso_dir).mkdir(parents=True, exist_ok=True)
+        ok, why = check_destination(
+            iso_dir, require_mount=self._config.require_completed_mount,
+        )
+        if not ok:
+            self._refuse(job, session, (
+                f"This is a data disc, and the ISO folder is not usable: {why} "
+                "Fix the destination under Settings or Storage and press Rip."
+            ))
+            return
+
+        # Stale .iso.part files are a previous run's death, and this is the
+        # first moment anyone is looking at the ISO folder again.
+        isobackup.sweep_stale_parts(iso_dir)
+
         if not job.title:
             job.title = job.disc_label or "Data disc"
         job.status = JobStatus.RIPPING
@@ -1978,7 +2028,15 @@ class DrivePipeline:
         if job.status == JobStatus.CANCELLED:
             job.completed_at = utcnow()
             session.commit()
-            log.append("rip", "Cancelled; the partial image was deleted.")
+            # The copy checks for cancellation every two seconds, so a cancel
+            # in the last window can land after the image finished — complete,
+            # on disk, referenced by no track row, while this log line claimed
+            # it was deleted. A cancel is a cancel: the file goes, whichever
+            # side of the finish line it was on.
+            if result.success and result.path:
+                with contextlib.suppress(OSError):
+                    Path(result.path).unlink()
+            log.append("rip", "Cancelled; the image was deleted.")
             return
 
         if not result.success:

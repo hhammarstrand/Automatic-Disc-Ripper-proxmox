@@ -164,12 +164,12 @@
                     {% if job.plex_path %}
                     <span class="badge bg-success me-1"><i class="bi bi-collection-play"></i> Plex</span>
                     <span class="text-break small text-secondary" title="{{ job.plex_path }}">{{ job.plex_path }}</span>
-                    <button class="btn btn-outline-light btn-sm ms-1 py-0 px-1" onclick='copyPath({{ job.plex_path | tojson }})' title="Copy path">
+                    <button class="btn btn-outline-light btn-sm ms-1 py-0 px-1" onclick='copyPath({{ job.plex_path | tojson }}, this)' title="Copy path">
                         <i class="bi bi-clipboard"></i>
                     </button>
                     {% elif job.output_path %}
                     <span class="text-break small text-secondary" title="{{ job.output_path }}">{{ job.output_path }}</span>
-                    <button class="btn btn-outline-light btn-sm ms-1 py-0 px-1" onclick='copyPath({{ job.output_path | tojson }})' title="Copy path">
+                    <button class="btn btn-outline-light btn-sm ms-1 py-0 px-1" onclick='copyPath({{ job.output_path | tojson }}, this)' title="Copy path">
                         <i class="bi bi-clipboard"></i>
                     </button>
                     {% endif %}
@@ -377,6 +377,10 @@ function reencodeJob(jobId) {
                 title: 'Encode this again?',
                 body: plan.reason,
                 confirmLabel: 'Encode again',
+                // Red, like every other action that replaces a library file:
+                // the finished-file path deletes the old copy once the new
+                // one exists, and a generation of quality goes with it.
+                danger: true,
             }).then(confirmed => {
                 if (!confirmed) return;
                 return fetch(`/api/jobs/${jobId}/reencode`, {method: 'POST'})

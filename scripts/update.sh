@@ -135,7 +135,12 @@ if [[ "${ADR_UPDATE_FORCE:-}" != "1" ]]; then
     # updater._job_in_progress reads the database directly and is the same
     # check the Update button uses to withhold itself. One question, one
     # answer, no serialisation format in between.
-    busy="$("$INSTALL_DIR/.venv/bin/python" -c '
+    # As the service user, never as root. The venv and the adr package are
+    # deliberately owned by the service user, so root importing them here
+    # would execute service-user-writable code as uid 0 — the exact hole the
+    # root-owned scripts/ directory exists to close, reopened one block above
+    # it. The check only reads the database, which the service user owns.
+    busy="$(sudo -u "$RUN_USER" "$INSTALL_DIR/.venv/bin/python" -c '
 import sys
 sys.path.insert(0, "'"$INSTALL_DIR"'")
 from adr.updater import _job_in_progress

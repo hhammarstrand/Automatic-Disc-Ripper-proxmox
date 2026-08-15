@@ -334,3 +334,66 @@ def test_files_are_written_where_the_result_says(tools, tmp_path):
     for path in result.files:
         assert path.parent == result.output_dir
         assert os.path.getsize(path) > 0
+
+
+class TestCancelStopsBetweenTracks:
+    """Killing the running cdparanoia is not enough on its own: that track is
+    recorded as failed and the loop starts a fresh cdparanoia for the next —
+    the registry has already handed out its kill, so a fifteen-track CD
+    cancelled at track two ripped the other thirteen anyway."""
+
+    def test_the_loop_asks_between_tracks(self, tmp_path):
+        import types
+
+        from adr.audiocd import AudioCDRipper
+        from adr.disctype import Toc, TocTrack
+
+        # The tool-presence check wants real executables; any file with the
+        # right bits set will do, since _extract is stubbed below.
+        for name in ("cdparanoia", "ffmpeg"):
+            exe = tmp_path / name
+            exe.write_text("#!/bin/sh\nexit 0\n")
+            exe.chmod(0o755)
+        config = types.SimpleNamespace(
+            raw_path=tmp_path / "raw",
+            ffmpeg_path=str(tmp_path / "ffmpeg"),
+            cdparanoia_path=str(tmp_path / "cdparanoia"),
+            audio_cd_format="flac", audio_cd_mp3_bitrate="320k",
+        )
+        ripper = AudioCDRipper(config)
+        extracted = []
+        ripper._extract = lambda *a, **k: extracted.append(1) or True
+
+        toc = Toc(first=1, last=3, leadout_lba=100000, tracks=[
+            TocTrack(number=n, lba=n * 10000, is_audio=True) for n in (1, 2, 3)
+        ])
+        from adr.musicbrainz import AlbumInfo
+
+        album = AlbumInfo(disc_id="x" * 28)
+        calls = {"n": 0}
+
+        def cancel_after_first():
+            calls["n"] += 1
+            return calls["n"] > 1          # first track runs, then cancel
+
+        result = ripper.rip(
+            "/dev/sr0", 1, toc, album, tmp_path / "music",
+            should_cancel=cancel_after_first,
+        )
+        assert result.success is False
+        assert result.error == "Cancelled."
+        assert len(extracted) <= 1, "tracks kept ripping after the cancel"
+
+
+class TestMetadataCannotEscapeTheMusicFolder:
+    def test_dot_dot_as_artist_stays_inside(self):
+        """sanitize_filename strips slashes but not dots, and the artist name
+        arrives over the network from MusicBrainz."""
+        from adr.audiocd import album_folder
+        from adr.musicbrainz import AlbumInfo
+
+        album = AlbumInfo(disc_id="y" * 28, artist="..", album="Album")
+        album.tracks = []
+        folder = album_folder(album)
+        assert ".." not in folder.parts
+        assert folder.parts[0] == "Unknown Artist"

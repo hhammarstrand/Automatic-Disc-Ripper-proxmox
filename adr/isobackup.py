@@ -21,6 +21,7 @@ from __future__ import annotations
 import contextlib
 import logging
 import os
+import shutil
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -34,6 +35,10 @@ logger = logging.getLogger(__name__)
 #: Read size. A multiple of the 2048-byte sector, large enough that the
 #: syscall overhead is irrelevant next to the drive's own latency.
 CHUNK_SIZE = 64 * 1024
+
+#: Headroom demanded beyond the image itself, so the copy cannot be the
+#: thing that fills the disk to the byte and takes SQLite down with it.
+SPACE_MARGIN = 512 * 1024 * 1024
 
 #: How many times a failing read is retried before the backup gives up.
 READ_RETRIES = 2
@@ -145,23 +150,43 @@ def create_image(
         )
         return result
 
+    # Room for the whole image, asked before hours of reading rather than
+    # discovered at ENOSPC after them. image_size() already knows the answer.
     try:
         destination_dir.mkdir(parents=True, exist_ok=True)
+        free = shutil.disk_usage(destination_dir).free
+        if free < total + SPACE_MARGIN:
+            result.error = (
+                f"The disc needs {total / 1_073_741_824:.1f} GB and "
+                f"{destination_dir} has {free / 1_073_741_824:.1f} GB free. "
+                "Nothing was written — free some space or point the ISO "
+                "folder somewhere larger under Settings."
+            )
+            return result
         target = unique_path(destination_dir, image_name(label, Path(device).name))
     except OSError as exc:
         result.error = f"Could not prepare {destination_dir}: {exc}"
         return result
     result.path = target
 
+    # Written under a .part name, renamed only when complete. The image was
+    # written straight to its final name once, and a process death mid-copy —
+    # an update, an OOM kill, a power cut, all routine per recovery.py — left
+    # a truncated ISO indistinguishable from a finished one, squatting the
+    # canonical name so the good re-image landed at "(2)". _discard cannot
+    # help there: nothing unwinds a killed process. The .part suffix is the
+    # marker that survives death, and _sweep_stale_parts collects them.
+    part = target.with_name(target.name + ".part")
+
     fd = None
     written = 0
     try:
         fd = os.open(device, os.O_RDONLY)
-        with open(target, "wb") as out:
+        with open(part, "wb") as out:
             while written < total:
                 if should_cancel is not None and should_cancel():
                     result.error = "Cancelled."
-                    _discard(target)
+                    _discard(part)
                     result.path = None
                     return result
 
@@ -174,7 +199,7 @@ def create_image(
                         f"{total / 1_048_576:.0f} MB). This is the disc, not the "
                         "drive — a scratch or rot at that point."
                     )
-                    _discard(target)
+                    _discard(part)
                     result.path = None
                     return result
                 if not chunk:
@@ -194,12 +219,14 @@ def create_image(
         result.success = written > 0
         if not result.success:
             result.error = "Nothing could be read from the disc."
-            _discard(target)
+            _discard(part)
             result.path = None
+            return result
+        os.replace(part, target)
         return result
     except OSError as exc:
         result.error = f"Writing the image failed: {exc}"
-        _discard(target)
+        _discard(part)
         result.path = None
         return result
     finally:
@@ -236,6 +263,33 @@ def _report(callback, written: int, total: int) -> None:
                 f"{total / 1_048_576:.0f} MB"
             ),
         })
+
+
+
+def sweep_stale_parts(destination_dir) -> int:
+    """Delete .iso.part files a dead process left behind. Returns how many.
+
+    A part file is by definition incomplete: the writer renames it the moment
+    the image is done, so one still wearing the suffix belonged to a process
+    that died mid-copy. Nothing references it and nothing will finish it.
+    """
+    removed = 0
+    directory = Path(str(destination_dir))
+    if not directory.is_dir():
+        return 0
+    try:
+        for stale in directory.glob("*.iso.part"):
+            with contextlib.suppress(OSError):
+                size = stale.stat().st_size
+                stale.unlink()
+                removed += 1
+                logger.info(
+                    "Removed %s — an image a previous run never finished "
+                    "(%.1f GB reclaimed)", stale.name, size / 1_073_741_824,
+                )
+    except OSError:
+        logger.debug("Could not sweep %s for stale parts", directory, exc_info=True)
+    return removed
 
 
 def _discard(path: Path) -> None:

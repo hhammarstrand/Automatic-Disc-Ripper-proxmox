@@ -162,10 +162,14 @@ def _requeue_finished(job, session, config, encode_queue, sources: list[Path]) -
     staging = should_stage(dest_parent, config.stage_locally)
     if staging:
         final_dir = dest_parent
-        output_dir = unique_output_dir(Path(config.staging_path) / naming.folder)
+        output_dir = unique_output_dir(
+            Path(config.staging_path) / naming.folder, merge=naming.is_series,
+        )
     else:
         final_dir = None
-        output_dir = unique_output_dir(Path(dest_parent) / naming.folder)
+        output_dir = unique_output_dir(
+            Path(dest_parent) / naming.folder, merge=naming.is_series,
+        )
 
     job.output_path = str(output_dir)
     job.status = JobStatus.ENCODING

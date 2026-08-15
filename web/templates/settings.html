@@ -172,10 +172,12 @@
                     </label>
                 </div>
                 <div class="form-text">
-                    Off by default. Re-ripping is legitimate when the first attempt came
-                    from a scratched disc or a worse preset, and a false positive that
-                    silently cancels a disc is harder to notice than one that only warns.
-                    Turn it on when working through a large shelf.
+                    Off by default. Skips only on evidence about the <em>film</em>:
+                    the library already holding it, or an earlier finished job with
+                    the same TMDb match. A matching disc label alone never skips —
+                    recorders write the same label onto every disc they burn — it
+                    is reported in the job log and the rip proceeds. Turn this on
+                    when working through a large shelf.
                 </div>
             </div>
         </div>
@@ -217,13 +219,14 @@
                         <div class="form-text">
                             As a disc spells it — <code>swe</code>, <code>eng</code>,
                             <code>nor</code>; <code>sv</code> works too. Set it and
-                            you get that language and nothing else: an AAC stereo
-                            track and the surround track, which is the shape a
-                            HandBrake "Surround" preset produces. Empty falls back
-                            to the language the HandBrake preset names, so both
-                            encoders agree; if the preset names none either, the
-                            disc's own track order decides — a coin toss when the
-                            disc carries two.
+                            you get that language and nothing else. On the GPU
+                            encoder that means an AAC stereo track plus the surround
+                            track; on HandBrake the preset decides how many tracks
+                            and in what shape — this only picks the language. Empty
+                            falls back to the language the HandBrake preset names,
+                            so both encoders agree; if the preset names none either,
+                            the disc's own track order decides — a coin toss when
+                            the disc carries two.
                         </div>
                     </div>
                     <div class="mb-3">
@@ -265,10 +268,12 @@
                     </select>
                     <div class="form-text">
                         HandBrake reaches Intel graphics through the Media SDK, which is
-                        deprecated and no longer starts on current drivers — so a container
-                        can have a working GPU that HandBrake cannot use. ffmpeg reaches the
-                        same hardware through VA-API. The Doctor page's encoder test tries
-                        both and tells you which works here.
+                        deprecated but still works when its runtime package is installed —
+                        the installer puts both Quick Sync runtimes in, since they cover
+                        different processor generations. ffmpeg reaches the same hardware
+                        through VA-API, and is the only hardware path on an AMD GPU. The
+                        Doctor page's encoder test tries both and tells you which works
+                        here, by encoding rather than by guessing.
                     </div>
                 </div>
                 <div id="vaapiSettings" class="{% if config.encoder_backend != 'vaapi' %}d-none{% endif %}">
@@ -346,7 +351,7 @@
                                name="main_feature_only" {% if config.main_feature_only %}checked{% endif %}>
                         <label class="form-check-label" for="mainFeatureOnly">Select main feature only</label>
                     </div>
-                    <div class="form-text">Scans the disc first and rips only the longest title (main feature). Trailers, featurettes and commentary versions are skipped. If the scan cannot read the disc, everything is ripped but only the longest title is encoded — the rest stay as MKV under Raw files.</div>
+                    <div class="form-text">Scans the disc first and rips only the longest title (main feature). Trailers, featurettes and commentary versions are skipped. If the scan cannot read the disc, everything is ripped and only the film is encoded — judged by length, or by size when no lengths are known — and the rest stay as MKV under Raw files.</div>
                 </div>
         </div>
     </div>

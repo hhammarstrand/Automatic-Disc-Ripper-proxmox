@@ -43,7 +43,7 @@ skip_duplicates: false
 # HandBrake cannot reach — its Quick Sync path goes through the deprecated Media
 # SDK. The Doctor page's encoder test tries both and offers the switch.
 
-audio_language: ''                          # swe | eng | sv | '' keeps the disc's own order
+audio_language: ''                          # swe | eng | sv | '' uses the preset's language, or the disc's order if it names none
 video_quality: 0                            # quantiser, lower is better; 0 leaves it to the preset
 max_height: 0                               # 0 = the source; 1080 shrinks a 4K rip. Never upscales
 encoder_backend: handbrake                  # handbrake | vaapi

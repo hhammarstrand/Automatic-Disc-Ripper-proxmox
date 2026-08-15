@@ -134,11 +134,46 @@ function confirmAction({title, body, detail = '', confirmLabel = 'Confirm', dang
 
 const REFRESH_INTERVAL = 5000;
 
+
+// ------------------------------------------------------------------ //
+// Polling that cannot stack, and a badge that tells the truth
+//
+// Every polling loop here used a bare setInterval: when the server is slow —
+// mid-encode on a small CPU is exactly when — the next tick fires before the
+// last answer arrives, requests pile up, and the answers can come back out of
+// order so an older state overwrites a newer one. Each loop now skips its
+// tick while one is in flight.
+//
+// The badge in the navbar was the string "Online", hardcoded in the template,
+// shown identically whether the last poll answered or the service had been
+// down for an hour. It now reflects the last poll's outcome, which is the
+// entire job of a badge that says Online.
+// ------------------------------------------------------------------ //
+const _inflight = new Set();
+
+function pollWithoutStacking(name, work) {
+    if (_inflight.has(name)) return Promise.resolve();
+    _inflight.add(name);
+    return Promise.resolve()
+        .then(work)
+        .then(() => setConnectionState(true))
+        .catch(() => setConnectionState(false))
+        .finally(() => _inflight.delete(name));
+}
+
+function setConnectionState(up) {
+    const badge = document.getElementById('connBadge');
+    if (!badge) return;
+    badge.className = up ? 'badge bg-success' : 'badge bg-danger';
+    badge.textContent = up ? 'Online' : 'No answer';
+    badge.title = up ? '' : 'The last status request got no reply — the service may be restarting.';
+}
+
 function refreshDashboard() {
     // Only refresh on the dashboard page
-    if (window.location.pathname !== '/') return;
+    if (window.location.pathname !== '/') return Promise.resolve();
 
-    fetch('/api/jobs/active')
+    return fetch('/api/jobs/active')
         .then(r => r.json())
         .then(activeJobs => {
 
@@ -777,7 +812,7 @@ function fallbackCopy(text, onSuccess) {
 }
 
 function copyPath(path, btn) {
-    copyToClipboard(path, btn || (window.event && window.event.target.closest('button')));
+    copyToClipboard(path, btn);
 }
 
 // ------------------------------------------------------------------ //
@@ -974,6 +1009,8 @@ function pickSeriesShow(tmdbId, name, year) {
     previewSeries();
 }
 
+let _seriesPreviewSeq = 0;
+
 function previewSeries() {
     const box = document.getElementById('seriesPreview');
     const show = document.getElementById('seriesShowName').value.trim();
@@ -1000,9 +1037,15 @@ function previewSeries() {
     // needs, so a lookup failure changes nothing.
     const tmdbId = document.getElementById('seriesTmdbId').value;
     if (!tmdbId) return;
+    // Every keystroke fires one of these, and the answers do not promise to
+    // come back in order — a slow reply for season 1 landing after a fast one
+    // for season 2 rendered season 1's titles under season 2's numbers. Only
+    // the newest request may paint.
+    const seq = ++_seriesPreviewSeq;
     fetch(`/api/tmdb/season?tmdb_id=${tmdbId}&season=${season}`)
         .then(r => r.json())
         .then(d => {
+            if (seq !== _seriesPreviewSeq) return;
             if (!d.episodes || !d.episodes.length) return;
             const titles = {};
             d.episodes.forEach(e => { titles[e.episode_number] = e.name; });
@@ -1173,14 +1216,14 @@ function retryJob(jobId) {
         .catch(err => notify('Error: ' + err.message, 'danger'));
 }
 
-function copyErrorText() {
+function copyErrorText(btn) {
     // Both halves: the summary is what we concluded, the log is the evidence.
     const text = document.getElementById('errorModalText').textContent
         + '\n\n--- tool output ---\n'
         + (document.getElementById('errorModalLog')?.textContent || '');
     copyToClipboard(
         text,
-        window.event && window.event.target.closest('button'),
+        btn,
         '<i class="bi bi-check me-1"></i>Copied!',
     );
 }
@@ -1201,7 +1244,7 @@ function updateSysBar(barId, valId, percent, label) {
 }
 
 function refreshSystemStats() {
-    fetch('/api/system')
+    return fetch('/api/system')
         .then(r => r.json())
         .then(data => {
             updateSysBar('cpuBar', 'cpuVal', data.cpu_percent);
@@ -1261,8 +1304,8 @@ function updateElapsedTimers() {
 
 function refreshDriveHealth() {
     const box = document.getElementById('driveHealth');
-    if (!box) return;
-    fetch('/api/drives/health')
+    if (!box) return Promise.resolve();
+    return fetch('/api/drives/health')
         .then(r => r.json())
         .then(d => {
             if (!d.problems || d.problems.length === 0) { box.innerHTML = ''; return; }
@@ -1286,8 +1329,8 @@ function refreshDriveHealth() {
 
 function refreshDoctorBadge() {
     const badge = document.getElementById('doctorBadge');
-    if (!badge || window.location.pathname === '/doctor') return;
-    fetch('/api/doctor')
+    if (!badge || window.location.pathname === '/doctor') return Promise.resolve();
+    return fetch('/api/doctor')
         .then(r => r.json())
         .then(d => {
             badge.textContent = d.failing;
@@ -1303,20 +1346,20 @@ document.addEventListener('DOMContentLoaded', () => {
         // so waiting for the first tick leaves the card blank for five
         // seconds every time the page loads.
         refreshDashboard();
-        setInterval(refreshDashboard, REFRESH_INTERVAL);
+        setInterval(() => pollWithoutStacking('dashboard', refreshDashboard), REFRESH_INTERVAL);
         // Start elapsed timers — tick every second
         updateElapsedTimers();
         setInterval(updateElapsedTimers, 1000);
         // Optical-drive passthrough health
         refreshDriveHealth();
-        setInterval(refreshDriveHealth, 15000);
+        setInterval(() => pollWithoutStacking('drives', refreshDriveHealth), 15000);
     }
 
     // System stats — poll every 5 seconds on all pages
     refreshSystemStats();
-    setInterval(refreshSystemStats, 5000);
+    setInterval(() => pollWithoutStacking('system', refreshSystemStats), 5000);
 
     // Doctor badge — cheap local checks, no need to poll hard
     refreshDoctorBadge();
-    setInterval(refreshDoctorBadge, 60000);
+    setInterval(() => pollWithoutStacking('doctor', refreshDoctorBadge), 60000);
 });

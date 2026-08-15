@@ -147,7 +147,7 @@ def requeue_encode(job, session, config, encode_queue) -> int:
     attempt's rows carry its error state and output paths, and a retry that
     silently inherits them is hard to reason about afterwards.
     """
-    from adr.naming import feature_index, plan_output
+    from adr.naming import feature_index, only_the_feature, plan_output
     from adr.pipeline import EncodeTask, final_destination
     from adr.storage import should_stage
     from adr.utils import BYTES_PER_MB, unique_output_dir
@@ -155,6 +155,16 @@ def requeue_encode(job, session, config, encode_queue) -> int:
     raw = _raw_files(job, config)
     if not raw:
         return 0
+
+    # What the old rows still know, read before they go: which episode each
+    # surviving file was. A passthrough series crash leaves *some* files in
+    # raw — the encoded ones were moved out — and re-planning the survivors
+    # by count would number episodes 3 and 4 as 1 and 2.
+    episode_of = {
+        t.filename: t.episode_number
+        for t in (job.tracks or [])
+        if t.filename and t.episode_number
+    }
 
     for track in list(job.tracks):
         session.delete(track)
@@ -180,11 +190,46 @@ def requeue_encode(job, session, config, encode_queue) -> int:
             sizes.append(path.stat().st_size)
         except OSError:
             sizes.append(0)
+
+    # main_feature_only IS consulted here, reversing an earlier comment that
+    # said it only decides what gets ripped. The raw directory can hold titles
+    # the setting deliberately kept unencoded — the scan failed, the whole
+    # disc was ripped, one title was encoded — and a retry that queues all
+    # sixteen encodes the fifteen extras the user chose not to have. The rule
+    # is the live pipeline's rule: reproduce what a fresh rip would do.
+    main_index = feature_index(
+        job, [None] * len(raw), sizes,
+        main_feature_only=bool(getattr(config, "main_feature_only", False)),
+    )
+    if getattr(config, "main_feature_only", False):
+        kept, kept_sizes, main_index = only_the_feature(raw, sizes, main_index)
+        if len(kept) < len(raw):
+            logger.info(
+                "Job %s retry: encoding only the feature; %d other ripped "
+                "title(s) stay as MKV", job.id, len(raw) - len(kept),
+            )
+            raw = kept
+
     plan = plan_output(
         job, len(raw), fallback_title=job.disc_label or f"Job {job.id}",
-        main_index=feature_index(job, [None] * len(raw), sizes,
-                                 main_feature_only=False),
+        main_index=main_index,
     )
+
+    # A series with a memory of its numbers keeps them. plan_output numbers
+    # from series_first_episode by position, which is right for a fresh rip
+    # and wrong for survivors of a partial one.
+    if plan.is_series and all(p.name in episode_of for p in raw):
+        from adr.series import make_episode_filename
+
+        numbers = [episode_of[p.name] for p in raw]
+        plan.episodes = numbers
+        plan.filenames = [
+            make_episode_filename(
+                job.title or job.disc_label or f"Job {job.id}",
+                job.year, int(job.series_season or 1), n,
+            )
+            for n in numbers
+        ]
     dest_parent, _ = final_destination(job, config)
     staging = should_stage(dest_parent, config.stage_locally)
     if staging:

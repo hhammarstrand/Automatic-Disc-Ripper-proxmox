@@ -129,9 +129,19 @@ class FolderWatcher(threading.Thread):
                 if entry.is_file() and entry.name.endswith(_PROCESSING_SUFFIX):
                     original_name = entry.name[: -len(_PROCESSING_SUFFIX)]
                     original_path = watch_dir / original_name
+                    # The original name may be taken by a file dropped after
+                    # the crash. Restoring onto it would replace the newer
+                    # file with the older one, silently — so the restored copy
+                    # steps aside instead, and both get encoded.
+                    if original_path.exists():
+                        stem, suffix = original_path.stem, original_path.suffix
+                        counter = 2
+                        while (candidate := watch_dir / f"{stem} ({counter}){suffix}").exists():
+                            counter += 1
+                        original_path = candidate
                     try:
                         Path(entry.path).rename(original_path)
-                        logger.info("Restored stale file: %s → %s", entry.name, original_name)
+                        logger.info("Restored stale file: %s → %s", entry.name, original_path.name)
                     except OSError as exc:
                         logger.warning("Could not restore %s: %s", entry.name, exc)
         except OSError as exc:
@@ -180,6 +190,20 @@ class FolderWatcher(threading.Thread):
                     self._file_sizes[key] = (size, now)
                     continue
                 age = now - first_seen
+                try:
+                    # Size alone misses a preallocated file: a copy tool that
+                    # writes into a full-size file changes no size while it
+                    # writes, and picking it up mid-copy encodes half a film.
+                    # The write clock has to have stopped too.
+                    modified_ago = now - entry.stat().st_mtime
+                except OSError:
+                    continue
+                if modified_ago < MIN_FILE_AGE:
+                    logger.debug(
+                        "FolderWatcher: %s still being written (mtime %.1fs ago)",
+                        path.name, modified_ago,
+                    )
+                    continue
                 if age < MIN_FILE_AGE:
                     # Not old enough yet
                     logger.debug("FolderWatcher: %s stable but too young (%.1fs / %ds)", path.name, age, MIN_FILE_AGE)
@@ -202,8 +226,23 @@ class FolderWatcher(threading.Thread):
         """Register a watch-folder file as a job and queue for encoding."""
         logger.info("Watch folder: new file detected — %s", file_path.name)
 
-        # Rename to prevent re-pickup
+        # Rename to prevent re-pickup.
+        #
+        # Refused outright when the target already exists. POSIX rename
+        # replaces silently, and the target existing means an earlier file of
+        # the same name is still queued or encoding — renaming onto it hands
+        # two jobs one input and destroys one of the user's files without it
+        # ever being encoded. Re-drops of a same-named file are likely, not
+        # exotic: the first one "disappeared" from the folder (it was renamed)
+        # with nothing visible to show for it yet. The new file just waits;
+        # the next scan after the first job finishes picks it up.
         processing_path = file_path.with_suffix(file_path.suffix + _PROCESSING_SUFFIX)
+        if processing_path.exists():
+            logger.info(
+                "Watch folder: %s is already being processed — leaving the new "
+                "file until that job finishes", file_path.name,
+            )
+            return
         try:
             file_path.rename(processing_path)
         except OSError:
@@ -243,8 +282,24 @@ class FolderWatcher(threading.Thread):
             session.commit()
 
             # Queue encoding with Plex-style output: Title (Year)/Title (Year).mp4
+            #
+            # Staged exactly like a disc encode. The watcher predates staging
+            # and never learned it, so a watch_output_path on the NAS had
+            # HandBrake writing across the network for the whole encode —
+            # the very thing stage_locally exists to prevent, quietly absent
+            # from one of the two paths that encode.
             from adr.pipeline import EncodeTask
-            output_dir = unique_output_dir(self.watch_output_path / plex_folder)
+            from adr.storage import should_stage
+
+            final_parent = self.watch_output_path
+            if should_stage(final_parent, self._config.stage_locally):
+                final_dir = final_parent
+                output_dir = unique_output_dir(
+                    Path(self._config.staging_path) / plex_folder,
+                )
+            else:
+                final_dir = None
+                output_dir = unique_output_dir(final_parent / plex_folder)
             job.output_path = str(output_dir)
             session.commit()
 
@@ -254,6 +309,7 @@ class FolderWatcher(threading.Thread):
                 input_path=processing_path,
                 output_dir=output_dir,
                 output_filename=plex_folder,  # -> "Title (Year).mp4"
+                final_dir=final_dir,
             ))
 
             logger.info("Watch folder: job #%d queued for encoding — %s -> %s", job.id, file_path.name, plex_folder)

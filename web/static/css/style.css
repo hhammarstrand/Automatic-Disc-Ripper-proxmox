@@ -350,8 +350,8 @@ html, body {
        icon buttons were 26px, and the difference is mis-taps on the
        delete button beside the retry button. */
     .btn-sm {
-        min-height: 42px;
-        min-width: 42px;
+        min-height: 44px;
+        min-width: 44px;
         display: inline-flex;
         align-items: center;
         justify-content: center;

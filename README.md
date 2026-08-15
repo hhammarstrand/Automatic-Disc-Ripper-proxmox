@@ -1099,7 +1099,7 @@ MakeMKV does.
 
 **Test with MakeMKV** goes further and asks MakeMKV to open the disc for real.
 It is the only check that exercises the registration key end to end, and the
-only one slow enough (up to 90 s) to be worth a separate button.
+only one slow enough — up to fifteen minutes on a protected disc whose every dummy title MakeMKV opens — to be worth a separate button.
 
 **Scan for drives** re-reads sysfs and hot-adds anything new, rather than
 waiting out the watcher's 30-second cache. If the host has a drive this

@@ -354,7 +354,10 @@ function testDrive(device, deep, btn) {
 // is twice the probe's own limit, so reaching it means the answer was lost
 // rather than slow — a restart of the service mid-probe, most likely.
 const PROBE_POLL_MS = 3000;
-const PROBE_GIVE_UP_MS = 600000;
+// A minute past the backend's own limit (SCAN_TIMEOUT is 15 minutes), so
+// the page never declares an answer lost that the server is still allowed to
+// produce. Giving up at ten minutes did exactly that for slow Blu-rays.
+const PROBE_GIVE_UP_MS = 16 * 60 * 1000;
 
 function pollProbe(device, box, render, fail, startedAt) {
   startedAt = startedAt || Date.now();

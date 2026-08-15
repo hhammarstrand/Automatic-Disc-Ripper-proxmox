@@ -49,13 +49,35 @@ def compute_disc_id(toc: Toc) -> str:
     first, then tracks 1 to 99, with zero for every track the disc does not
     have. SHA-1 of that, base64-encoded, with ``+/=`` rewritten as ``._-``.
     """
-    offsets = [0] * 100
-    offsets[0] = toc.leadout_frame_offset
-    for track in toc.tracks:
-        if 1 <= track.number <= 99:
-            offsets[track.number] = track.frame_offset
+    # Audio tracks only. An Enhanced CD — an album with a bonus data session,
+    # which describes half the CDs pressed after the mid-nineties — carries a
+    # trailing data track, and MusicBrainz computes its IDs from the audio
+    # session alone: the data track is excluded and the lead-out becomes the
+    # data session's start minus 11400 frames (the inter-session gap). Hashing
+    # the whole TOC produced an ID no release in the database has, so every
+    # Enhanced CD ripped as "Unidentified CD <hash>" while the lookup that
+    # would have named it sat one arithmetic step away.
+    audio = [t for t in toc.tracks if t.is_audio and 1 <= t.number <= 99]
+    if not audio:
+        audio = [t for t in toc.tracks if 1 <= t.number <= 99]
 
-    payload = f"{toc.first:02X}{toc.last:02X}" + "".join(f"{o:08X}" for o in offsets)
+    first = min(t.number for t in audio)
+    last = max(t.number for t in audio)
+    trailing_data = [
+        t.frame_offset for t in toc.tracks
+        if not t.is_audio and t.number > last
+    ]
+    leadout = (
+        min(trailing_data) - 11400 if trailing_data
+        else toc.leadout_frame_offset
+    )
+
+    offsets = [0] * 100
+    offsets[0] = leadout
+    for track in audio:
+        offsets[track.number] = track.frame_offset
+
+    payload = f"{first:02X}{last:02X}" + "".join(f"{o:08X}" for o in offsets)
     digest = hashlib.sha1(payload.encode("ascii")).digest()  # noqa: S324 - not security
     return base64.b64encode(digest).decode("ascii").translate(_DISCID_ALPHABET)
 

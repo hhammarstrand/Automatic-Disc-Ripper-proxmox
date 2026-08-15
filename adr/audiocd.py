@@ -81,6 +81,11 @@ def missing_tools(config: Config) -> list[str]:
 def album_folder(album: AlbumInfo) -> Path:
     """The ``Artist/Album (Year)`` folder this album belongs in."""
     artist = sanitize_filename(album.artist) or "Unknown Artist"
+    # sanitize_filename strips slashes but not dots, and this value arrives
+    # over the network from MusicBrainz. "." or ".." as a component would put
+    # the album outside music_path.
+    if artist.strip(".") == "":
+        artist = "Unknown Artist"
     if album.identified:
         name = sanitize_filename(album.album) or "Unknown Album"
         if album.year:
@@ -120,6 +125,7 @@ class AudioCDRipper:
         album: AlbumInfo,
         output_root: Path,
         progress_callback: Callable[[dict], None] | None = None,
+        should_cancel: Callable[[], bool] | None = None,
     ) -> AudioRipResult:
         """Rip every audio track on *toc* into *output_root*.
 
@@ -162,6 +168,16 @@ class AudioCDRipper:
 
         total = len(tracks)
         for index, track in enumerate(tracks):
+            # Between tracks, because killing the process is not enough on its
+            # own: cancel kills the cdparanoia that is running, that track is
+            # recorded as failed, and the loop then starts a fresh cdparanoia
+            # for the next one — the registry has already handed out its kill,
+            # so a fifteen-track CD cancelled at track two ripped the other
+            # thirteen anyway.
+            if should_cancel is not None and should_cancel():
+                result.error = "Cancelled."
+                result.success = False
+                return result
             title = album.title_for(track.number)
             self._report(
                 progress_callback,

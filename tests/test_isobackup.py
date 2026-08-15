@@ -192,3 +192,61 @@ def test_an_unwritable_destination_is_reported(disc, tmp_path):
     result = isobackup.create_image(path, blocker)
     assert not result.success
     assert "Could not prepare" in result.error
+
+
+class TestACrashCannotLeaveACompleteLookingImage:
+    """The image was written straight to its final name, so a process death
+    mid-copy — an update, an OOM kill, a power cut, all routine per
+    recovery.py — left a truncated ISO indistinguishable from a finished one,
+    squatting the canonical name so the good re-image landed at "(2)"."""
+
+    def test_the_writer_uses_a_part_name(self):
+        import inspect
+
+        from adr import isobackup
+
+        source = inspect.getsource(isobackup.create_image)
+        assert '".part"' in source
+        assert "os.replace(part, target)" in source, (
+            "the image is written to its final name again"
+        )
+
+    def test_stale_parts_are_swept(self, tmp_path):
+        from adr import isobackup
+
+        dead = tmp_path / "OLD_DISC.iso.part"
+        dead.write_bytes(b"x" * 4096)
+        finished = tmp_path / "GOOD_DISC.iso"
+        finished.write_bytes(b"y" * 4096)
+
+        removed = isobackup.sweep_stale_parts(tmp_path)
+        assert removed == 1
+        assert not dead.exists()
+        assert finished.exists(), "a finished image was swept"
+
+    def test_sweeping_a_missing_folder_is_nothing(self, tmp_path):
+        from adr import isobackup
+
+        assert isobackup.sweep_stale_parts(tmp_path / "nope") == 0
+
+
+class TestTheDiscMustFitBeforeHoursOfReading:
+    def test_too_small_a_destination_fails_immediately(self, tmp_path, monkeypatch):
+        """An 8 GB disc into 5 GB free read for over an hour before ENOSPC
+        discarded everything — when image_size() knew the answer up front."""
+        import shutil as shutil_mod
+        import types
+
+        from adr import isobackup
+
+        monkeypatch.setattr(isobackup, "image_size", lambda d: 8_000_000_000)
+        monkeypatch.setattr(
+            shutil_mod, "disk_usage",
+            lambda p: types.SimpleNamespace(free=5_000_000_000, total=0, used=0),
+        )
+        result = isobackup.create_image(
+            device="/dev/sr0", destination_dir=tmp_path, label="BIG",
+        )
+        assert not result.success
+        assert "GB" in result.error and "free" in result.error
+        assert list(tmp_path.iterdir()) == [], "something was written anyway"

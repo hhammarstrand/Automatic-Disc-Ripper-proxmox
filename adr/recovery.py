@@ -37,6 +37,7 @@ from adr.models import (
     RIP_PHASE_STATUSES,
     Job,
     JobStatus,
+    TrackStatus,
     get_session,
 )
 from adr.utils import utcnow
@@ -113,17 +114,26 @@ def _recover_one(job, session, config, encode_queue) -> bool:
         logger.info("Job %s was mid-rip and cannot be resumed", job.id)
         return False
 
-    # Encode phase. The raw files are the cheapest thing to resume from and the
-    # most likely to survive, so they are tried first.
+    # Encode phase. Finished files first, with the same evidence retry.plan
+    # demands: every track saying DONE. This used to try the raw requeue
+    # first — the opposite order to the Retry button — so a job that crashed
+    # during the *transfer*, with a complete encode sitting in staging,
+    # re-encoded everything from raw on the next start: hours of work redone
+    # and the finished copy orphaned. The same disk state must get the same
+    # answer whichever door it comes through.
+    tracks = list(job.tracks or [])
+    encode_finished = bool(tracks) and all(
+        t.status == TrackStatus.DONE for t in tracks
+    )
+    if encode_finished and retry.encoded_files(job):
+        _fail(job, session, MID_TRANSFER_MESSAGE)
+        logger.info("Job %s has finished files waiting to be moved", job.id)
+        return False
+
     queued = retry.requeue_encode(job, session, config, encode_queue)
     if queued:
         logger.info("Job %s resumed: %d file(s) queued for encoding again", job.id, queued)
         return True
-
-    if retry.encoded_files(job):
-        _fail(job, session, MID_TRANSFER_MESSAGE)
-        logger.info("Job %s has finished files waiting to be moved", job.id)
-        return False
 
     _fail(job, session, NOTHING_LEFT_MESSAGE)
     logger.info("Job %s had nothing left on disk", job.id)

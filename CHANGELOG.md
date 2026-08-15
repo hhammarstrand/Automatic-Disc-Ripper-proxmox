@@ -1,5 +1,62 @@
 # Changelog
 
+## 1.23.0
+
+The general review reached the three modules nothing had ever reviewed —
+audio CDs, disc images and the watch folder — and the fixes from it are here,
+alongside the review of the review's own leftovers.
+
+**A privilege hole reopened by its own fix, closed again.** The update's
+busy-check ran the service user's Python as root — the venv and the adr
+package are deliberately service-user-owned, so root importing them executes
+service-user-writable code as uid 0, the exact hole the root-owned scripts/
+directory exists to close, reopened one block above it. The check now runs as
+the service user.
+
+**Two ways to lose a file in the watch folder.** Dropping a second file with
+the same name silently replaced the one being processed — POSIX rename
+overwrites — so one user file was destroyed without ever being encoded; and
+the crash-restore path had the same clobber in reverse. Both now step aside
+instead. Watch encodes also never staged: a NAS output path had HandBrake
+writing across the network for the whole encode, the very thing staging
+exists to prevent, quietly absent from one of the two paths that encode.
+
+**A crash mid-image left a truncated ISO that looked complete.** The image
+was written straight to its final name; a process death — an update, an OOM
+kill, a power cut — left it squatting the canonical name so the good re-image
+landed at "(2)". Images are written as .part and renamed only on completion,
+stale parts are swept, the destination is gated by the same checks every video
+disc passes (an unmounted NAS used to send an 8 GB image onto the container's
+root disk), and the disc must fit in the free space before hours of reading
+rather than at ENOSPC after them.
+
+**Every Enhanced CD identified as nothing.** An album with a bonus data
+session — half the CDs pressed after the mid-nineties — hashes its disc ID
+from the audio session alone, with the lead-out at the data session's start
+minus 11400 frames. Hashing the whole TOC produced an ID no release in
+MusicBrainz has, so the lookup that would have named the album never matched.
+
+**Cancelling an audio CD now actually stops it**: killing the running
+cdparanoia only failed that track, and the loop started a fresh one for the
+next — a fifteen-track CD cancelled at track two ripped the other thirteen.
+And an artist name of ".." arriving from MusicBrainz can no longer step out
+of the music folder.
+
+**Recovery agrees with Retry.** After a crash it tried the raw files first —
+the opposite order to the Retry button — so a job that crashed during the
+transfer re-encoded everything while a complete encode sat in staging. It now
+demands the same evidence: every track saying DONE before finished files are
+trusted. A retry also honours "main feature only" for the titles the setting
+deliberately kept unencoded, and a partially-consumed series renumbers its
+survivors from its own track rows rather than from one.
+
+**And the browser stops lying.** The Online badge was a hardcoded string,
+shown identically whether the last poll answered or the service had been down
+an hour — it now reflects the last poll. Polling loops no longer stack
+requests on a slow server. The re-encode confirmation is red, like every
+other action that replaces a library file. Nine pieces of help text and
+documentation that described last week's behaviour now describe this week's.
+
 ## 1.22.0
 
 **The app now fits a phone, verified in a real browser rather than by eye.**

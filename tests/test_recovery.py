@@ -148,6 +148,14 @@ class TestMidEncode:
         (out / "The Film (1999).mp4").write_bytes(b"x")
         job = _job(db, JobStatus.ENCODING, title="The Film", year=1999,
                    output_path=str(out))
+        # The evidence recovery now demands, same as the Retry button: a file
+        # with the right suffix is not proof the encode finished, but a track
+        # row saying DONE is written only when it did. A crash mid-transfer
+        # has exactly this shape.
+        db.add(Track(job_id=job.id, track_number=1, filename="title00.mkv",
+                     status=TrackStatus.DONE,
+                     output_path=str(out / "The Film (1999).mp4")))
+        db.commit()
 
         q = queue.Queue()
         outcome = recovery.recover_interrupted_jobs(config, q)
@@ -157,6 +165,30 @@ class TestMidEncode:
         assert job.status == JobStatus.ERROR
         assert "press Retry" in job.error_message
         assert q.empty()
+
+
+
+    def test_a_partial_encode_is_not_offered_as_finished(self, config, db):
+        """The opposite shape: a file on disk and a track still ENCODING.
+        Recovery used to trust the directory listing — the crash-time twin of
+        the Retry bug fixed in 1.20.0 — and could hand a truncated file to the
+        transfer. With intact raw it re-encodes instead."""
+        out = config.staging_path / "The Film (1999)"
+        out.mkdir(parents=True)
+        (out / "The Film (1999).mp4").write_bytes(b"trunc")
+        job = _job(db, JobStatus.ENCODING, title="The Film", year=1999,
+                   output_path=str(out))
+        db.add(Track(job_id=job.id, track_number=1, filename="title00.mkv",
+                     status=TrackStatus.ENCODING))
+        db.commit()
+        _raw_files(config, job.id)
+
+        q = queue.Queue()
+        outcome = recovery.recover_interrupted_jobs(config, q)
+        assert outcome["resumed"] == [job.id], (
+            "a half-written encode was preferred over the intact raw files"
+        )
+        assert q.qsize() >= 1
 
     def test_nothing_on_disk_is_said_plainly(self, config, db):
         job = _job(db, JobStatus.ENCODING, title="The Film", year=1999)

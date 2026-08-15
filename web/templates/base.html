@@ -5,7 +5,6 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{% block title %}Automatic Disc Ripper{% endblock %}</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
-    <!-- Bootstrap 5 CDN -->
     <!-- Served locally rather than from a CDN. This application is an
          appliance on a LAN: the ripper keeps working when the internet is
          down, and a dashboard that renders as bare unstyled HTML at exactly
@@ -83,7 +82,7 @@
                             <span class="sys-val" id="gpuVal">–</span>
                         </span>
                     </span>
-                    <span class="badge bg-success">Online</span>
+                    <span class="badge bg-success" id="connBadge">Online</span>
                     <span class="badge bg-secondary ms-1" title="LAN address"><i class="bi bi-wifi me-1"></i>{{ lan_ip }}:{{ lan_port }}</span>
                 </span>
             </div>
@@ -154,7 +153,7 @@
                     <pre id="errorModalLog" style="white-space: pre-wrap; word-break: break-word; background: #0d1117; padding: 1rem; border-radius: 6px; border: 1px solid var(--adr-border); color: var(--adr-text); font-size: 0.8rem; max-height: 300px; overflow-y: auto;">Loading…</pre>
                 </div>
                 <div class="modal-footer" style="border-top-color: var(--adr-border);">
-                    <button type="button" class="btn btn-outline-light btn-sm" onclick="copyErrorText()"><i class="bi bi-clipboard me-1"></i>Copy</button>
+                    <button type="button" class="btn btn-outline-light btn-sm" onclick="copyErrorText(this)"><i class="bi bi-clipboard me-1"></i>Copy</button>
                     <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Close</button>
                 </div>
             </div>
