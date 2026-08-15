@@ -37,6 +37,29 @@ def contrast(foreground: str, background: str) -> float:
     return (lighter + 0.05) / (darker + 0.05)
 
 
+def _declared(selector: str) -> dict:
+    """The declarations a rule makes for *selector*, as written."""
+    text = re.sub(r"/\*.*?\*/", " ", CSS.read_text(), flags=re.S)
+    out: dict[str, str] = {}
+    for block in re.finditer(r"([^{}]+)\{([^{}]*)\}", text):
+        if selector not in [s.strip() for s in block.group(1).split(",")]:
+            continue
+        for declaration in block.group(2).split(";"):
+            if ":" not in declaration:
+                continue
+            name, _, value = declaration.partition(":")
+            out[name.strip()] = value.replace("!important", "").strip()
+    return out
+
+
+def _resolve(value: str, palette: dict) -> str:
+    """A declared colour as a hex string, following one var() indirection."""
+    match = re.fullmatch(r"var\(--(adr-[a-z-]+)\)", value.strip())
+    if match:
+        return palette[match.group(1)]
+    return value.strip()
+
+
 def _sets_colour(selector: str) -> bool:
     """Whether the stylesheet gives *selector* a ``color`` in its resting state.
 
@@ -230,8 +253,21 @@ class TestTheActiveTab:
 
     def test_the_active_tab_is_readable(self, palette):
         """Its background is the card colour, so it reads like the panel it
-        belongs to — and the text on it has to clear AA against that."""
-        assert contrast(palette["adr-text"], palette["adr-card"]) >= AA_TEXT
+        belongs to — and the text on it has to clear AA against that.
+
+        Against the colour the rule actually sets, not against a pair of
+        palette entries that are correct by construction. The first version
+        asserted --adr-text over --adr-card and would have passed with the
+        active tab back on Bootstrap's white, which is the bug this whole
+        file was written for.
+        """
+        declared = _declared(".nav-tabs .nav-link.active")
+        assert declared.get("background-color"), "the tab sets no background"
+        assert declared.get("color"), "the tab sets no text colour"
+        assert contrast(
+            _resolve(declared["color"], palette),
+            _resolve(declared["background-color"], palette),
+        ) >= AA_TEXT
 
     def test_an_inactive_tab_is_readable_too(self, palette):
         assert contrast(palette["adr-text-muted"], palette["adr-bg"]) >= AA_TEXT

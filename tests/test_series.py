@@ -786,7 +786,6 @@ class TestADiscOfEpisodesAndOneClip:
         """
         drive, config, encode_queue, tmp_path, monkeypatch, pipeline_mod = harness
         from adr import seriesmode
-        from adr.ripper import RipResult
 
         durations = [self.EPISODE] * 5 + [self.CLIP]
         titles = {

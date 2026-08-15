@@ -261,3 +261,61 @@ class TestTheElapsedTimer:
             "the phase pills come first, which is why the status badge needs "
             "its own class"
         )
+
+
+class TestASeriesExtraCanActuallyBePlayed:
+    """The file list returned an extra by its bare name — "Extra 1.mkv" — and
+    the stream route joined that to the season folder, where it is not. Every
+    extra offered a Play button that answered 404."""
+
+    def _series_job(self, tmp_path):
+        from adr.models import Job, Track, get_session
+
+        season = tmp_path / "tv" / "Show (1964)" / "Season 01"
+        (season / "Other").mkdir(parents=True)
+        episode = season / "Show (1964) - S01E01.mkv"
+        episode.write_bytes(b"x" * 2048)
+        extra = season / "Other" / "Extra 1.mkv"
+        extra.write_bytes(b"y" * 1024)
+
+        session = get_session()
+        job = Job(disc_label="SHOW", title="Show", year=1964, drive="/dev/sr0",
+                  content_type="series", series_season=1,
+                  output_path=str(season))
+        session.add(job)
+        session.commit()
+        session.add(Track(job_id=job.id, track_number=1, filename="t0.mkv",
+                          output_path=str(episode), episode_number=1))
+        session.add(Track(job_id=job.id, track_number=2, filename="t1.mkv",
+                          output_path=str(extra)))
+        session.commit()
+        job_id = job.id
+        session.close()
+        return job_id
+
+    def test_the_extra_is_listed_with_its_folder(self, client, tmp_path):
+        job_id = self._series_job(tmp_path)
+        files = client.get(
+            f"/api/jobs/{job_id}/files").get_json()["files"]
+        names = [f["name"] for f in files]
+        assert "Other/Extra 1.mkv" in names, names
+
+    def test_the_extra_streams(self, client, tmp_path):
+        job_id = self._series_job(tmp_path)
+        response = client.get(
+            f"/api/jobs/{job_id}/stream/Other/Extra 1.mkv")
+        assert response.status_code == 200
+
+    def test_an_episode_still_streams(self, client, tmp_path):
+        job_id = self._series_job(tmp_path)
+        response = client.get(
+            f"/api/jobs/{job_id}/stream/Show (1964) - S01E01.mkv")
+        assert response.status_code == 200
+
+    def test_climbing_out_of_the_job_folder_is_refused(self, client, tmp_path):
+        """The basename flattening was also the traversal guard, so replacing
+        it has to keep that job."""
+        job_id = self._series_job(tmp_path)
+        response = client.get(
+            f"/api/jobs/{job_id}/stream/../../../etc/passwd")
+        assert response.status_code in (403, 404)

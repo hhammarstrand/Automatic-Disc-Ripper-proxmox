@@ -363,9 +363,11 @@ def suggest_numbering(session, job) -> dict:
     reopening the dialog cannot overwrite a choice someone made.
     """
     label = parse_series_label(getattr(job, "disc_label", "") or "")
-    season = label["season"] or (
-        1 if job.series_season is None else int(job.series_season)
-    )
+    # `or` would fold season 0 into season 1, and season 0 is where Plex
+    # files specials — see plan_output, which is careful about the same thing.
+    season = label["season"]
+    if season is None:
+        season = 1 if job.series_season is None else int(job.series_season)
     first, why = episode_after_previous_discs(
         label["disc"], earlier_discs(session, label["show"], job, season),
     )

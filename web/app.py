@@ -178,6 +178,39 @@ def create_app(config: Config, pipeline_manager=None) -> Flask:
     )
     # Template filter for time formatting
     app.jinja_env.filters["duration"] = lambda s: format_duration(s) if s else "–"
+    @app.before_request
+    def _refuse_cross_site_writes():
+        """Refuse a state-changing request that another site sent.
+
+        The dashboard is unauthenticated by design — it sits on a home LAN —
+        and that is a decision about who may reach it, not about who may
+        *drive* it. A browser sends cookies and LAN requests alike whatever
+        page asked, so any web page the owner happens to open can POST to
+        http://10.0.0.5:8080/api/jobs/1/delete, or to /api/update/start, and
+        the endpoints that read no JSON body can be reached by a plain form
+        submission that needs no CORS permission at all.
+
+        Same-origin requests carry Origin or Referer, so the rule is: a write
+        with neither is a browser form post from somewhere else, or a
+        deliberate client like curl. Deliberate clients are welcome — this is
+        somebody's homelab, and scripting it is legitimate — so the check is
+        on a header that *contradicts* us rather than one that is missing.
+        """
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return None
+        source = request.headers.get("Origin") or request.headers.get("Referer")
+        if not source:
+            return None
+        host = request.host_url.rstrip("/")
+        if source.rstrip("/") == host or source.startswith(f"{host}/"):
+            return None
+        logger.warning(
+            "Refused a %s to %s sent from %s", request.method, request.path, source,
+        )
+        return jsonify({
+            "error": "This request came from another site and was refused.",
+        }), 403
+
     app.jinja_env.filters["isotime"] = _isotime
     # "Drive: /dev/sr0" on a job card is a device node where the person
     # reading it gave that drive a name. Diagnostics keep the node.
@@ -837,6 +870,15 @@ def _register_api_routes(app: Flask) -> None:
                         job.tmdb_id = int(tmdb_id)
                         # The poster is a film's; it no longer describes this job.
                         job.poster_url = None
+                else:
+                    # No show was picked, so whatever id is on the job came
+                    # from the *film* search. TMDb's film and programme id
+                    # spaces are unrelated, and the season check queries the
+                    # TV namespace with it — which either 404s or resolves to
+                    # an entirely different programme and reports its episode
+                    # count as this one's.
+                    job.tmdb_id = None
+                    job.poster_url = None
             else:
                 job.series_season = None
                 job.series_first_episode = None
@@ -849,12 +891,28 @@ def _register_api_routes(app: Flask) -> None:
                 preview = plan_output(job, count).filenames
                 episode_numbers(count, job.series_first_episode or 1)
 
+            # Say when the preview is not what this run will produce.
+            #
+            # Every filename is decided and baked into its encode task while
+            # the job is still RIPPED, so a change that lands after the tracks
+            # exist is real — a later Retry or Encode again re-plans from it —
+            # but it renames nothing that is being written now. Answering a
+            # plain {"ok": true} with a season preview promised otherwise.
+            note = ""
+            if job.tracks:
+                note = (
+                    "The names for the encode already under way were decided "
+                    "when the rip finished, so this does not rename it. The "
+                    "change is kept: Retry or Encode again will use it."
+                )
+
             return jsonify({
                 "ok": True,
                 "content_type": job.content_type,
                 "season": job.series_season,
                 "first_episode": job.series_first_episode,
                 "preview": preview,
+                "note": note,
             })
         except SQLAlchemyError as exc:
             session.rollback()
@@ -1078,12 +1136,23 @@ def _register_api_routes(app: Flask) -> None:
                         # missing file is not a reason to answer the whole
                         # request with a 500 and an HTML error page.
                         continue
-                    files.append({"name": f.name, "size_mb": size_mb})
+                    # Relative to the job folder, not the bare name. A
+                    # series extra lives at "<season>/Other/Extra 1.mkv", so
+                    # returning "Extra 1.mkv" had the player ask for a file
+                    # sitting directly in the season folder, where it is not:
+                    # every extra offered a button that answered 404.
+                    try:
+                        shown = f.relative_to(out).as_posix()
+                    except ValueError:
+                        shown = f.name
+                    files.append({"name": shown, "size_mb": size_mb})
             return jsonify({"files": files, "title": job.display_title})
         finally:
             session.close()
 
-    @app.route("/api/jobs/<int:job_id>/stream/<filename>")
+    # <path:> and not <string:>: the default converter refuses a slash, so a
+    # request for "Other/Extra 1.mkv" never reached this route at all.
+    @app.route("/api/jobs/<int:job_id>/stream/<path:filename>")
     def api_stream_file(job_id: int, filename: str):
         """Stream an MP4 file for in-browser playback."""
         session = get_session()
@@ -1092,9 +1161,17 @@ def _register_api_routes(app: Flask) -> None:
             if not job or not job.output_path:
                 abort(404)
             out = Path(job.output_path)
-            # Sanitise filename to prevent path traversal
-            safe_name = Path(filename).name
-            file_path = out / safe_name
+            # One level of subfolder is legitimate — extras live in Other/ —
+            # so the name is resolved against the job folder and then checked
+            # to be inside it, rather than flattened to its basename. That
+            # flattening is what made every extra unplayable; resolve() is
+            # what keeps ".." out.
+            candidate = (out / filename).resolve()
+            try:
+                candidate.relative_to(out.resolve())
+            except ValueError:
+                abort(404)
+            file_path = candidate
             from adr.naming import OUTPUT_SUFFIXES
 
             if (not file_path.exists()

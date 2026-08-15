@@ -447,6 +447,37 @@ a:not(.btn):not(.nav-link):not(.navbar-brand):not(.dropdown-item):not(.page-link
 .border-success-subtle { border-color: rgba(63, 185, 80, 0.35) !important; }
 .border-info-subtle    { border-color: rgba(88, 166, 255, 0.35) !important; }
 
+/* Checkboxes and switches.
+ *
+ * Bootstrap resolves their fill through --bs-form-check-bg, which defaults to
+ * --bs-body-bg — still #fff, because the theme restates the page background
+ * as a property on body rather than as that token. So every unchecked box and
+ * every OFF switch rendered as a solid white block on a #161b22 card, and on
+ * the switches that inverts the affordance: OFF was the loudest thing on the
+ * page and ON was quieter. The Plex switch on each job and all ten Settings
+ * toggles read as lit up precisely when they were off.
+ */
+.form-check-input {
+    background-color: var(--adr-bg) !important;
+    border-color: var(--adr-border) !important;
+}
+.form-check-input:checked {
+    background-color: var(--adr-accent) !important;
+    border-color: var(--adr-accent) !important;
+}
+.form-check-input:focus {
+    border-color: var(--adr-accent) !important;
+    box-shadow: 0 0 0 0.2rem rgba(88, 166, 255, 0.25) !important;
+}
+/* The knob is a background-image data URI whose colour Bootstrap picks for a
+   light track; unchecked it was near-white on near-white. */
+.form-switch .form-check-input {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%238b949e'/%3e%3c/svg%3e") !important;
+}
+.form-switch .form-check-input:checked {
+    background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='-4 -4 8 8'%3e%3ccircle r='3' fill='%230d1117'/%3e%3c/svg%3e") !important;
+}
+
 /* ---- Spinning disc animation ---- */
 @keyframes spin {
     from { transform: rotate(0deg); }

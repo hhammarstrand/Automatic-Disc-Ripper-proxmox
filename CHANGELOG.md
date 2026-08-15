@@ -1,5 +1,61 @@
 # Changelog
 
+## 1.34.0
+
+The rest of the critical review's backlog — everything it confirmed that 1.31
+did not already take.
+
+**A fast first track could finish the whole disc.** Encode tasks were queued
+inside the loop that creates the track rows, and a worker decides a job is done
+by asking whether every track it can see is DONE. So a quick first encode — a
+short extra, a passthrough — concluded the disc was finished: it marked the job
+DONE, transferred the staging folder to the library, moved it to Plex, sent the
+notification and asked Plex to rescan, while the remaining episodes were still
+being written into a folder that had just been moved out from under them. Every
+row exists before anything is queued now.
+
+**Every series extra offered a Play button that answered 404.** The file list
+returned an extra by its bare name, and the stream route joined that to the
+season folder, where it is not. Paths are returned relative to the job folder
+and resolved against it — one level of subfolder is legitimate, `..` is still
+refused, and the route takes a `path:` converter because the default one
+refuses a slash outright.
+
+**The "Online" badge could never turn red.** Every poller caught its own
+rejection, so the branch that reports a dead service was unreachable and the
+badge said Online permanently — including during an update, which is the one
+moment it exists for. The four pollers rethrow; the fire-and-forget callers
+still do not.
+
+**Checkboxes and switches were still Bootstrap's light theme** — solid white on
+the dark cards, and on the switches that inverted the affordance: OFF was the
+loudest thing on the page.
+
+Also: a specials disc labelled S00 is no longer folded into season 1, where its
+numbering collides with the real first season. A film's TMDb id is cleared when
+a disc is marked as a series without picking a show, so the season check cannot
+query the TV namespace with a film's id and announce another programme's
+episode count. `--main-feature` reaches a watch-folder ISO, which it never did,
+because the watcher renames the file to `.iso.adr-processing` first. The audio
+log line no longer blames the disc when `handbrake_extra_args` had the last
+word. The series-mode dialog no longer opens showing the previous job's disc
+hint. And marking a job as a series after its tracks exist says plainly that it
+will not rename the encode already under way.
+
+**Cross-site writes are refused.** The dashboard is unauthenticated by design —
+it is on a home LAN — but that is a decision about who may reach it, not about
+who may drive it: a browser sends LAN requests whatever page asked, and the
+endpoints that read no JSON body need no CORS permission at all. A write whose
+Origin or Referer contradicts us is refused; one with neither is a deliberate
+client and still welcome, because scripting your own homelab is legitimate.
+
+**Two tests that could not fail.** `TestTheActiveTab` — named for the bug the
+contrast file was written for — compared two palette entries that are correct
+by construction, and would have passed with the active tab back on Bootstrap's
+white. It reads the colours the rule actually declares now. And the retry branch
+that recovers episode numbers from the old track rows, which is what stops a
+retry renumbering a half-finished season from 1, had no test at all.
+
 ## 1.33.0
 
 **The bonus clip was still being filed as an episode.** 1.26 taught the split

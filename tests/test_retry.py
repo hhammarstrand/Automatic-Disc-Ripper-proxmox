@@ -419,3 +419,77 @@ class TestAHalfWrittenEncodeIsNotAFinishedOne:
         result = retry.plan(job, config)
         assert result["resume"] == retry.RESUME_TRANSFER
         assert "no re-encoding" in result["reason"]
+
+
+class TestARetryRemembersWhichFilesWereEpisodes:
+    """requeue_encode reads the old Track rows to recover the episode numbers
+    and the episode/extra split, and no test ever gave it rows that name the
+    raw files — so the whole branch was dead in the suite while looking
+    covered. It is the branch that stops a retry renumbering a half-finished
+    season from 1.
+    """
+
+    def _job(self, tmp_path, names, episode_of):
+        import types
+
+        raw = tmp_path / "raw" / "5"
+        raw.mkdir(parents=True)
+        for name in names:
+            (raw / name).write_bytes(b"M" * 4096)
+        tracks = [
+            types.SimpleNamespace(
+                filename=name, episode_number=episode_of.get(name),
+                output_path=None, id=index,
+            )
+            for index, name in enumerate(names)
+        ]
+        return types.SimpleNamespace(
+            id=5, title="Show", year=1964, disc_label="SHOW_D2",
+            content_type="series", series_season=1, series_first_episode=1,
+            tracks=tracks, output_path=None, status=None, error_message=None,
+            completed_at=None, progress_encode=0.0,
+        ), raw
+
+    def _run(self, job, tmp_path):
+        import queue
+        import types
+
+        from adr import retry
+
+        config = types.SimpleNamespace(
+            raw_path=tmp_path / "raw", staging_path=tmp_path / "staging",
+            completed_path=tmp_path / "completed", tv_path=tmp_path / "tv",
+            plex_path=tmp_path / "plex", stage_locally=False,
+            transcode_enabled=True, main_feature_only=False,
+        )
+        for name in ("staging", "completed", "tv", "plex"):
+            (tmp_path / name).mkdir(exist_ok=True)
+
+        class _Session:
+            def delete(self, obj): pass
+            def add(self, obj): pass
+            def commit(self): pass
+
+        out = queue.Queue()
+        retry.requeue_encode(job, _Session(), config, out)
+        names = []
+        while not out.empty():
+            names.append(out.get().output_filename)
+        return names
+
+    def test_the_remembered_numbers_come_back(self, tmp_path):
+        """Disc 2 of a box set was E06-E08. A retry that renumbers from 1
+        overwrites disc 1."""
+        names = ["t0.mkv", "t1.mkv", "t2.mkv"]
+        job, _ = self._job(tmp_path, names, {"t0.mkv": 6, "t1.mkv": 7, "t2.mkv": 8})
+        out = self._run(job, tmp_path)
+        assert [n[-3:] for n in sorted(out)] == ["E06", "E07", "E08"], out
+
+    def test_a_file_that_was_an_extra_stays_an_extra(self, tmp_path):
+        """It had a Track row and no episode number, which is exactly how an
+        extra is recorded — and re-planning it as an episode shifts the rest."""
+        names = ["t0.mkv", "t1.mkv", "t2.mkv"]
+        job, _ = self._job(tmp_path, names, {"t0.mkv": 6, "t2.mkv": 7})
+        out = self._run(job, tmp_path)
+        assert len([n for n in out if "S01E" in n]) == 2, out
+        assert len([n for n in out if n.startswith("Other/")]) == 1, out

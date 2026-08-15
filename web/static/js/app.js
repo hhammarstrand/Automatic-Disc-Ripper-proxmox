@@ -192,7 +192,15 @@ function refreshDashboard() {
             updateQueueSize();
             checkPreflight();
         })
-        .catch(err => console.warn('Refresh failed:', err));
+        .catch(err => {
+            // Rethrown, not swallowed. pollWithoutStacking decides the
+            // connection badge from whether this rejects, and catching it
+            // here made setConnectionState(false) unreachable: the badge
+            // said "Online" permanently, including while the service was
+            // down — the one moment it exists to report.
+            console.warn('Refresh failed:', err);
+            throw err;
+        });
 }
 
 function updateActiveJobs(jobs) {
@@ -875,7 +883,11 @@ function openPlayer(jobId) {
 
 function playFile(jobId, filename) {
     const video = document.getElementById('videoPlayer');
-    video.src = `/api/jobs/${jobId}/stream/${encodeURIComponent(filename)}`;
+    // Each segment encoded, the separators left alone: an extra is
+    // "Other/Extra 1.mkv", and encoding the slash to %2F gives a path many
+    // servers reject outright rather than a subfolder.
+    const encodedPath = String(filename).split('/').map(encodeURIComponent).join('/');
+    video.src = `/api/jobs/${jobId}/stream/${encodedPath}`;
     video.load();
     video.play().catch(() => {}); // autoplay may be blocked
 }
@@ -1135,6 +1147,11 @@ function saveSeries() {
 // ------------------------------------------------------------------ //
 
 function startSeriesMode() {
+    // The blue disc hint belongs to whichever job editSeries last opened.
+    // Left on screen it explains a different disc, directly above this
+    // dialog's own warning and contradicting the fields below it.
+    const discHint = document.getElementById('seriesDiscHint');
+    if (discHint) { discHint.classList.add('d-none'); discHint.textContent = ''; }
     // Reuses the per-job series modal: same three questions, different verb.
     document.getElementById('seriesJobId').value = '';   // '' means "the mode"
     document.getElementById('seriesTmdbId').value = '';
@@ -1292,7 +1309,7 @@ function refreshSystemStats() {
                 updateSysBar('gpuBar', 'gpuVal', data.gpu.utilization);
             }
         })
-        .catch(() => {});
+        .catch(err => { throw err; });
 }
 
 // ------------------------------------------------------------------ //
@@ -1346,7 +1363,7 @@ function refreshDriveHealth() {
                  </div>`
             ).join('');
         })
-        .catch(() => {});
+        .catch(err => { throw err; });
 }
 
 // ------------------------------------------------------------------ //
@@ -1366,7 +1383,7 @@ function refreshDoctorBadge() {
             badge.textContent = d.failing;
             badge.classList.toggle('d-none', d.failing === 0);
         })
-        .catch(() => {});
+        .catch(err => { throw err; });
 }
 
 document.addEventListener('DOMContentLoaded', () => {

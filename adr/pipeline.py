@@ -1493,7 +1493,14 @@ class DrivePipeline:
                     if verdict["is_series"] and self._config.series_detection:
                         job.content_type = "series"
                         guess = parse_series_label(job.disc_label or "")
-                        job.series_season = guess["season"] or 1
+                        # Not `or 1`: season 0 is a real season, and Plex
+                        # files specials in it. Folding it into season 1 puts
+                        # a specials disc among the real first-season
+                        # episodes, where the numbers then collide — which is
+                        # the collision plan_output already guards against.
+                        job.series_season = (
+                            1 if guess["season"] is None else guess["season"]
+                        )
                         # Which disc of the box set this is, when the label
                         # says so, and where that leaves the numbering. Only
                         # the label may start this — see
@@ -1928,26 +1935,37 @@ class DrivePipeline:
                 )
             job.output_path = str(output_dir)
 
+            # Every row first, and only then the queue.
+            #
+            # Queueing inside this loop published track 1 while tracks 2..N
+            # did not exist yet, and an encoder worker decides a job is
+            # finished by asking whether *every* track it can see is DONE. So
+            # a fast first encode — a short extra, a passthrough — concluded
+            # the whole disc was done: it marked the job DONE, renamed,
+            # transferred the staging folder to the library, moved to Plex,
+            # sent the "disc ripped" notification and asked Plex to rescan,
+            # all while the rest of the episodes were still being written into
+            # a folder that had just been moved out from under them.
+            queued = []
             for idx, mkv_file in enumerate(rip_files):
-                duration_sec = durations[idx]
-
                 track = Track(
                     job_id=job.id,
                     track_number=idx + 1,
                     filename=mkv_file.name,
                     size_mb=mkv_file.stat().st_size / BYTES_PER_MB,
-                    duration_seconds=duration_sec,
+                    duration_seconds=durations[idx],
                     status=TrackStatus.PENDING,
                 )
                 session.add(track)
-                session.commit()
-
-                out_name = plan.filenames[idx] if idx < len(plan.filenames) else f"{plex_folder_name} - pt{idx + 1}"
                 if plan.episodes and idx < len(plan.episodes):
                     track.episode_number = plan.episodes[idx]
-                    session.commit()
+                session.flush()          # the id, without publishing the row
 
-                self._encode_queue.put(EncodeTask(
+                out_name = (
+                    plan.filenames[idx] if idx < len(plan.filenames)
+                    else f"{plex_folder_name} - pt{idx + 1}"
+                )
+                queued.append(EncodeTask(
                     job_id=job.id,
                     track_id=track.id,
                     input_path=mkv_file,
@@ -1956,6 +1974,7 @@ class DrivePipeline:
                     final_dir=final_dir,
                     passthrough=not self._config.transcode_enabled,
                 ))
+            session.commit()
 
             if _cancelled(session, job):
                 logger.info("Job %s cancelled while its tracks were queued", job.id)
@@ -1963,6 +1982,8 @@ class DrivePipeline:
                 return
             job.status = JobStatus.ENCODING
             session.commit()
+            for task in queued:
+                self._encode_queue.put(task)
             logger.info("Job %s: %d tracks queued for encoding", job.id, len(rip_files))
 
             # The numbers were claimed above, before the plan was built. This

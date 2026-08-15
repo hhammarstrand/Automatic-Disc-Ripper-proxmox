@@ -125,3 +125,64 @@ class TestSwitchingHandBrakeOntoTheGPU:
         from web.app import _without_encoder_flag
 
         assert _without_encoder_flag("") == ""
+
+
+class TestAnotherSiteCannotDriveTheApi:
+    """The dashboard is unauthenticated by design — it sits on a home LAN —
+    and that is a decision about who may reach it, not about who may drive it.
+    A browser sends LAN requests whatever page asked, so any site the owner
+    opens could POST to /api/jobs/1/delete or /api/update/start; the endpoints
+    that read no JSON body need no CORS permission at all.
+    """
+
+    def _client(self, tmp_path):
+        from adr.config import Config
+        from adr.models import init_db
+        from web.app import create_app
+
+        path = tmp_path / "adr.yaml"
+        path.write_text(
+            f"raw_path: {tmp_path / 'raw'}\n"
+            f"completed_path: {tmp_path / 'completed'}\n"
+            f"staging_path: {tmp_path / 'staging'}\n",
+        )
+        init_db()
+        app = create_app(Config(str(path)), pipeline_manager=None)
+        app.config["TESTING"] = True
+        return app.test_client()
+
+    def test_a_post_from_another_origin_is_refused(self, tmp_path):
+        response = self._client(tmp_path).post(
+            "/api/jobs/delete", json={"ids": [1]},
+            headers={"Origin": "https://evil.example"},
+        )
+        assert response.status_code == 403
+
+    def test_a_form_post_with_only_a_referer_is_refused(self, tmp_path):
+        """The shape that needs no CORS permission: a plain form submission."""
+        response = self._client(tmp_path).post(
+            "/api/update/start",
+            headers={"Referer": "https://evil.example/page.html"},
+        )
+        assert response.status_code == 403
+
+    def test_the_dashboard_itself_is_allowed(self, tmp_path):
+        client = self._client(tmp_path)
+        response = client.post(
+            "/api/jobs/delete", json={"ids": []},
+            headers={"Origin": "http://localhost"},
+        )
+        assert response.status_code != 403
+
+    def test_curl_is_still_welcome(self, tmp_path):
+        """No Origin and no Referer is a deliberate client, not a browser
+        being steered. This is somebody's homelab and scripting it is a
+        legitimate thing to do, so the check is on a header that contradicts
+        us rather than one that is absent."""
+        response = self._client(tmp_path).post("/api/jobs/delete", json={"ids": []})
+        assert response.status_code != 403
+
+    def test_reading_is_never_refused(self, tmp_path):
+        response = self._client(tmp_path).get(
+            "/api/status", headers={"Origin": "https://evil.example"})
+        assert response.status_code != 403

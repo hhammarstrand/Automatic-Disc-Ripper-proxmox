@@ -96,11 +96,28 @@ def describe_audio_request(
     if overrides is None:
         overrides = handbrake_overrides(config, input_path, streams)
     asked = requested_language(overrides)
+    # What the settings alone chose. If the two differ, something in
+    # handbrake_extra_args had the last word — and the branch below, which
+    # explains a mismatch by saying the disc has no such track, would be
+    # blaming the disc for a decision a text field made.
+    from_settings = requested_language(
+        handbrake_overrides(config, input_path, streams),
+    )
 
     # The interesting case, and the one that used to produce a silent film:
     # the language asked for is not on this disc. Worth a second probe to say
     # what is, because "why is this in English" and "why is this mute" are the
     # same question and this line answers both.
+    if asked != from_settings:
+        return (
+            f"Audio: '{wanted}' was asked for (from {source}), but "
+            f"handbrake_extra_args ends with '--audio-lang-list {asked}', "
+            "which is appended after the settings and therefore wins. "
+            f"HandBrake is being asked for '{asked}'. Clear that flag from "
+            "Settings → Encoding → Extra arguments to let the spoken language "
+            "decide."
+        )
+
     if asked and asked != wanted:
         if streams is None:
             streams = audio_streams(
@@ -265,8 +282,18 @@ class HandBrakeEncoder:
         cmd.append(f"--preset={self._preset}")
         cmd.append("--json")  # HandBrake 1.10.x emits JSON progress on stdout
 
-        # ISOs need --main-feature to auto-select the movie, not a menu loop
-        if input_path.suffix.lower() == ".iso":
+        # ISOs need --main-feature to auto-select the movie, not a menu loop.
+        #
+        # The suffix is read off the name with the watch folder's marker
+        # stripped: the only path that hands this an ISO is the watch folder,
+        # and it renames the file to "Film.iso.adr-processing" while it works
+        # — so Path.suffix was ".adr-processing" and this branch never once
+        # fired on the input it was written for.
+        real_name = input_path.name
+        for marker in (".adr-processing",):
+            if real_name.endswith(marker):
+                real_name = real_name[: -len(marker)]
+        if real_name.lower().endswith(".iso"):
             cmd.append("--main-feature")
 
         # What this file actually carries, read once and used three times: to
