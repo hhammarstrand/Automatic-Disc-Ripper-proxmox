@@ -221,3 +221,80 @@ class TestDescribe:
 
     def test_no_match_says_so(self):
         assert "No earlier rip" in duplicates.describe(None)
+
+
+class TestADiscLabelIsNotAnIdentity:
+    """The report: two films ripped fine, then every disc after them was
+    cancelled as a duplicate.
+
+    A set-top DVD recorder writes its own name onto every disc it burns, so a
+    whole shelf of home recordings all said LG_COMBI_RECORDER. The first was
+    ripped and renamed by hand — which is the proof the label never identified
+    it — and every disc after it matched that label and was skipped.
+
+    find_previous_rip's docstring has said since it was written that a label
+    "is not a unique identifier" and "only ever annotates a job, never blocks
+    one". skip_duplicates blocked on it anyway.
+    """
+
+    def test_a_label_match_never_blocks(self):
+        from adr import duplicates
+
+        assert duplicates.blocks_a_rip({"kind": duplicates.MATCH_LABEL}) is False
+
+    def test_the_two_that_compare_the_film_still_do(self):
+        from adr import duplicates
+
+        assert duplicates.blocks_a_rip({"kind": duplicates.MATCH_LIBRARY}) is True
+        assert duplicates.blocks_a_rip({"kind": duplicates.MATCH_TMDB}) is True
+
+    def test_nothing_found_blocks_nothing(self):
+        from adr import duplicates
+
+        assert duplicates.blocks_a_rip(None) is False
+
+    def test_the_pipeline_asks_before_cancelling(self):
+        import inspect
+
+        from adr.pipeline import DrivePipeline
+
+        source = inspect.getsource(DrivePipeline._run_pipeline)
+        assert "duplicates.blocks_a_rip(duplicate)" in source, (
+            "a disc label can cancel a rip again"
+        )
+
+    def test_a_label_match_is_still_reported(self):
+        """It is real information — the same disc may well be in the drive
+        again. It is just not grounds for refusing to rip."""
+        from adr import duplicates
+
+        detail = duplicates.describe({
+            "kind": duplicates.MATCH_LABEL, "detail": "…was already ripped…",
+        })
+        assert detail
+
+
+class TestEquipmentLabelsAreGeneric:
+    """Labels that name the machine rather than the film. Listing brands would
+    never keep up; the word is what gives it away."""
+
+    def _generic(self, label):
+        from adr.pipeline import _is_generic_label
+
+        return _is_generic_label(label)
+
+    def test_the_reported_one(self):
+        assert self._generic("LG_COMBI_RECORDER")
+
+    def test_other_recorders_nobody_listed(self):
+        for label in ("PHILIPS_DVDR", "SONY_RDR_RECORDER", "MY_RECORDING",
+                      "PANASONIC_DVD_RECORDER", "CAMCORDER_01"):
+            assert self._generic(label), label
+
+    def test_the_old_list_still_counts(self):
+        for label in ("DVD_VIDEO", "UNTITLED", "", "   "):
+            assert self._generic(label), label
+
+    def test_a_real_film_label_is_not_generic(self):
+        for label in ("JUMANJI", "THE_MATRIX", "DINOSAUR", "LOGAN_S01D2"):
+            assert not self._generic(label), label

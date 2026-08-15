@@ -184,7 +184,9 @@ def _label_match(job, session) -> dict | None:
         "files": [],
         "detail": (
             f"A disc labelled '{job.disc_label}' was already ripped as job "
-            f"{previous.id} ({previous.display_title}){when}."
+            f"{previous.id} ({previous.display_title}){when}. Ripping anyway — "
+            "a disc label is not an identity, and recorders write the same one "
+            "onto every disc they burn."
         ),
     }
 
@@ -214,6 +216,28 @@ def find_duplicate(job, session, config) -> dict | None:
         if found:
             return found
     return None
+
+
+#: Which kinds of evidence are strong enough to skip a rip on.
+#:
+#: Not the disc label. find_previous_rip's docstring has said since it was
+#: written that a label "is not a unique identifier" and "only ever annotates a
+#: job, never blocks one" — and then skip_duplicates blocked on it anyway.
+#:
+#: What that costs, in the report this constant exists for: a DVD recorder
+#: writes the same volume label onto every disc it burns. One evening's worth
+#: of home recordings all say LG_COMBI_RECORDER, so the first one ripped and
+#: every one after it was cancelled as a duplicate of it — a film the user had
+#: renamed by hand, which is the proof that the label never identified it.
+#:
+#: A library or TMDb match is different: both compare the *film*, and both are
+#: worth acting on.
+BLOCKING_MATCHES = frozenset({MATCH_LIBRARY, MATCH_TMDB})
+
+
+def blocks_a_rip(match: dict | None) -> bool:
+    """Whether this evidence is strong enough to cancel the rip."""
+    return bool(match) and match.get("kind") in BLOCKING_MATCHES
 
 
 def describe(match: dict) -> str:

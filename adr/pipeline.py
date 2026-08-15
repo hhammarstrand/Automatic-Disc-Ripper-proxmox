@@ -301,7 +301,7 @@ def find_previous_rip(job, session):
     than saying nothing.
     """
     label = (job.disc_label or "").strip()
-    if not label or label.upper() in _GENERIC_DISC_LABELS:
+    if _is_generic_label(label):
         return None
     return (
         session.query(Job)
@@ -320,7 +320,24 @@ def find_previous_rip(job, session):
 _GENERIC_DISC_LABELS = frozenset({
     "DVD_VIDEO", "DVDVIDEO", "DVD", "BLURAY", "BLU-RAY", "BD_ROM", "BDROM",
     "UNTITLED", "UNKNOWN", "NO_LABEL", "LOGICAL_VOLUME_ID", "VIDEO_TS",
+    "NEW_VOLUME", "MY_DISC", "MOVIE", "VIDEO", "DISC",
 })
+
+#: Words that mean the label names the *equipment*, not the film.
+#:
+#: A set-top DVD recorder writes its own name onto every disc it burns —
+#: LG_COMBI_RECORDER, PHILIPS_DVDR, SONY_RDR — so a whole shelf of home
+#: recordings shares one label. Matching on the word rather than listing every
+#: brand is the only way this can cover a recorder nobody here has heard of.
+_EQUIPMENT_WORDS = ("RECORDER", "COMBI", "DVDR", "RECORDING", "CAMCORDER")
+
+
+def _is_generic_label(label: str) -> bool:
+    """Whether *label* identifies a disc, or merely the thing that wrote it."""
+    upper = label.strip().upper()
+    if not upper or upper in _GENERIC_DISC_LABELS:
+        return True
+    return any(word in upper for word in _EQUIPMENT_WORDS)
 
 
 def final_destination(job, config) -> tuple[Path, bool]:
@@ -1270,7 +1287,7 @@ class DrivePipeline:
                 JobLog(self._config, job.id).append("detect", duplicate["detail"])
                 Notifier(self._config).duplicate(job, duplicate["detail"])
 
-                if self._config.skip_duplicates:
+                if self._config.skip_duplicates and duplicates.blocks_a_rip(duplicate):
                     job.status = JobStatus.CANCELLED
                     job.error_message = (
                         f"Skipped as a duplicate. {duplicate['detail']} "

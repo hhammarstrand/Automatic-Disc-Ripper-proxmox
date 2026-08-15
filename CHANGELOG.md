@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.21.2
+
+**Two films ripped, and then every disc after them was refused.**
+
+A set-top DVD recorder writes its own name onto every disc it burns, so a whole
+shelf of home recordings all carried the label `LG_COMBI_RECORDER`. The first
+was ripped and named by hand — which is the proof the label never identified it
+— and every disc after it matched that label and was cancelled as a duplicate.
+
+The mechanism was doing what it was told; what it was told was wrong.
+`find_previous_rip` has said since it was written that a disc label "is not a
+unique identifier" and "only ever annotates a job, never blocks one", and
+`skip_duplicates` blocked on it anyway. The code contradicted its own
+documented design, and nothing noticed because the two live in different files.
+
+A label match is now reported and the rip proceeds. The two checks that compare
+the *film* — the library already holding it, and a finished job with the same
+TMDb id — still skip, which is what "skip discs already ripped" is for.
+
+Separately, labels that name the equipment rather than the film are ignored
+outright. Listing brands would never keep up, so the word is what gives it
+away: `RECORDER`, `COMBI`, `DVDR`, `RECORDING`, `CAMCORDER`.
+
 ## 1.21.1
 
 The thirty fixes in 1.21.0 were reviewed the same way they were found, and

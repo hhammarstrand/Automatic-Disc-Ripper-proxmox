@@ -744,33 +744,20 @@ from a bad drive.
 
 ### Already ripped?
 
-Working through a shelf, the expensive mistake is ripping the same film twice.
-Before the rip starts — and *after* identification, when the title is known —
-the disc is checked three ways, in descending order of how much each can be
-trusted:
+Three ways to answer, and only two of them are grounds for refusing to rip:
 
-| Check | Catches |
-|---|---|
-| **The library** | `Title (Year)/` already holds a video file at the destination. The only check that is true rather than remembered: it survives a cleared history, a reinstall, and finds films that were in the library before this app existed |
-| **TMDb id** | An earlier completed job for the same film — a different pressing, a re-release, a disc with a different label |
-| **Disc label** | The fallback for a disc TMDb could not identify |
+| Evidence | What it compares | Skips the rip? |
+|---|---|---|
+| The library already holds `Title (Year)/…` | the film | yes |
+| A finished job with the same TMDb id | the film | yes |
+| A finished job with the same disc label | the *disc* | no — it says so and rips |
 
-The label is the weakest signal, so better evidence overrules it: if TMDb
-identified both discs and called them different films, a shared label is a
-coincidence rather than a duplicate.
-
-A duplicate is always logged, shown in the job's tool output, badged in the
-history, and can be sent as a notification. Whether it *stops* the rip is
-**Settings → Duplicates → Skip discs already ripped**, off by default —
-re-ripping is legitimate when the first attempt came from a scratched disc or a
-worse preset, and a false positive that silently cancels a disc is harder to
-notice than one that only warns. Turn it on when working through a large shelf;
-the disc is then cancelled and ejected before MakeMKV starts, so nothing is
-wasted.
-
-Series discs are exempt. Every disc of a box set writes into the same show
-folder, which is the normal case rather than a warning; episodes are protected
-by their numbering instead.
+A disc label is not an identity. A set-top DVD recorder writes its own name
+onto every disc it burns, so a shelf of home recordings all say
+`LG_COMBI_RECORDER` — and skipping on that meant the first one ripped and every
+one after it was cancelled as a duplicate of it. Labels that name equipment
+rather than content are ignored outright, and a label match anywhere else is
+reported and then ripped anyway.
 
 ### MakeMKV key
 
