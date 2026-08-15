@@ -183,12 +183,18 @@ class Notifier:
     # The events themselves
     # -------------------------------------------------------------- #
 
-    def job_done(self, job, destination: str = "") -> bool:
+    def job_done(self, job, destination: str = "", season: str = "") -> bool:
         parts = [f"{job.display_title} is ready."]
         if destination:
             parts.append(f"Saved to {destination}")
         if job.avg_fps:
             parts.append(f"Encoded at {job.avg_fps:.0f} fps average.")
+        # Which episodes are still missing, when this was a box-set disc. The
+        # whole point of the notification is that whoever fed the disc walked
+        # away, and "put the next one in" is the one thing they can act on
+        # without coming back to look.
+        if season:
+            parts.append(season)
         return self.notify(EVENT_JOB_DONE, "Disc ripped", " ".join(parts))
 
     def job_failed(self, job) -> bool:

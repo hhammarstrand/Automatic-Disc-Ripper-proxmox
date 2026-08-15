@@ -982,7 +982,22 @@ class EncoderWorker(threading.Thread):
                 # the film is visible now rather than after the next scheduled
                 # scan. Both are best-effort: the film is on disk either way.
                 session.commit()
-                Notifier(self._config).job_done(job, job.output_path or "")
+
+                # Is that all of them? Feeding a box set one disc at a time,
+                # that is the question after every single disc, and nothing
+                # answered it — whether episode 9 existed anywhere was
+                # something to notice weeks later in Plex.
+                season = {}
+                if (job.content_type or "movie") == "series":
+                    from adr import seasoncheck
+
+                    season = seasoncheck.check(job, self._config)
+                    if season["text"]:
+                        job_log.append("done", season["text"])
+
+                Notifier(self._config).job_done(
+                    job, job.output_path or "", season.get("text", ""),
+                )
                 PlexNotifier(self._config).refresh_for(job.output_path or "")
             elif any_error and all(t.status in (TrackStatus.DONE, TrackStatus.ERROR) for t in job.tracks):
                 job.status = JobStatus.ERROR

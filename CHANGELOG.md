@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.30.0
+
+**After every box-set disc, it says whether that was all of them.** Feeding a
+set one disc at a time, that is the question every time, and nothing answered
+it: the disc came out, the folder grew, and whether episode 9 existed anywhere
+was something to notice weeks later in Plex.
+
+> Season 1 has 5 of 13 episodes. Still missing: 6-13. Put the next disc in —
+> the episode numbers carry on from what is already there.
+
+In the job log and in the finish notification, because whoever fed the disc
+walked away and "put the next one in" is the one thing they can act on without
+coming back to look.
+
+**How many discs a set has cannot be looked up, and this does not pretend
+otherwise.** No metadata source knows it: the disc count is a property of one
+physical release in one region — the same season is three discs in Sweden and
+two in Germany — and TMDb describes programmes, not pressings. The episode list
+can be looked up, and it is the better question anyway. Discs are packaging;
+episodes are what you wanted. Counting episodes also finds a gap in the
+*middle* — a disc that failed halfway, a title skipped for a navigation error —
+which counting discs never would.
+
+It declines to answer rather than guess. A show named off its disc label has
+nothing to count against, and says so and where to fix it; no API key, a season
+TMDb does not list, or TMDb being down all produce silence, because "0 of 0
+episodes" reads as a fault when the season may well be complete.
+
 ## 1.29.0
 
 **A box-set disc now works out which show it is.** Identification runs TMDb's
