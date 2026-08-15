@@ -34,6 +34,26 @@ function reasonFrom(payload, fallback = 'the server did not say why') {
     return payload.error || payload.message || fallback;
 }
 
+// Do this once the typing stops.
+//
+// A search that fires on every keystroke sends one request per letter, and
+// "The Wire" is eight of them against a rate-limited third-party API — seven
+// of which are answers nobody will ever read. Waiting for a pause is what
+// makes searching-as-you-type affordable at all.
+//
+// The delay is a judgement, not a constant to tune: shorter and a normal
+// typing rhythm still fires mid-word; longer and it feels like the field has
+// stopped responding.
+function debounce(fn, ms) {
+    let timer = null;
+    return function (...args) {
+        clearTimeout(timer);
+        timer = setTimeout(() => fn.apply(this, args), ms);
+    };
+}
+
+const SEARCH_DEBOUNCE_MILLISECONDS = 400;
+
 // Times, in the zone of whoever is reading them.
 //
 // The server renders each timestamp too, so the page is readable with no
@@ -602,17 +622,38 @@ function moveToPlexManual(jobId) {
 function openRematchModal(jobId, currentTitle) {
     document.getElementById('rematchJobId').value = jobId;
     document.getElementById('rematchJobTitle').textContent = currentTitle;
-    document.getElementById('rematchQuery').value = currentTitle.replace(/\s*\(\d{4}\)\s*$/, '');
+    const field = document.getElementById('rematchQuery');
+    field.value = currentTitle.replace(/\s*\(\d{4}\)\s*$/, '');
     document.getElementById('rematchYear').value = '';
     document.getElementById('rematchResults').innerHTML = '';
     document.getElementById('rematchEmpty').classList.add('d-none');
     const modal = new bootstrap.Modal(document.getElementById('rematchModal'));
     modal.show();
+    // Inside the tap that opened it, for the keyboard, and selected rather
+    // than merely focused: the field is prefilled with the title that matched
+    // wrongly, so the first keystroke should replace it, not append to it.
+    field.focus({preventScroll: true});
+    field.select();
 }
 
-function searchTmdb() {
+let _rematchSearchSeq = 0;
+
+const _searchTmdbSoon = debounce(
+    () => searchTmdb(true), SEARCH_DEBOUNCE_MILLISECONDS);
+
+function onRematchInput() {
+    _searchTmdbSoon();
+}
+
+function searchTmdb(fromTyping = false) {
     const query = document.getElementById('rematchQuery').value.trim();
-    if (!query) return;
+    if (query.length < 2) {
+        if (fromTyping) {
+            document.getElementById('rematchResults').innerHTML = '';
+            document.getElementById('rematchEmpty').classList.add('d-none');
+        }
+        return;
+    }
     const year = document.getElementById('rematchYear').value.trim();
     const resultsDiv = document.getElementById('rematchResults');
     const spinner = document.getElementById('rematchSpinner');
@@ -625,9 +666,14 @@ function searchTmdb() {
     let url = `/api/tmdb/search?q=${encodeURIComponent(query)}`;
     if (year) url += `&year=${year}`;
 
+    // Typing puts several of these in flight at once and they do not promise
+    // to come back in order. Only the newest may paint — same guard as the
+    // season preview's, for the same reason.
+    const seq = ++_rematchSearchSeq;
     fetch(url)
         .then(r => r.json())
         .then(data => {
+            if (seq !== _rematchSearchSeq) return;
             spinner.classList.add('d-none');
             if (data.error) {
                 empty.textContent = data.error;
@@ -642,7 +688,10 @@ function searchTmdb() {
             }
             results.forEach(movie => {
                 const col = document.createElement('div');
-                col.className = 'col-6 col-md-4';
+                // Full width on a phone. Two columns at 390px is a poster
+                // beside three lines of 11px text, which is a card nobody can
+                // read and a tap target the width of a thumb.
+                col.className = 'col-12 col-sm-6 col-md-4';
                 col.innerHTML = `
                     <div class="card h-100" style="cursor:pointer; background: #0d1117; border-color: var(--adr-border);"
                          onclick="applyRematch(${parseInt(movie.tmdb_id)})">
@@ -666,6 +715,7 @@ function searchTmdb() {
             });
         })
         .catch(err => {
+            if (seq !== _rematchSearchSeq) return;
             spinner.classList.add('d-none');
             empty.textContent = 'Search error: ' + err.message;
             empty.classList.remove('d-none');
@@ -1009,6 +1059,11 @@ function editSeries(jobId, season, firstEpisode, suggestedShow, suggestedYear) {
     discHint.textContent = '';
     previewSeries();
     new bootstrap.Modal(document.getElementById('seriesModal')).show();
+    // Synchronously, inside the tap that opened the dialog: iOS raises the
+    // keyboard for a focus() that happens in a user gesture and refuses one
+    // that arrives later, so doing this from shown.bs.modal gets a search
+    // sheet with no keyboard and a second tap needed to fix it.
+    setSeriesStep('find');
 
     // Where the disc label says this one belongs. Asked for after the dialog
     // is already open and filled in, so a slow answer never delays it and a
@@ -1033,6 +1088,11 @@ function editSeries(jobId, season, firstEpisode, suggestedShow, suggestedYear) {
                 discHint.textContent = d.reason;
                 discHint.classList.remove('d-none');
             }
+            // An earlier disc of this set already answered the "which show"
+            // question, so the phone should not be asked to search for it
+            // again — it opens on the numbers, with the show named above them
+            // and Change one tap away if the guess is wrong.
+            if (d.show) setSeriesStep('confirm');
             previewSeries();
         })
         .catch(() => {});
@@ -1042,15 +1102,40 @@ function editSeries(jobId, season, firstEpisode, suggestedShow, suggestedYear) {
 // runs the movie search, which for a box set returns a confident-looking film
 // — so without this step a season is named after whatever film the disc label
 // happened to resemble.
-function searchSeriesShow() {
+//
+// Typing searches. The button and the Enter key still do, immediately, because
+// a field that only answers to a pause has no way of saying "yes, that one,
+// now" — and because a search that returned nothing has to be repeatable
+// without editing the text first.
+//
+// fromTyping is what separates the two: a debounced search on one letter is a
+// request that cannot match anything, and telling someone off for having typed
+// only one letter of a word they are still typing is nonsense. From the button
+// the same emptiness is a question that deserves an answer.
+let _seriesSearchSeq = 0;
+
+function searchSeriesShow(fromTyping = false) {
     const query = document.getElementById('seriesShowName').value.trim();
     const box = document.getElementById('seriesShowResults');
-    if (!query) { box.innerHTML = '<span class="text-warning small">Enter a show name first.</span>'; return; }
+    if (query.length < 2) {
+        box.className = '';
+        if (fromTyping) { box.replaceChildren(); return; }
+        box.innerHTML = '<span class="text-warning small">Enter at least two letters of the show name.</span>';
+        return;
+    }
+    box.className = '';
     box.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Searching TMDb…';
 
+    // Answers do not promise to arrive in the order they were asked for, and
+    // now that typing asks, several are in flight at once: "The W" answered
+    // after "The Wire" would paint the wider list over the better one. Only
+    // the newest request may paint. The same guard as _seriesPreviewSeq, for
+    // the same reason.
+    const seq = ++_seriesSearchSeq;
     fetch('/api/tmdb/search-tv?query=' + encodeURIComponent(query))
         .then(r => r.json())
         .then(d => {
+            if (seq !== _seriesSearchSeq) return;
             if (d.error) { box.innerHTML = `<span class="text-danger small">${escapeHtml(d.error)}</span>`; return; }
             if (!d.results.length) { box.innerHTML = '<span class="text-secondary small">No shows found.</span>'; return; }
             // Built as elements, with the handler attached in JS.
@@ -1083,17 +1168,65 @@ function searchSeriesShow() {
             }));
             box.className = 'list-group';
         })
-        .catch(err => { box.innerHTML = `<span class="text-danger small">${escapeHtml(err.message)}</span>`; });
+        .catch(err => {
+            if (seq !== _seriesSearchSeq) return;
+            box.innerHTML = `<span class="text-danger small">${escapeHtml(err.message)}</span>`;
+        });
+}
+
+const _searchSeriesShowSoon = debounce(
+    () => searchSeriesShow(true), SEARCH_DEBOUNCE_MILLISECONDS);
+
+// The show name drives two things: the filename preview, which is instant and
+// local, and the TMDb lookup, which is neither.
+function onSeriesShowInput() {
+    previewSeries();
+    _searchSeriesShowSoon();
+}
+
+// Which half of the dialog the phone is showing.
+//
+// Both halves are on screen at once on a desktop and always were; the step
+// rules live inside the phone's media query, so this attribute is inert above
+// 768px and the desktop dialog is exactly what it was. On a phone the two
+// halves cannot share a screen with the keyboard up — which is the whole
+// complaint this rework started from.
+function setSeriesStep(step) {
+    const content = document.querySelector('#seriesModal .modal-content');
+    if (!content) return;
+    content.dataset.step = step;
+
+    // The confirm step asks for a season and a first episode with the search
+    // gone, so it has to say a season of what.
+    const chosen = document.getElementById('seriesChosenShow');
+    if (chosen) {
+        const name = document.getElementById('seriesShowName').value.trim();
+        const year = document.getElementById('seriesShowYear').value.trim();
+        document.getElementById('seriesChosenName').textContent =
+            name + (year ? ` (${year})` : '');
+        chosen.classList.toggle('d-none', !name);
+    }
+
+    if (step === 'find') {
+        const input = document.getElementById('seriesShowName');
+        // preventScroll: on a phone the field is already at the top of a
+        // full-screen sheet, and scrolling to it moves the sheet under the
+        // keyboard that is about to appear.
+        if (input) input.focus({preventScroll: true});
+    }
 }
 
 function pickSeriesShow(tmdbId, name, year) {
     document.getElementById('seriesTmdbId').value = tmdbId;
     document.getElementById('seriesShowName').value = name;
     document.getElementById('seriesShowYear').value = year || '';
-    document.getElementById('seriesShowResults').innerHTML =
-        `<div class="small text-success"><i class="bi bi-check-circle me-1"></i>Using
-         <strong>${escapeHtml(name)}</strong>${year ? ' (' + year + ')' : ''}</div>`;
-    document.getElementById('seriesShowResults').className = '';
+    // The list is cleared rather than replaced with "Using X": the chosen-show
+    // row says that now, and on a phone it is the only one of the two the
+    // confirm step shows.
+    const box = document.getElementById('seriesShowResults');
+    box.replaceChildren();
+    box.className = '';
+    setSeriesStep('confirm');
     previewSeries();
 }
 
@@ -1210,6 +1343,10 @@ function startSeriesMode() {
     document.getElementById('seriesModeHint').classList.remove('d-none');
     previewSeries();
     new bootstrap.Modal(document.getElementById('seriesModal')).show();
+    // Nothing is known about the show here, so this always opens on the
+    // search step — and focuses inside the tap, so the keyboard comes up with
+    // the sheet rather than after another tap.
+    setSeriesStep('find');
 }
 
 function stopSeriesMode() {

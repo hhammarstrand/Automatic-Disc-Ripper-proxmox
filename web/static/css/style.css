@@ -796,6 +796,67 @@ input, select, textarea, .list-group-item-action {
         padding-bottom: 0.7rem;
     }
 
+    /* ---- The search sheets, as steps ----
+     *
+     * The reported pain point, and the reason for this whole pass: naming a
+     * TV disc from the phone. The dialog put the search field, the results,
+     * the season, the first episode and the filename preview on one screen,
+     * and the keyboard — which appears the moment the field is touched —
+     * covers the bottom half of that. So the results being typed towards were
+     * the part that could not be seen.
+     *
+     * One thing at a time instead: find the show, then say where on it this
+     * disc starts. The rules are scoped to the phone, so the desktop dialog
+     * still shows both halves at once, which is right when there is room.
+     *
+     * dvh before vh matters and the order is the fallback: a browser that
+     * does not know dvh keeps vh, and one that does uses the height that
+     * actually tracks the keyboard. 100vh under an iOS keyboard is a lie —
+     * it reports the height the screen would have if the keyboard were not
+     * there, which puts the bottom of the sheet behind it.
+     */
+    .modal-fullscreen-md-down .modal-content {
+        height: 100vh;
+        height: 100dvh;
+    }
+    [data-step="find"] .series-pane-confirm,
+    [data-step="find"] .series-confirm-only,
+    [data-step="confirm"] .series-pane-find {
+        display: none !important;
+    }
+    /* The field, the year box and the button share one row, and at 390px that
+       leaves the field about 100px wide — narrower than the words being typed
+       into it, so the thing you are searching for scrolls out of sight as you
+       type it. The field takes a row of its own; the year and the button keep
+       the second, where they are both still comfortably above 44px. */
+    .modal-fullscreen-md-down .input-group {
+        flex-wrap: wrap;
+        row-gap: 0.5rem;
+    }
+    #seriesShowName,
+    #rematchQuery {
+        flex: 1 0 100%;
+        border-radius: 0.375rem !important;
+    }
+    #seriesShowYear,
+    #rematchYear {
+        border-radius: 0.375rem 0 0 0.375rem !important;
+    }
+
+    /* The filename preview is one long path per line and cannot usefully wrap
+       — a path broken across two lines is harder to check than one you have
+       to slide. It scrolls inside its own box; the page does not. */
+    #seriesPreview pre {
+        overflow-x: auto;
+    }
+
+    /* A row of search results is a list of things to hit with a thumb. */
+    #seriesShowResults .list-group-item {
+        min-height: 44px;
+        padding-top: 0.6rem;
+        padding-bottom: 0.6rem;
+    }
+
     /* The history table becomes cards.
        Fourteen columns in a sideways-scrolling strip is unusable with a
        thumb: the row's identity sits off-screen from its buttons, and

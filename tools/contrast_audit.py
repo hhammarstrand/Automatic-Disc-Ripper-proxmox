@@ -120,6 +120,34 @@ WALKER = r"""
 """
 
 
+#: The series sheet as it looks with an answer in it: two results in the list,
+#: which is the state the search step exists for and which no page load makes.
+SERIES_SHEET_WITH_RESULTS = r"""
+startSeriesMode();
+document.getElementById('seriesShowName').value = 'The Wire';
+const box = document.getElementById('seriesShowResults');
+box.className = 'list-group';
+box.replaceChildren(...[
+  ['The Wire', 2002, 'Baltimore drug scene, seen through the eyes of dealers and police.'],
+  ['The Wire', 2007, 'A documentary about the cable under the Atlantic.'],
+].map(([name, year, overview]) => {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'list-group-item list-group-item-action bg-transparent text-start';
+  const strong = document.createElement('strong');
+  strong.textContent = name;
+  const span = document.createElement('span');
+  span.className = 'text-secondary';
+  span.textContent = ' (' + year + ')';
+  const div = document.createElement('div');
+  div.className = 'small text-secondary';
+  div.textContent = overview;
+  button.append(strong, span, div);
+  return button;
+}));
+"""
+
+
 def seed(config):
     """Jobs covering the states whose markup differs, the banner included."""
     from adr.models import Job, JobStatus, Track, TrackStatus, get_session, init_db, utcnow
@@ -213,8 +241,18 @@ def main():
     # States that only exist after something is opened, and therefore have
     # never been measured. Same blind spot as the series-mode banner: the
     # markup is on every page and no default render shows any of it.
+    # (label, path, script, only-when). The last is for state that does not
+    # exist at every width: the bottom bar is display:none above md, so its
+    # More button is not there to click on the desktop pass.
+    visible = ("() => { const b = document.getElementById('moreNavBtn');"
+               " return b && getComputedStyle(b).display !== 'none'; }")
     opened = [
-        ("more sheet", "/", "document.getElementById('moreNavBtn').click()"),
+        ("more sheet", "/", "document.getElementById('moreNavBtn').click()", visible),
+        # The series sheet with results in it. The rows are injected rather
+        # than searched for, because this measures what the cascade does to a
+        # result row and TMDb is neither reachable nor deterministic here.
+        ("series sheet", "/", SERIES_SHEET_WITH_RESULTS, None),
+        ("rematch sheet", "/history", "openRematchModal(1, 'Jumanji')", None),
     ]
     # Phone first: it is where the report came from, and a 390px viewport
     # reflows things onto backgrounds they never share on a desktop.
@@ -238,15 +276,10 @@ def main():
                         item["page"] = path
                         item["viewport"] = vname
                         findings.append(item)
-            for label, path, script in opened:
+            for label, path, script, only_when in opened:
                 page.goto(f"http://127.0.0.1:{port}{path}", wait_until="networkidle")
                 page.wait_for_timeout(300)
-                # The bottom bar is display:none above md, so the button that
-                # opens this is not there to click on the desktop pass.
-                if not page.evaluate(
-                        "() => document.getElementById('moreNavBtn') "
-                        "&& getComputedStyle(document.getElementById('moreNavBtn'))"
-                        ".display !== 'none'"):
+                if only_when and not page.evaluate(only_when):
                     continue
                 page.evaluate(script)
                 page.wait_for_timeout(600)     # the sheet slides in

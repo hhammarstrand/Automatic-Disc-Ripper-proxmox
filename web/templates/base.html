@@ -252,9 +252,21 @@
          a confident-looking film. Naming a whole season after it would be
          silently wrong, so the show is looked up in the TV namespace here and
          the numbering is previewed before anything is committed. -->
-    <div class="modal fade" id="seriesModal" tabindex="-1" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
-            <div class="modal-content" style="background-color: var(--adr-card); color: var(--adr-text); border: 1px solid var(--adr-border);">
+    <!--
+         On a phone this is a two-step sheet rather than a form. Everything
+         below used to be on screen at once: the search field, the results, the
+         season, the first episode and the filename preview — with the keyboard
+         covering the bottom half of it the moment the field took focus, so the
+         results you were typing towards were the part you could not see.
+
+         data-bs-focus="false" is the supported switch that stops Bootstrap's
+         focus trap pulling focus back to the dialog when it opens. Without it
+         the focus() call that raises the keyboard is undone a frame later, and
+         the user gets a search sheet with no keyboard.
+    -->
+    <div class="modal fade" id="seriesModal" tabindex="-1" aria-hidden="true" data-bs-focus="false">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-md-down">
+            <div class="modal-content" data-step="find" style="background-color: var(--adr-card); color: var(--adr-text); border: 1px solid var(--adr-border);">
                 <div class="modal-header" style="border-bottom-color: var(--adr-border);">
                     <h5 class="modal-title">
                         <i class="bi bi-collection-play text-info me-2"></i>This disc holds episodes
@@ -275,11 +287,14 @@
                         you turn it off.
                     </div>
 
-                    <div class="mb-3">
+                    <div class="series-pane-find mb-3">
                         <label class="form-label">Show</label>
                         <div class="input-group">
-                            <input type="text" class="form-control" id="seriesShowName"
-                                   oninput="previewSeries()" placeholder="The Wire">
+                            <input type="search" class="form-control" id="seriesShowName"
+                                   enterkeyhint="search" autocomplete="off" autocorrect="off"
+                                   oninput="onSeriesShowInput()"
+                                   onkeydown="if(event.key==='Enter') searchSeriesShow()"
+                                   placeholder="The Wire">
                             <input type="number" class="form-control" id="seriesShowYear"
                                    style="max-width:7rem" placeholder="Year" oninput="previewSeries()">
                             <button class="btn btn-outline-secondary" type="button" onclick="searchSeriesShow()">
@@ -293,26 +308,42 @@
                         <div id="seriesShowResults" class="mt-2"></div>
                     </div>
 
-                    <div class="row">
-                        <div class="col-6 mb-3">
-                            <label class="form-label">Season</label>
-                            <input type="number" class="form-control" id="seriesSeason"
-                                   min="0" value="1" oninput="previewSeries()">
-                            <div class="form-text">0 is Plex's convention for specials.</div>
+                    <div class="series-pane-confirm">
+                        <!-- Which show the numbers below are about. On the
+                             phone the search step is gone by the time these are
+                             filled in, so without this the sheet asks for a
+                             season with nothing on it saying a season of what. -->
+                        <div id="seriesChosenShow" class="alert alert-success d-flex justify-content-between align-items-center py-2 d-none">
+                            <span>
+                                <i class="bi bi-check-circle me-1"></i>Using
+                                <strong id="seriesChosenName"></strong>
+                            </span>
+                            <button type="button" class="btn btn-sm btn-outline-light" onclick="setSeriesStep('find')">
+                                Change
+                            </button>
                         </div>
-                        <div class="col-6 mb-3">
-                            <label class="form-label">First episode on this disc</label>
-                            <input type="number" class="form-control" id="seriesFirstEpisode"
-                                   min="1" value="1" oninput="previewSeries()">
-                            <div class="form-text">Disc 2 of a season usually starts at 4 or 5.</div>
-                        </div>
-                    </div>
 
-                    <div id="seriesPreview" class="p-2 rounded" style="background: var(--adr-bg-alt, #0d1117);"></div>
+                        <div class="row">
+                            <div class="col-6 mb-3">
+                                <label class="form-label">Season</label>
+                                <input type="number" class="form-control" id="seriesSeason"
+                                       min="0" value="1" oninput="previewSeries()">
+                                <div class="form-text">0 is Plex's convention for specials.</div>
+                            </div>
+                            <div class="col-6 mb-3">
+                                <label class="form-label">First episode on this disc</label>
+                                <input type="number" class="form-control" id="seriesFirstEpisode"
+                                       min="1" value="1" oninput="previewSeries()">
+                                <div class="form-text">Disc 2 of a season usually starts at 4 or 5.</div>
+                            </div>
+                        </div>
+
+                        <div id="seriesPreview" class="p-2 rounded" style="background: var(--adr-bg-alt, #0d1117);"></div>
+                    </div>
                 </div>
                 <div class="modal-footer" style="border-top-color: var(--adr-border);">
                     <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Cancel</button>
-                    <button type="button" class="btn btn-primary btn-sm" onclick="saveSeries()">
+                    <button type="button" class="btn btn-primary btn-sm series-confirm-only" onclick="saveSeries()">
                         <i class="bi bi-check2 me-1"></i>Use these names
                     </button>
                 </div>
@@ -343,8 +374,10 @@
     </div>
 
     <!-- Re-match TMDb Modal -->
-    <div class="modal fade" id="rematchModal" tabindex="-1" aria-labelledby="rematchModalLabel" aria-hidden="true">
-        <div class="modal-dialog modal-lg modal-dialog-scrollable">
+    <!-- One step, and the same reasoning as the series sheet: full screen on a
+         phone, live results as you type, and a focus that survives opening. -->
+    <div class="modal fade" id="rematchModal" tabindex="-1" aria-labelledby="rematchModalLabel" aria-hidden="true" data-bs-focus="false">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable modal-fullscreen-md-down">
             <div class="modal-content" style="background-color: var(--adr-card); color: var(--adr-text); border: 1px solid var(--adr-border);">
                 <div class="modal-header" style="border-bottom-color: var(--adr-border);">
                     <h5 class="modal-title" id="rematchModalLabel">
@@ -355,8 +388,10 @@
                 <div class="modal-body">
                     <input type="hidden" id="rematchJobId">
                     <div class="input-group mb-3">
-                        <input type="text" id="rematchQuery" class="form-control" placeholder="Search movie title..."
+                        <input type="search" id="rematchQuery" class="form-control" placeholder="Search movie title..."
+                            enterkeyhint="search" autocomplete="off" autocorrect="off"
                             style="background: #0d1117; color: var(--adr-text); border-color: var(--adr-border);"
+                            oninput="onRematchInput()"
                             onkeydown="if(event.key==='Enter') searchTmdb()">
                         <input type="number" id="rematchYear" class="form-control" placeholder="Year" style="max-width:90px; background: #0d1117; color: var(--adr-text); border-color: var(--adr-border);">
                         <button class="btn btn-info" onclick="searchTmdb()"><i class="bi bi-search"></i></button>

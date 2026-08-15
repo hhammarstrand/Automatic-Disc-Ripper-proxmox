@@ -602,6 +602,147 @@ class TestARefreshDoesNotInterruptTyping:
         assert "location.reload()" in source
 
 
+class TestTheSearchSheets:
+    """Naming a TV disc from the phone was the thing that actually hurt.
+
+    Both TMDb dialogs put everything on one screen — the field, the results,
+    the season, the first episode, the filename preview — and the keyboard
+    covers the bottom half of that the moment the field is touched. So the
+    results being typed towards were the part that could not be seen, and
+    searching at all took a separate deliberate press of a button.
+    """
+
+    MODALS = ["seriesModal", "rematchModal"]
+    SOURCE = Path("web/static/js/app.js")
+
+    @staticmethod
+    def _modal(name: str) -> str:
+        text = Path("web/templates/base.html").read_text()
+        start = text.index(f'id="{name}"')
+        return text[start - 200:start + 400]
+
+    @pytest.mark.parametrize("name", MODALS)
+    def test_it_takes_the_whole_screen_on_a_phone(self, name):
+        """A 390px-wide dialog with 32px of dimmed page either side of it,
+        holding a form and a keyboard."""
+        assert "modal-fullscreen-md-down" in self._modal(name)
+
+    @pytest.mark.parametrize("name", MODALS)
+    def test_bootstrap_does_not_steal_the_focus_back(self, name):
+        """The focus trap pulls focus to the dialog on shown, one frame after
+        the focus() that raises the keyboard — so without this the sheet opens
+        with no keyboard and needs a second tap."""
+        assert 'data-bs-focus="false"' in self._modal(name)
+
+    @pytest.mark.parametrize("field", ["seriesShowName", "rematchQuery"])
+    def test_the_field_says_it_is_a_search_field(self, field):
+        """type=search gets the clear button; enterkeyhint puts Search on the
+        keyboard's return key instead of Go, which is what the key does."""
+        text = Path("web/templates/base.html").read_text()
+        tag = next(t for t in re.findall(r"<input\b[^>]*>", text, re.S)
+                   if f'id="{field}"' in t)
+        assert 'type="search"' in tag
+        assert 'enterkeyhint="search"' in tag
+
+    def test_typing_searches(self):
+        text = Path("web/templates/base.html").read_text()
+        assert 'oninput="onSeriesShowInput()"' in text
+        assert 'oninput="onRematchInput()"' in text
+        source = self.SOURCE.read_text()
+        assert "function debounce(" in source
+        assert "function onSeriesShowInput(" in source
+        assert "function onRematchInput(" in source
+
+    def test_the_button_and_the_enter_key_still_search_at_once(self):
+        """A field that only answers to a pause cannot be told "yes, that one,
+        now", and a search that found nothing has to be repeatable without
+        editing the text first."""
+        text = Path("web/templates/base.html").read_text()
+        assert 'onclick="searchSeriesShow()"' in text
+        assert text.count("if(event.key==='Enter') search") == 2
+
+    @pytest.mark.parametrize("name,counter", [
+        ("searchSeriesShow", "_seriesSearchSeq"),
+        ("searchTmdb", "_rematchSearchSeq"),
+    ])
+    def test_a_slow_answer_cannot_paint_over_a_newer_one(self, name, counter):
+        """Typing puts several requests in flight and they do not come back in
+        order: "The W" answered after "The Wire" would paint the wider list
+        over the better one. The same guard the season preview already has."""
+        source = self.SOURCE.read_text()
+        assert f"let {counter} = 0" in source
+        start = source.index(f"function {name}(")
+        end = source.find("\nfunction ", start + 1)
+        body = source[start:end if end != -1 else len(source)]
+        assert re.search(rf"const seq = \+\+{counter}", body), (
+            f"{name} does not claim a sequence number before its fetch"
+        )
+        assert body.count(f"seq !== {counter}") >= 2, (
+            f"{name} does not drop a stale answer in both its handlers"
+        )
+
+    def test_one_letter_does_not_get_told_off(self):
+        """The warning is for someone who pressed the button with an empty
+        field, not for someone in the middle of typing a word."""
+        source = self.SOURCE.read_text()
+        start = source.index("function searchSeriesShow(")
+        body = source[start:start + 900]
+        assert "fromTyping" in body
+        assert re.search(r"if \(fromTyping\).*return", body)
+
+    def test_the_phone_gets_one_question_at_a_time(self):
+        """Both panes exist in one piece of markup; which is shown is a data
+        attribute, and the rules that read it live inside the phone's media
+        query — so the desktop dialog is exactly what it was."""
+        text = Path("web/templates/base.html").read_text()
+        assert 'data-step="find"' in text
+        assert "series-pane-find" in text
+        assert "series-pane-confirm" in text
+        assert "series-confirm-only" in text
+
+        css = Path("web/static/css/style.css").read_text()
+        mobile = css[css.index("max-width: 767.98px"):]
+        assert '[data-step="find"] .series-pane-confirm' in mobile
+        assert '[data-step="confirm"] .series-pane-find' in mobile
+        assert '[data-step="find"] .series-confirm-only' in mobile
+
+    def test_the_step_survives_the_keyboard(self):
+        """100vh under an iOS keyboard reports the height the screen would
+        have without it, so the bottom of the sheet sits behind the keys. dvh
+        tracks; vh stays first as the fallback for anything that predates it."""
+        css = Path("web/static/css/style.css").read_text()
+        mobile = css[css.index("max-width: 767.98px"):]
+        block = mobile[mobile.index(".modal-fullscreen-md-down .modal-content"):][:200]
+        assert block.index("100vh") < block.index("100dvh")
+
+    def test_the_keyboard_comes_up_with_the_sheet(self):
+        """iOS raises the keyboard for a focus() inside the tap that opened
+        the dialog and refuses one that arrives later, so this cannot wait for
+        shown.bs.modal."""
+        source = self.SOURCE.read_text()
+        for name in ("editSeries", "startSeriesMode"):
+            start = source.index(f"function {name}(")
+            body = source[start:source.index(".show();", start) + 400]
+            assert "setSeriesStep('find')" in body, f"{name} opens on no step"
+        assert "focus({preventScroll: true})" in source
+
+    def test_choosing_a_show_moves_on(self):
+        source = self.SOURCE.read_text()
+        start = source.index("function pickSeriesShow(")
+        body = source[start:start + 800]
+        assert "setSeriesStep('confirm')" in body
+
+    def test_the_choice_can_be_changed_without_starting_over(self):
+        text = Path("web/templates/base.html").read_text()
+        assert "onclick=\"setSeriesStep('find')\"" in text
+        assert 'id="seriesChosenShow"' in text
+
+    def test_a_result_is_a_full_width_row_on_a_phone(self):
+        """Two columns at 390px is a poster beside three lines of 11px text."""
+        source = self.SOURCE.read_text()
+        assert "'col-12 col-sm-6 col-md-4'" in source
+
+
 class TestTheBottomNav:
     """Six items behind a hamburger, at the top of a screen held in one hand.
 

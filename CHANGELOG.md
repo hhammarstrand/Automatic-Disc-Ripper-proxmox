@@ -1,5 +1,53 @@
 # Changelog
 
+## 1.41.0
+
+**Naming a TV disc from the phone was the thing that actually hurt, and it is
+the thing this changes.** The dialog asked five questions on one screen — the
+show, the year, which of TMDb's results is the right one, the season, the
+first episode — and then the keyboard appeared and covered the bottom half of
+it. The results you were typing towards were the half that went under the
+keys. Searching at all needed a separate deliberate press of a button, after
+typing, with the results landing somewhere you could not see.
+
+On a phone it is two steps now. Find the show: hints, one full-width field,
+and the results, and nothing else on screen. Tap a result and the sheet moves
+to the numbers — "Using **The Wire** (2002)", with Change next to it, then the
+season, the first episode and the filename preview. Full screen rather than a
+dialog with 32 pixels of dimmed page either side, and 100dvh rather than
+100vh, because 100vh under an iOS keyboard reports the height the screen would
+have if the keyboard were not there and puts the bottom of the sheet behind
+the keys.
+
+**Typing searches.** 400ms after the typing stops, in both dialogs; the button
+and the Enter key still search immediately, because a field that only answers
+to a pause cannot be told "yes, that one, now" and a search that found nothing
+has to be repeatable without editing the text first. Typing one letter is not
+told off for being one letter — that warning belongs to someone who pressed
+the button with an empty field, not to someone mid-word.
+
+Live search means several requests in flight at once, and they do not promise
+to come back in order: "The W" answered after "The Wire" would paint the wider
+list over the better one. Each search claims a sequence number before it asks
+and drops its own answer if a newer one has been asked since — the same guard
+the season preview has carried since 1.33, for the same reason.
+
+**And the focus.** iOS raises the keyboard for a `focus()` that happens inside
+the tap that opened the dialog and refuses one that arrives a frame later, so
+the focus happens synchronously and `data-bs-focus="false"` stops Bootstrap's
+focus trap from taking it back. Without the pair you get a search sheet with
+no keyboard and a second tap needed to fix it. The re-match field is selected
+as well as focused, because it is prefilled with the title that matched wrongly
+and the first keystroke should replace it.
+
+When an earlier disc of the same box set already answered "which show", the
+sheet opens on the numbers instead of asking the phone to search for it again.
+
+The desktop dialog is unchanged. Both halves are one piece of markup and the
+step rules live inside the phone's media query, so above 768px everything is
+on screen at once exactly as it was — with live search, which is an
+improvement there too.
+
 ## 1.40.0
 
 **Navigation on a phone is a bar at the bottom, not a hamburger at the top.**
