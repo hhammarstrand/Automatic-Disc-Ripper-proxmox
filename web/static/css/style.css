@@ -329,3 +329,107 @@ a.text-info:hover {
     white-space: pre-wrap;
     word-break: break-all;
 }
+
+/* ------------------------------------------------------------------ */
+/* Phones                                                              */
+/*                                                                     */
+/* The dashboard's main use is a phone across the room from the drive, */
+/* and the reported failure was the page panning sideways on an        */
+/* iPhone. Two answers, in order: every wide element is contained or   */
+/* redesigned below, and the clip here is the backstop so one          */
+/* regressed element can never make the whole app pan again. clip      */
+/* rather than hidden: hidden turns the body into a scroll container,  */
+/* which quietly breaks position:sticky descendants.                   */
+/* ------------------------------------------------------------------ */
+html, body {
+    overflow-x: clip;
+}
+
+@media (max-width: 767.98px) {
+    /* Fingers, not pointers. Apple's floor is 44px; the table rows'
+       icon buttons were 26px, and the difference is mis-taps on the
+       delete button beside the retry button. */
+    .btn-sm {
+        min-height: 42px;
+        min-width: 42px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .form-check-input {
+        width: 1.35em;
+        height: 1.35em;
+    }
+    .navbar .nav-link {
+        padding-top: 0.7rem;
+        padding-bottom: 0.7rem;
+    }
+
+    /* The history table becomes cards.
+       Fourteen columns in a sideways-scrolling strip is unusable with a
+       thumb: the row's identity sits off-screen from its buttons, and
+       the strip pans when the page should. The desktop-only columns
+       are already display:none (Bootstrap's d-md-table-cell), so what
+       is left per job is title, status, completed, total, path and the
+       buttons — which stack. */
+    #historyTable,
+    #historyTable tbody {
+        display: block;
+    }
+    #historyTable thead {
+        display: none;
+    }
+    #historyTable tr {
+        position: relative;
+        display: block;
+        margin-bottom: 0.75rem;
+        padding: 0.75rem;
+        border: 1px solid var(--adr-border);
+        border-radius: 0.5rem;
+        background: var(--adr-card);
+    }
+    #historyTable td {
+        display: flex;
+        align-items: baseline;
+        gap: 0.5rem;
+        padding: 0.2rem 0;
+        border: 0;
+        /* Bootstrap paints stripes per cell with an inset box-shadow;
+           on cards it renders as random banding inside each card. */
+        box-shadow: none;
+        background: transparent;
+    }
+    #historyTable td[data-label]::before {
+        content: attr(data-label);
+        flex: 0 0 6.5rem;
+        color: var(--adr-text-muted);
+        font-size: 0.8rem;
+    }
+    /* The checkbox floats to the card's corner so the title gets the
+       full width; the title is the card's heading. */
+    #historyTable td:first-child {
+        position: absolute;
+        top: 0.6rem;
+        right: 0.6rem;
+        width: auto;
+        padding: 0;
+    }
+    #historyTable .job-title-cell {
+        display: block;
+        padding-right: 2.5rem;
+        font-weight: 600;
+    }
+    #historyTable .job-path-cell {
+        flex-wrap: wrap;
+        word-break: break-all;
+    }
+    #historyTable .job-actions-cell {
+        padding-top: 0.6rem;
+    }
+    /* The empty state has no columns to be a card of. */
+    #historyTable td[colspan] {
+        position: static;
+        display: block;
+        text-align: center;
+    }
+}

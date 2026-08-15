@@ -33,7 +33,7 @@
     </div>
 </div>
 
-<div id="bulkBar" class="d-none align-items-center gap-2 mb-3 p-3 rounded border">
+<div id="bulkBar" class="d-none align-items-center flex-wrap gap-2 mb-3 p-3 rounded border">
     <span id="bulkCount" class="fw-semibold"></span>
     <button class="btn btn-outline-danger btn-sm" onclick="deleteSelected(false)">
         <i class="bi bi-trash3 me-1"></i>Remove from history
@@ -54,17 +54,17 @@
                     <input class="form-check-input" type="checkbox" id="selectAll"
                            onclick="toggleAll(this)" title="Select every finished job on this page">
                 </th>
-                <th>#</th>
+                <th class="d-none d-md-table-cell">#</th>
                 <th>Title</th>
-                <th>Drive</th>
+                <th class="d-none d-md-table-cell">Drive</th>
                 <th>Status</th>
-                <th>Started</th>
+                <th class="d-none d-md-table-cell">Started</th>
                 <th>Completed</th>
-                <th>Tracks</th>
-                <th>Rip Time</th>
-                <th>Encode Time</th>
+                <th class="d-none d-md-table-cell">Tracks</th>
+                <th class="d-none d-md-table-cell">Rip Time</th>
+                <th class="d-none d-md-table-cell">Encode Time</th>
                 <th>Total</th>
-                <th>FPS</th>
+                <th class="d-none d-md-table-cell">FPS</th>
                 <th>Path</th>
                 <th></th>
             </tr>
@@ -78,8 +78,8 @@
                            value="{{ job.id }}" onchange="selectionChanged()">
                     {% endif %}
                 </td>
-                <td>{{ job.id }}</td>
-                <td>
+                <td class="d-none d-md-table-cell">{{ job.id }}</td>
+                <td class="job-title-cell">
                     {% if job.poster_url %}
                     <img src="{{ job.poster_url }}" alt="" style="height:30px;" class="me-2 rounded">
                     {% endif %}
@@ -124,8 +124,8 @@
                     </div>
                     {% endif %}
                 </td>
-                <td>{{ job.drive }}</td>
-                <td>
+                <td class="d-none d-md-table-cell">{{ job.drive }}</td>
+                <td data-label="Status">
                     {% if job.status and job.status.value == 'error' and job.error_message %}
                     <span class="badge bg-danger" role="button" style="cursor:pointer;"
                         title="{{ job.error_message[:120] }}"
@@ -144,22 +144,23 @@
                     </span>
                     {% endif %}
                 </td>
-                <td class="small">
+                <td class="small d-none d-md-table-cell">
                     {% if job.started_at %}
                     <time data-iso="{{ job.started_at | isotime }}">{{ job.started_at.strftime('%Y-%m-%d %H:%M') }}</time>
                     {% else %}–{% endif %}
                 </td>
-                <td class="small">
+                <td class="small" data-label="Completed">
                     {% if job.completed_at %}
                     <time data-iso="{{ job.completed_at | isotime }}">{{ job.completed_at.strftime('%Y-%m-%d %H:%M') }}</time>
                     {% else %}–{% endif %}
                 </td>
-                <td>{{ job.tracks | length }}</td>
-                <td class="small">{{ job.rip_duration | duration }}</td>
-                <td class="small">{{ job.encode_duration | duration }}</td>
-                <td class="small">{{ job.total_duration | duration }}</td>
-                <td class="small">{{ '%.1f' | format(job.avg_fps) if job.avg_fps else '–' }}</td>
-                <td>
+                <td class="d-none d-md-table-cell">{{ job.tracks | length }}</td>
+                <td class="small d-none d-md-table-cell">{{ job.rip_duration | duration }}</td>
+                <td class="small d-none d-md-table-cell">{{ job.encode_duration | duration }}</td>
+                <td class="small" data-label="Total">{{ job.total_duration | duration }}</td>
+                <td class="small d-none d-md-table-cell">{{ '%.1f' | format(job.avg_fps) if job.avg_fps else '–' }}</td>
+                <td data-label="Path"
+                    class="job-path-cell{% if not job.plex_path and not job.output_path %} d-none d-md-table-cell{% endif %}">
                     {% if job.plex_path %}
                     <span class="badge bg-success me-1"><i class="bi bi-collection-play"></i> Plex</span>
                     <span class="text-break small text-secondary" title="{{ job.plex_path }}">{{ job.plex_path }}</span>
@@ -173,8 +174,8 @@
                     </button>
                     {% endif %}
                 </td>
-                <td>
-                    <div class="d-flex gap-1">
+                <td class="job-actions-cell">
+                    <div class="d-flex gap-1 flex-wrap">
                         {% if job.status and job.status.value == 'done' and job.output_path %}
                         <button class="btn btn-outline-success btn-sm" onclick="openPlayer({{ job.id }})" title="Play">
                             <i class="bi bi-play-circle"></i>

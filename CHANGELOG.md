@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.22.0
+
+**The app now fits a phone, verified in a real browser rather than by eye.**
+Every page was rendered in headless Chromium at iPhone widths (390px and
+320px) and measured: the layout viewport stays at device width and nothing
+escapes it. Before this, the history page forced the viewport to 1260px —
+which on an iPhone is exactly the sideways panning that was reported.
+
+The history table is the big change. Fourteen columns in a sideways-scrolling
+strip is unusable with a thumb, so below tablet width it becomes **cards**:
+title as the heading, status, completed time, total time and path as labelled
+rows, the buttons in a row at the bottom, the select-checkbox in the corner.
+The low-value columns — drive, FPS, per-phase times — are desktop-only.
+Nothing changes on a desktop.
+
+With it: tap targets grow to Apple's 44px floor on phones (the table's icon
+buttons were 26px, and the delete button sits next to retry), the bulk-action
+bar wraps, the dashboard's recent-jobs table is contained, and
+`overflow-x: clip` on the root is the backstop so one regressed element can
+never make the whole app pan again.
+
+**And the UI no longer needs the internet.** Bootstrap was served from a CDN,
+so the dashboard of a LAN appliance rendered as bare unstyled HTML at exactly
+the moment the internet was down — while the ripper underneath kept working.
+The assets are vendored and served from the container.
+
 ## 1.21.2
 
 **Two films ripped, and then every disc after them was refused.**

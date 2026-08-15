@@ -418,3 +418,80 @@ class TestTojsonNeedsASingleQuotedAttribute:
                 f"{path}: a copy button bypasses the secure-context guard"
             )
             assert "copyToClipboard(" in code
+
+
+class TestThePageFitsAPhone:
+    """The reported failure: the app pans sideways on an iPhone and is hard
+    to steer with a thumb.
+
+    Verified for real with headless Chromium at 390px and 320px — layout
+    viewport stayed at device width and nothing escaped it. These pin the
+    structural half of that result, the part a template edit can regress:
+    every wide table is either contained or carded, and the assets the layout
+    depends on are served locally.
+    """
+
+    def test_the_viewport_is_declared(self):
+        text = Path("web/templates/base.html").read_text()
+        assert 'name="viewport"' in text
+        assert "width=device-width" in text
+
+    def test_every_table_is_contained_or_carded(self):
+        """A bare <table> outside .table-responsive forces the layout viewport
+        wide, which is exactly the sideways pan. The history table is exempt
+        by name: below md it is display:block cards, and above md it sits in
+        its own responsive wrapper."""
+        for path in Path("web/templates").glob("*.html"):
+            text = path.read_text()
+            for i, line in enumerate(text.splitlines(), 1):
+                if "<table" not in line:
+                    continue
+                before = text[:text.index(line)]
+                assert "table-responsive" in before[-600:] or "historyTable" in line, (
+                    f"{path.name}:{i}: a table outside .table-responsive"
+                )
+
+    def test_the_history_table_cards_itself_on_phones(self):
+        css = Path("web/static/css/style.css").read_text()
+        assert "#historyTable tr" in css
+        assert "attr(data-label)" in css
+        text = Path("web/templates/history.html").read_text()
+        assert 'data-label="Status"' in text
+        assert 'data-label="Path"' in text
+
+    def test_the_desktop_only_columns_are_marked(self):
+        """Fourteen columns cannot card; the low-value ones are desktop-only.
+        Bootstrap's d-none wins below md with !important, which is the lever
+        the card transform stands on."""
+        text = Path("web/templates/history.html").read_text()
+        assert text.count("d-none d-md-table-cell") >= 8
+
+    def test_sideways_panning_has_a_backstop(self):
+        """clip, not hidden: hidden makes body a scroll container and quietly
+        breaks position:sticky inside it."""
+        css = Path("web/static/css/style.css").read_text()
+        assert "overflow-x: clip" in css
+
+    def test_tap_targets_grow_on_phones(self):
+        css = Path("web/static/css/style.css").read_text()
+        mobile = css[css.index("max-width: 767.98px"):]
+        assert "min-height" in mobile and "min-width" in mobile
+
+    def test_the_ui_does_not_need_the_internet(self):
+        """The ripper keeps working when the internet is down; a dashboard
+        that renders as bare HTML at exactly that moment reads as the whole
+        appliance being broken. Every asset is served from /static."""
+        text = Path("web/templates/base.html").read_text()
+        assert "cdn.jsdelivr.net" not in text
+        for line in text.splitlines():
+            if "<link" in line or "<script src" in line:
+                assert "https://" not in line, f"an external asset: {line.strip()}"
+        for asset in ("web/static/vendor/bootstrap.min.css",
+                      "web/static/vendor/bootstrap.bundle.min.js",
+                      "web/static/vendor/bootstrap-icons.min.css",
+                      "web/static/vendor/fonts/bootstrap-icons.woff2"):
+            assert Path(asset).stat().st_size > 10_000, f"{asset} missing or truncated"
+
+    def test_the_bulk_bar_wraps(self):
+        """Five controls in one non-wrapping row is wider than any phone."""
+        assert "flex-wrap" in Path("web/templates/history.html").read_text()
