@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.37.0
+
+**The eject now says what happened.** Five call sites ejected the disc and threw
+the answer away, and the job log — the one page anyone opens when the tray does
+not move — never mentioned the eject at all. So a drive that refused produced
+exactly the same silence as one that worked.
+
+It is also checked rather than assumed. A successful call only means the kernel
+accepted the command; on a drive still held open elsewhere, or one that will not
+motorise, it is accepted and the disc does not move. The tray is asked
+afterwards — with a couple of seconds' grace, because asking immediately reports
+a disc still present on a drive that is opening perfectly well — and the three
+outcomes now read differently in the job log:
+
+* `Ejected the disc from Internal.`
+* `Could not eject Internal — the drive accepted the command but the disc is
+  still in it. Encoding carries on; take the disc out by hand.`
+* `Leaving the disc in Internal: auto-eject is off for this drive under
+  Settings.`
+
+That last one matters as much as the others: silence about a setting reads as a
+fault.
+
 ## 1.36.0
 
 **Two discs of one box set are now told apart.** Every disc rendered as the

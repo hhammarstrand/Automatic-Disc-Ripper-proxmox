@@ -222,6 +222,65 @@ def _name_the_show(job, parsed_show: str, config) -> str:
     return ""
 
 
+def _eject_and_report(config, drive: str, job_log=None) -> bool:
+    """Eject, check the tray actually opened, and say so in the job's own log.
+
+    Three things were missing and they compound. The return value was thrown
+    away at every call site, so a refusal changed nothing and stopped nothing.
+    The job log never mentioned the eject at all, so the one page someone
+    looks at when the tray stays shut said nothing about it. And a successful
+    ioctl only means the kernel accepted the command — on a drive that is
+    still open elsewhere, or a slot loader that will not motorise, the call
+    returns cleanly and the disc stays exactly where it was.
+
+    So the drive is asked afterwards. A tray that reports a disc still ready,
+    a couple of seconds later, did not open whatever the call said.
+    """
+    from adr.disc import media_status
+
+    if not config.should_eject(drive):
+        logger.info("Auto-eject disabled for drive %s — skipping", drive)
+        if job_log:
+            job_log.append(
+                "rip",
+                f"Leaving the disc in {config.drive_display(drive)}: auto-eject "
+                "is off for this drive under Settings.",
+            )
+        return False
+
+    logger.info("Ejecting drive %s", drive)
+    accepted = eject_drive(drive)
+    shown = config.drive_display(drive)
+
+    # The tray needs a moment, and asking too early reports the disc still
+    # present on a drive that is opening perfectly well.
+    opened = False
+    for _ in range(6):
+        time.sleep(0.5)
+        if media_status(drive)["state"] in ("tray_open", "empty", "missing"):
+            opened = True
+            break
+
+    if opened:
+        if job_log:
+            job_log.append("rip", f"Ejected the disc from {shown}.")
+        return True
+
+    detail = (
+        "the drive refused the command" if not accepted
+        else "the drive accepted the command but the disc is still in it"
+    )
+    logger.warning("Eject of %s did not open the tray: %s", drive, detail)
+    if job_log:
+        job_log.append(
+            "rip",
+            f"Could not eject {shown} — {detail}. Encoding carries on; take "
+            "the disc out by hand. A drive still held open by something else "
+            "is the usual cause.",
+        )
+    return False
+
+
 def _cancelled(session, job) -> bool:
     """Whether someone has cancelled *job* since this thread last looked.
 
@@ -1410,8 +1469,9 @@ class DrivePipeline:
                     job.completed_at = utcnow()
                     session.commit()
                     logger.info("Job %s skipped as a duplicate", job.id)
-                    if self._config.should_eject(self.drive):
-                        eject_drive(self.drive)
+                    _eject_and_report(
+                        self._config, self.drive, JobLog(self._config, job.id),
+                    )
                     return
 
             # 3. Prepare rip
@@ -1728,11 +1788,7 @@ class DrivePipeline:
                 return
 
             # 4. Eject disc (so user can insert next)
-            if self._config.should_eject(self.drive):
-                logger.info("Ejecting drive %s", self.drive)
-                eject_drive(self.drive)
-            else:
-                logger.info("Auto-eject disabled for drive %s — skipping", self.drive)
+            _eject_and_report(self._config, self.drive, job_log)
 
             # 5. Create track records and queue encoding.
             # Naming lives in adr.naming: with television in the picture the
@@ -2046,8 +2102,7 @@ class DrivePipeline:
         session.commit()
         logger.info("Job %s: %s", job.id, message)
         JobLog(self._config, job.id).append("detect", message)
-        if self._config.should_eject(self.drive):
-            eject_drive(self.drive)
+        _eject_and_report(self._config, self.drive, JobLog(self._config, job.id))
 
     def _run_audio_cd(self, job, session, disc) -> None:
         """Rip an audio CD: identify at MusicBrainz, extract, encode, tag."""
@@ -2168,8 +2223,7 @@ class DrivePipeline:
         log.append("done", f"{len(result.files)} track(s) written to {result.output_dir}")
         logger.info("Job %s: audio CD finished — %d track(s)", job.id, len(result.files))
 
-        if self._config.should_eject(self.drive):
-            eject_drive(self.drive)
+        _eject_and_report(self._config, self.drive, log)
         Notifier(self._config).job_done(job, str(result.output_dir or ""))
 
     def _run_data_disc(self, job, session, disc) -> None:
@@ -2283,8 +2337,7 @@ class DrivePipeline:
         log.append("done", f"Image written to {result.path} ({result.size_bytes / BYTES_PER_MB:.0f} MB)")
         logger.info("Job %s: disc image finished — %s", job.id, result.path)
 
-        if self._config.should_eject(self.drive):
-            eject_drive(self.drive)
+        _eject_and_report(self._config, self.drive, log)
         Notifier(self._config).job_done(job, str(result.path or ""))
 
 
