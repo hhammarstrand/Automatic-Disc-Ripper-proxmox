@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.25.2
+
+**1.25.0 broke a button in exactly the way it fixed one.** The TV-series-mode
+banner is an `alert-warning` holding a `.btn-outline-dark`, and Bootstrap draws
+that near-black — correct against the pale yellow it used to sit on, and
+**1.00:1** against the dark ground that replaced it. "Fix episode number" is on
+every page in the application while series mode is on, and it could not be seen
+at all.
+
+The contrast sweep did not catch it because the sweep only measures what the
+seeded data renders, and no default render turns series mode on. So the states
+were enumerated separately — every branch of every template, including the ones
+only JavaScript produces — and the banner was rendered and measured like the
+rest. `btn-outline-dark`, `btn-dark`, `btn-secondary` and Bootstrap's
+`*-border-subtle` tokens are now restated too.
+
+`tools/contrast_audit.py` is the browser pass, now in the repository rather
+than improvised: it serves the real application, walks every element that draws
+text, resolves the background actually behind it, and reports every pair below
+WCAG AA. The test suite keeps the cheap half and gained a check that a button
+class is given a colour in its *resting* state — the first version of that test
+searched for the class name, which a `:hover` rule satisfied, and it watched
+this very regression go past.
+
 ## 1.25.1
 
 **The diagnostics bundle now says what audio the ripped discs actually

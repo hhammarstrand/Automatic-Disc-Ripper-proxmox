@@ -611,6 +611,23 @@ encoders because HandBrake could not reach the GPU, got English again with
 nothing saying why. A language typed into Settings still wins, because someone
 typed it; the job log names which of the two the answer came from.
 
+**Contrast is measured, not judged.** `tests/test_contrast.py` checks the
+colours the stylesheet declares; `tools/contrast_audit.py` serves the real
+application to a headless browser, walks every element that draws text, finds
+the background actually behind it, and reports every pair below WCAG AA. Both
+halves are needed, because the failures that matter are products of the
+cascade: a `.btn-outline-light` themed near-white for the dark ground it
+usually sits on, dropped inside an `.alert-info` Bootstrap still draws pale
+blue. Two defensible rules, 1.01:1 together, and nothing in either file says
+so. The browser pass found 160 such pairs the first time it ran.
+
+Its blind spot is state — it sees only what the seeded data renders — and that
+is not academic: the regression that put a near-black `.btn-outline-dark` on a
+newly-dark `.alert-warning` was on every page in the application at 1.00:1,
+and no default render showed it, because the banner only exists while TV
+series mode is switched on. When a state changes colours, it belongs in
+`seed()`.
+
 **A disc that cannot answer in that language still gets its audio.** HandBrake
 has no fallback of its own: `hb_preset_job_add_audio` reaches for the wildcard
 only when the language list is *empty*, never when a non-empty list matched

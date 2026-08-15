@@ -37,6 +37,23 @@ def contrast(foreground: str, background: str) -> float:
     return (lighter + 0.05) / (darker + 0.05)
 
 
+def _sets_colour(selector: str) -> bool:
+    """Whether the stylesheet gives *selector* a ``color`` in its resting state.
+
+    Resting state specifically: a ``:hover`` or ``:focus`` rule mentioning the
+    same class does not make the button readable before anyone touches it, and
+    a test that merely searched for the class name was satisfied by one.
+    """
+    text = re.sub(r"/\*.*?\*/", " ", CSS.read_text(), flags=re.S)
+    for block in re.finditer(r"([^{}]+)\{([^{}]*)\}", text):
+        selectors = [s.strip() for s in block.group(1).split(",")]
+        if selector not in selectors:
+            continue
+        if re.search(r"(^|[;\s])color\s*:", block.group(2)):
+            return True
+    return False
+
+
 @pytest.fixture(scope="module")
 def palette() -> dict:
     """The theme's colours, as the stylesheet defines them."""
@@ -140,6 +157,64 @@ class TestAlerts:
         block = text[text.index("/* ---- Alerts ----"):]
         block = block[:block.index("/* ---- Progress")]
         assert "border-left-color" in block
+
+
+class TestButtonsOnAlerts:
+    """Restating the alerts broke a button, in exactly the way the alerts had
+    been broken.
+
+    The series-mode banner is an ``.alert-warning`` holding a
+    ``.btn-outline-dark``, and ``.btn-outline-dark`` is Bootstrap's #212529 —
+    near-black, correct against the pale yellow it used to sit on, and
+    **1.00:1** against the dark ground that replaced it. "Fix episode number"
+    was on every page in the application and could not be seen at all.
+
+    It was found by rendering the banner in a browser, not by reading the
+    diff, because the banner only exists while series mode is switched on and
+    no default render produces it. These tests are the cheap half of that: an
+    alert ground is a place buttons get put, so every button colour has to
+    clear AA against every one of them.
+    """
+
+    GROUNDS = ["adr-info-bg", "adr-success-bg", "adr-warning-bg",
+               "adr-danger-bg", "adr-card"]
+
+    #: Bootstrap classes that are near-black or near-white by default and
+    #: therefore have to be restated to survive on a dark ground.
+    MUST_BE_RESTATED = [
+        ".btn-outline-dark", ".btn-dark", ".btn-secondary",
+        ".btn-outline-light", ".btn-outline-secondary", ".btn-outline-primary",
+    ]
+
+    @pytest.mark.parametrize("ground", GROUNDS)
+    def test_a_button_label_is_readable_on_every_alert(self, palette, ground):
+        """--adr-text is what every restated outline button resolves to."""
+        assert contrast(palette["adr-text"], palette[ground]) >= AA_TEXT
+
+    @pytest.mark.parametrize("selector", MUST_BE_RESTATED)
+    def test_the_near_black_and_near_white_buttons_are_restated(self, selector):
+        """Bootstrap picked these colours for a white page. Left alone, each
+        one is invisible somewhere in this application.
+
+        The declaration, not the name. Asking only whether the selector
+        appears anywhere in the file passes on the ``:hover`` rule alone —
+        which is how the first version of this test watched the very
+        regression it was written for go straight past it.
+        """
+        assert _sets_colour(selector), (
+            f"{selector} has no rule setting its colour, so it still carries "
+            "Bootstrap's light-theme one in its resting state"
+        )
+
+    def test_bootstraps_own_dark_button_colour_would_fail(self, palette):
+        """The number this class exists for. If this ever passes, the premise
+        is wrong and the rest of these tests are worthless."""
+        assert contrast("#212529", palette["adr-warning-bg"]) < AA_TEXT
+
+    def test_the_subtle_border_tokens_are_restated_too(self):
+        """--bs-danger-border-subtle is #f1aeb5, a pale pink hairline on a
+        dark alert. Not text, so no contrast sweep would ever mention it."""
+        assert ".border-danger-subtle" in CSS.read_text()
 
 
 class TestTheActiveTab:

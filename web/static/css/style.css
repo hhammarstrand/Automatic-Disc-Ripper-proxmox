@@ -399,6 +399,54 @@ a:not(.btn):not(.nav-link):not(.navbar-brand):not(.dropdown-item):not(.page-link
     color: var(--adr-bg) !important;
 }
 
+/* Dark buttons, on a dark page.
+ *
+ * This pair is here because restating the alerts above broke them, and broke
+ * them in exactly the way the alerts themselves had been broken. The
+ * series-mode banner is an .alert-warning holding a .btn-outline-dark, and
+ * .btn-outline-dark is #212529 — near-black text, correct against Bootstrap's
+ * pale yellow and 1.00:1 against the dark ground that replaced it. "Fix
+ * episode number" was on every page in the application and could not be seen
+ * at all.
+ *
+ * Caught by rendering the banner, not by reading the diff: the banner only
+ * exists while series mode is switched on, which no default render produces,
+ * so a sweep that measured every page still measured none of them with it.
+ *
+ * There is no light ground left here for a dark button to sit on, so both get
+ * what their light-theme counterparts already get.
+ */
+.btn-outline-dark {
+    color: var(--adr-text) !important;
+    border-color: var(--adr-border) !important;
+}
+.btn-outline-dark:hover,
+.btn-outline-dark:focus {
+    background-color: rgba(255, 255, 255, 0.08) !important;
+    color: #fff !important;
+}
+.btn-dark,
+.btn-secondary {
+    background-color: var(--adr-border) !important;
+    border-color: var(--adr-border) !important;
+    color: var(--adr-text) !important;
+}
+.btn-dark:hover,
+.btn-dark:focus,
+.btn-secondary:hover,
+.btn-secondary:focus {
+    background-color: #3d444d !important;
+    color: #fff !important;
+}
+
+/* Bootstrap's *-subtle border tokens are light-theme values — --bs-danger-
+   border-subtle is #f1aeb5, a pale pink hairline drawn on the dark alert
+   ground. Not text, so no contrast sweep would ever mention it. */
+.border-danger-subtle  { border-color: rgba(248, 81, 73, 0.35) !important; }
+.border-warning-subtle { border-color: rgba(210, 153, 34, 0.35) !important; }
+.border-success-subtle { border-color: rgba(63, 185, 80, 0.35) !important; }
+.border-info-subtle    { border-color: rgba(88, 166, 255, 0.35) !important; }
+
 /* ---- Spinning disc animation ---- */
 @keyframes spin {
     from { transform: rotate(0deg); }
