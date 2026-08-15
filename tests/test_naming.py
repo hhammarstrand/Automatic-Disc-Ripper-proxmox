@@ -192,3 +192,52 @@ class TestWhenNobodySaysHowLongTheTitlesAre:
 
     def test_a_mismatched_size_list_is_ignored_rather_than_trusted(self):
         assert naming.episode_mask([None] * 6, sizes=[1, 2]) == [True] * 6
+
+
+class TestThePlayAllTitleInsideTheWindow:
+    """Alfons & Milla: episodes of 9.6 minutes, so the user lowered the
+    episode floor to 8 — at which point the disc's ~48-minute play-all title
+    fits INSIDE the 8-75 window and was numbered as an episode, shifting
+    every real one after it. The length rule only catches a play-all while
+    the episodes are long enough to push it over the ceiling.
+
+    Arithmetic is what gives it away: the play-all runs about as long as the
+    rest of the disc put together, and no episode does.
+    """
+
+    EP = 574.5                     # 9.6 min, straight from the user's log
+    WINDOW = (8 * 60, 75 * 60)
+
+    def test_a_play_all_inside_the_window_is_not_an_episode(self):
+        mask = naming.episode_mask([5 * self.EP] + [self.EP] * 5, self.WINDOW)
+        assert mask == [False] + [True] * 5
+
+    def test_wherever_it_sits_on_the_disc(self):
+        mask = naming.episode_mask([self.EP] * 5 + [5 * self.EP], self.WINDOW)
+        assert mask == [True] * 5 + [False]
+
+    def test_five_equal_episodes_are_left_alone(self):
+        assert naming.episode_mask([self.EP] * 5, self.WINDOW) == [True] * 5
+
+    def test_a_two_parter_is_not_two_play_alls(self):
+        """Each half of a two-parter is exactly the sum of the others. Fewer
+        than three known titles and the rule stays out of it."""
+        assert naming.episode_mask([45 * 60] * 2, self.WINDOW) == [True] * 2
+
+    def test_at_most_one_title_is_the_whole_disc(self):
+        """Two titles that each dwarf the rest is not a shape this rule
+        understands — it must not empty the disc of episodes."""
+        mask = naming.episode_mask(
+            [100 * 60, 100 * 60, 10 * 60], (8 * 60, 120 * 60))
+        assert sum(1 for m in mask if not m) == 1
+
+    def test_the_known_trade_a_double_finale_goes_to_extras(self):
+        """20+20+40: the 40 is indistinguishable from a play-all of the other
+        two. A misfiled extra someone renames is cheaper than a phantom
+        episode renumbering the season — documented, not accidental."""
+        mask = naming.episode_mask([20 * 60, 20 * 60, 40 * 60], self.WINDOW)
+        assert mask == [True, True, False]
+
+    def test_unknown_lengths_do_not_trip_the_arithmetic(self):
+        mask = naming.episode_mask([None, self.EP, self.EP, None], self.WINDOW)
+        assert mask == [True] * 4

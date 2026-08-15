@@ -1930,9 +1930,11 @@ class DrivePipeline:
                 for index, seconds in extras:
                     job_log.append(
                         "encode",
-                        f"Title {index + 1} ({format_duration(seconds)}) is not "
-                        f"episode-length, so it goes to {EXTRAS_FOLDER}/ instead "
-                        "of taking an episode number. Settings → Series sets "
+                        f"Title {index + 1} ({format_duration(seconds) if seconds else 'length unknown'}) "
+                        f"does not look like an episode of this disc — too "
+                        "short, too long, or the whole disc in one play-all "
+                        f"title — so it goes to {EXTRAS_FOLDER}/ instead of "
+                        "taking an episode number. Settings → Series sets "
                         "what counts as an episode.",
                     )
                 if extras:

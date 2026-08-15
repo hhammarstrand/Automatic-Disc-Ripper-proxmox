@@ -252,6 +252,12 @@ def only_the_feature(files, durations, main_index: int | None):
 DEFAULT_EPISODE_WINDOW = (15 * 60, 75 * 60)
 
 
+#: How close to "the rest of the disc put together" a title has to run before
+#: it is taken for the play-all title rather than an episode. 0.85 rather
+#: than 1.0 because play-all titles routinely drop duplicated recaps and
+#: credits, so they come in a little short of the literal sum.
+PLAY_ALL_RATIO = 0.85
+
 #: How small a title has to be, against the middle of the ones that look like
 #: episodes, before its size alone is taken as proof it is not one. A 100 MB
 #: clip beside five 1.1 GB episodes is 0.09 of them; a genuinely short episode
@@ -292,6 +298,37 @@ def episode_mask(
         True if seconds is None else bool(low <= float(seconds) <= high)
         for seconds in durations
     ]
+
+    # A play-all title that fits INSIDE the window. Above it, the length
+    # rule already catches the whole-disc title — but that only works while
+    # episodes are long. Five nine-minute episodes make a 48-minute play-all,
+    # comfortably under any sane ceiling, and it was numbered as an episode,
+    # shifting every real one after it. What gives it away is arithmetic,
+    # not length: it runs about as long as the rest of the disc put
+    # together, and no episode does.
+    #
+    # At most ONE title is excluded this way — the longest that qualifies —
+    # because "the whole disc in one title" is singular by nature, and a
+    # disc where two titles each dwarf the rest is not a shape this rule
+    # understands well enough to act on twice.
+    #
+    # The knowing trade: on a three-title disc where the finale is a genuine
+    # double episode (20+20+40), the 40 looks exactly like a play-all of the
+    # other two and goes to Other/ — a misfiled extra someone renames, which
+    # is cheaper than a phantom episode renumbering the season.
+    known = [
+        (index, float(seconds)) for index, seconds in enumerate(durations)
+        if seconds is not None and mask[index]
+    ]
+    if len(known) >= 3:
+        candidates = [
+            (seconds, index) for index, seconds in known
+            if seconds >= PLAY_ALL_RATIO * (
+                sum(s for j, s in known if j != index)
+            )
+        ]
+        if candidates:
+            mask[max(candidates)[1]] = False
 
     # Size, only for the titles whose length nobody could tell us.
     #

@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.38.1
+
+**A play-all title that fits inside the episode window is no longer numbered
+as an episode.** The length rule catches the whole-disc title only while the
+episodes are long enough to push it over the ceiling. Alfons & Milla's
+episodes run 9.6 minutes, so the episode floor had to come down to 8 — at
+which point the disc's ~48-minute play-all title sat comfortably inside the
+8-75 window and became an episode, shifting every real one after it.
+
+(The combined-film half of that story was the old 15-minute floor: 9.6-minute
+episodes fell under it, nothing looked like a series, and "main feature only"
+picked the longest title — the play-all — as the film. Lowering the floor
+fixed that and exposed this.)
+
+Arithmetic is what gives the play-all away, not length: it runs about as long
+as the rest of the disc put together, and no episode does. At most one title
+is excluded this way — the whole disc in one title is singular by nature. The
+knowing trade, documented in the code and the tests: on a three-title disc
+whose finale is a genuine double episode, the finale looks exactly like a
+play-all of the other two and goes to Other/ — a misfiled extra someone
+renames, which is cheaper than a phantom episode renumbering the season.
+
 ## 1.38.0
 
 **Three things the diagnostics bundle could never answer, and had to be asked
