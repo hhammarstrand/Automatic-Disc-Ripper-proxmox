@@ -31,7 +31,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **One set of encoding settings** — spoken language, quality, height cap — told to whichever encoder runs, so switching encoder does not silently change the result.
 - **Copy diagnostics**: one button produces everything needed to diagnose the install as a single paste, with keys and tokens removed.
 - **Television discs**: box sets are recognised from title durations and named `Show (Year)/Season 02/Show (Year) - S02E05.mp4` — and a bonus clip on the disc is filed as an extra instead of taking an episode number, which would shift every episode after it.
-- **Series mode**: set the show once, then feed a whole box set — the episode number carries across discs on its own.
+- **Series mode**: set the show once, then feed a whole box set — the episode number carries across discs on its own. When the disc label names the disc (`SHOW_S01_D2`), the numbering continues from the earlier discs without being asked, and a re-rip of a disc already done is recognised as one rather than appended.
 - **Notifications** to ntfy, Gotify, Discord or a webhook when a disc finishes or fails — the pipeline is unattended, so it tells you.
 - **Plex library refresh** the moment a film lands, instead of waiting for the next scheduled scan.
 - **Per-job logs** in the UI: what MakeMKV and HandBrake actually said, without SSH.

@@ -1,5 +1,33 @@
 # Changelog
 
+## 1.27.0
+
+**A box set disc that names itself continues where the last one stopped.**
+Feeding a box set disc by disc numbered every disc from 1, because each is
+detected on its own and had no way of knowing what the last one used — so a
+season folder collected "Show - S01E01 (2).mp4" and "(3)" and became unusable.
+Series mode has always solved this by being told the show up front; this covers
+the case where nobody switched it on.
+
+Only the disc number on the label may start it, and that is the whole safety
+argument. Continuing from "what is already in the season folder" cannot tell a
+second disc from a second *rip of the same disc*: both find five episodes
+there, and the re-rip would be silently filed as 6-10. A label that says D2 is
+a claim about which disc this is, and a re-rip of disc 1 says D1. `SHOW_S01_D2`,
+`Firefly Season 1 Disc 2` and the rest were already parsed for their season;
+the disc number was parsed too and then thrown away.
+
+Nothing is invented. A later disc with no earlier disc on record declines and
+says so, because "disc 3" does not say how long discs 1 and 2 were. An earlier
+disc that numbered nothing — it failed, or was ripped as a film — is not
+evidence. Another season is never continued from. And every answer lands in
+the dashboard banner beside its Change button, which is what makes guessing
+acceptable at all.
+
+Discs whose labels say nothing about a disc number, which includes every
+home-burned one, are completely unaffected: they start at episode 1 exactly as
+before, and series mode remains the answer for them.
+
 ## 1.26.0
 
 **A two-minute clip on a box-set disc no longer becomes an episode.** Every

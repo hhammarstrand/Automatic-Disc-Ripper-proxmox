@@ -207,6 +207,62 @@ def parse_series_label(disc_label: str) -> dict[str, Any]:
     return {"show": show.title() if show.isupper() else show, "season": season, "disc": disc}
 
 
+def episode_after_previous_discs(
+    this_disc: int | None, previous: list[dict],
+) -> tuple[int, str]:
+    """Where disc *this_disc* should start numbering. ``(episode, why)``.
+
+    Feeding a box set disc by disc numbers every disc from 1, because each is
+    detected on its own and has no way of knowing what the last one used. The
+    season folder then collects "Show - S01E01 (2).mp4" and the run is
+    unusable. Series mode solves it by being told the show up front; this
+    solves the case where nobody switched series mode on.
+
+    The disc number is the only thing allowed to start it, and that is the
+    whole safety argument. Continuing from "what is already in the season
+    folder" alone cannot tell a second disc from a second *rip of the same
+    disc*: both find five episodes there, and the re-rip would be silently
+    filed as 6-10. A label that says D2 is a claim about which disc this is,
+    and a re-rip of disc 1 says D1.
+
+    *previous* is what the earlier discs of this show and season did:
+    ``[{"disc": 1, "last_episode": 5}, ...]``. Nothing is invented from it —
+    if the earlier discs left no episodes behind, this declines and says so,
+    because "disc 3" on its own does not say how long discs 1 and 2 were.
+    """
+    if not this_disc or this_disc <= 1:
+        return 1, ""
+
+    seen = {int(entry["disc"]) for entry in previous if entry.get("disc")}
+    if this_disc in seen:
+        return 1, (
+            f"The label says disc {this_disc}, and disc {this_disc} of this "
+            "season has been ripped before — so this is the same disc again "
+            "rather than the next one. Numbering starts at episode 1; change "
+            "it above if that is wrong."
+        )
+
+    earlier = [
+        int(entry["last_episode"]) for entry in previous
+        if entry.get("disc") and int(entry["disc"]) < this_disc
+        and entry.get("last_episode")
+    ]
+    if not earlier:
+        return 1, (
+            f"The label says disc {this_disc}, but nothing from an earlier "
+            "disc of this season is on record, so there is no way to tell "
+            "which episode it starts at. Numbering starts at 1 — change it "
+            "above before encoding begins."
+        )
+
+    start = max(earlier) + 1
+    return start, (
+        f"The label says disc {this_disc}, and earlier discs of this season "
+        f"ended at episode {max(earlier)}, so this one starts at episode "
+        f"{start}. Change it above if the box set is not in disc order."
+    )
+
+
 def make_series_folder_name(show: str, year: int | None) -> str:
     """``Show Name (2019)`` — the top-level folder Plex expects."""
     safe = sanitize_filename(show)

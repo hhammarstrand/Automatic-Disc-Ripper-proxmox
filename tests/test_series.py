@@ -780,3 +780,170 @@ class TestADiscOfEpisodesAndOneClip:
         names, _ = self._run(harness, [self.EPISODE] * 4)
         assert len([n for n in names if "S01E" in n]) == 4
         assert not [n for n in names if n.startswith("Other/")]
+
+
+class TestTheLabelSaysWhichDiscThisIs:
+    """Feeding a box set disc by disc numbers every disc from 1, because each
+    is detected on its own and cannot know what the last one used. Saltkråkan
+    arrived as three jobs all claiming S01E01-E06, and the season folder ended
+    up holding "(2)" and "(3)" copies of every episode.
+
+    Only the disc number on the label may start the continuation, and that is
+    the whole safety argument. "Carry on from what is in the season folder"
+    cannot tell a second disc from a second *rip of the same disc* — both find
+    five episodes there, and the re-rip would be silently filed as 6-10. A
+    label that says D2 is a claim about which disc this is; a re-rip of disc 1
+    says D1.
+    """
+
+    def _after(self, this_disc, previous):
+        from adr.series import episode_after_previous_discs
+
+        return episode_after_previous_discs(this_disc, previous)
+
+    def test_a_label_with_no_disc_number_changes_nothing(self):
+        """Which is most discs, including every one of the user's."""
+        assert self._after(None, [{"disc": 1, "last_episode": 5}]) == (1, "")
+
+    def test_disc_one_starts_at_one_and_says_nothing(self):
+        assert self._after(1, []) == (1, "")
+
+    def test_disc_two_carries_on_from_disc_one(self):
+        start, why = self._after(2, [{"disc": 1, "last_episode": 5}])
+        assert start == 6
+        assert "disc 2" in why and "episode 6" in why
+
+    def test_disc_three_carries_on_from_the_highest_earlier_disc(self):
+        start, _ = self._after(3, [
+            {"disc": 1, "last_episode": 5},
+            {"disc": 2, "last_episode": 11},
+        ])
+        assert start == 12
+
+    def test_a_later_disc_that_was_fed_first_is_not_counted(self):
+        """Only discs *before* this one say where it starts."""
+        start, _ = self._after(2, [
+            {"disc": 1, "last_episode": 5},
+            {"disc": 4, "last_episode": 30},
+        ])
+        assert start == 6
+
+    def test_ripping_the_same_disc_again_does_not_advance(self):
+        """The case the whole design turns on. Disc 2 has been done; disc 2
+        comes back. Continuing would file it as 12-16 and quietly duplicate
+        the season."""
+        start, why = self._after(2, [
+            {"disc": 1, "last_episode": 5},
+            {"disc": 2, "last_episode": 11},
+        ])
+        assert start == 1
+        assert "same disc again" in why
+
+    def test_a_later_disc_with_nothing_on_record_declines_to_guess(self):
+        """"Disc 3" does not say how long discs 1 and 2 were."""
+        start, why = self._after(3, [])
+        assert start == 1
+        assert "no way to tell" in why
+
+    def test_an_earlier_disc_that_numbered_nothing_is_not_evidence(self):
+        """A disc that failed, or was ripped as a film, says nothing about
+        where the next one starts."""
+        start, why = self._after(2, [{"disc": 1, "last_episode": None}])
+        assert start == 1
+        assert "no way to tell" in why
+
+    def test_every_answer_can_be_corrected(self):
+        """The banner keeps its Change button, so none of this is final —
+        which is what makes guessing at all acceptable."""
+        for disc, previous in (
+            (2, [{"disc": 1, "last_episode": 5}]),
+            (3, []),
+            (2, [{"disc": 2, "last_episode": 9}]),
+        ):
+            _, why = self._after(disc, previous)
+            assert "hange it" in why, why
+
+
+class TestFindingTheEarlierDiscs:
+    """Identity comes from the parsed show name, because that is the part two
+    discs of one box set agree on: SALTKRAKAN_D2 and SALTKRAKAN_D3 are the
+    same programme and different strings."""
+
+    def _job(self, session, label, season, episodes, content_type="series"):
+        from adr.models import Job, Track
+
+        job = Job(disc_label=label, drive="/dev/sr0", content_type=content_type,
+                  series_season=season)
+        session.add(job)
+        session.commit()
+        for number in episodes:
+            session.add(Track(job_id=job.id, track_number=number,
+                              filename=f"t{number}.mkv", episode_number=number))
+        session.commit()
+        return job
+
+    def test_it_matches_the_show_across_different_labels(self, tmp_path):
+        from adr.models import get_session, init_db
+        from adr.pipeline import _earlier_discs
+
+        init_db()
+        session = get_session()
+        try:
+            self._job(session, "SALTKRAKAN_D1", 1, [1, 2, 3, 4, 5])
+            this = self._job(session, "SALTKRAKAN_D2", 1, [])
+            found = _earlier_discs(session, "Saltkrakan", this)
+            assert found == [{"disc": 1, "last_episode": 5}]
+        finally:
+            session.close()
+
+    def test_another_season_is_not_carried_on_from(self, tmp_path):
+        """Season 2 disc 1 must not continue season 1."""
+        from adr.models import get_session, init_db
+        from adr.pipeline import _earlier_discs
+
+        init_db()
+        session = get_session()
+        try:
+            self._job(session, "SALTKRAKAN_S01_D1", 1, [1, 2, 3])
+            this = self._job(session, "SALTKRAKAN_S02_D2", 2, [])
+            assert _earlier_discs(session, "Saltkrakan", this) == []
+        finally:
+            session.close()
+
+    def test_a_different_show_is_not_carried_on_from(self, tmp_path):
+        from adr.models import get_session, init_db
+        from adr.pipeline import _earlier_discs
+
+        init_db()
+        session = get_session()
+        try:
+            self._job(session, "THE_WIRE_D1", 1, [1, 2, 3])
+            this = self._job(session, "SALTKRAKAN_D2", 1, [])
+            assert _earlier_discs(session, "Saltkrakan", this) == []
+        finally:
+            session.close()
+
+    def test_a_disc_ripped_as_a_film_is_ignored(self, tmp_path):
+        from adr.models import get_session, init_db
+        from adr.pipeline import _earlier_discs
+
+        init_db()
+        session = get_session()
+        try:
+            self._job(session, "SALTKRAKAN_D1", 1, [], content_type="movie")
+            this = self._job(session, "SALTKRAKAN_D2", 1, [])
+            assert _earlier_discs(session, "Saltkrakan", this) == []
+        finally:
+            session.close()
+
+    def test_a_nameless_disc_looks_nothing_up(self, tmp_path):
+        from adr.models import get_session, init_db
+        from adr.pipeline import _earlier_discs
+
+        init_db()
+        session = get_session()
+        try:
+            this = self._job(session, "", 1, [])
+            assert _earlier_discs(session, "", this) == []
+        finally:
+            session.close()
