@@ -179,6 +179,11 @@ def create_app(config: Config, pipeline_manager=None) -> Flask:
     # Template filter for time formatting
     app.jinja_env.filters["duration"] = lambda s: format_duration(s) if s else "–"
     app.jinja_env.filters["isotime"] = _isotime
+    # "Drive: /dev/sr0" on a job card is a device node where the person
+    # reading it gave that drive a name. Diagnostics keep the node.
+    app.jinja_env.filters["drivename"] = (
+        lambda d: _config.drive_display(d) if (_config and d) else (d or "")
+    )
 
     # Register routes
     _register_ui_routes(app)

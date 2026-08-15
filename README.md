@@ -45,7 +45,7 @@ named via **TMDb**, and dropped into a Plex-ready folder — all inside a single
 - **Says what is broken before you insert a disc**, with the fix, instead of letting every disc fail separately with the same reason.
 - **Survives a restart mid-job**: an interrupted encode picks itself up on the next start, and nothing is left saying "ripping" for ever.
 - **Notices a drive that has stopped answering** instead of waiting on it for the rest of the service's life.
-- **Multi-drive** support and a **watch folder** for batch encoding of existing video files.
+- **Multi-drive** support and a **watch folder** for batch encoding of existing video files. Name the drives and they are named everywhere you read them — "Saltkråkan DVD 2 in Internal", not "in /dev/sr0". The device node stays in the diagnostics bundle, because that is what you type into `pct exec`.
 - **Transcoding is optional** — keep the lossless MKV straight off the disc instead, if size is cheaper than time.
 - **Extras kept apart** from the film, in a folder Plex actually recognises, so a trailer never becomes the second half of the movie — including when the disc carries a commentary version exactly as long as the film.
 - **Main feature only**, honoured even when the pre-rip scan cannot read the disc: the rest is ripped but not encoded, and stays on disk rather than filling the library.

@@ -219,8 +219,14 @@ class Notifier:
         )
 
     def disc_inserted(self, drive: str, label: str | None) -> bool:
+        # The drive by the name its owner gave it. This read "… in /dev/sr1",
+        # which is the right answer in a diagnostics bundle and the wrong one
+        # on a phone: naming the drives is exactly so that you do not have to
+        # remember which node is the one on the shelf.
+        display = getattr(self._config, "drive_display", None)
+        where = display(drive) if callable(display) else drive
         return self.notify(
             EVENT_DISC_INSERTED,
             "Disc inserted",
-            f"{label or 'Unlabelled disc'} in {drive}.",
+            f"{label or 'Unlabelled disc'} in {where}.",
         )

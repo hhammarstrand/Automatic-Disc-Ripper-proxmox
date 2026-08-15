@@ -2391,11 +2391,16 @@ class PipelineManager:
         """
         from adr.disc import _blkid_label, media_status
 
+        # By the name its owner gave it. Someone with an Internal and an
+        # External does not think in device nodes, and every one of the
+        # sentences below is read on the dashboard rather than in a log.
+        shown = self.config.drive_display(drive)
+
         pipeline = self.drive_pipelines.get(drive)
         if pipeline is None:
-            return False, f"{drive} is not a drive this instance watches."
+            return False, f"{shown} is not a drive this instance watches."
         if normalize_drive(drive) in self.config.disabled_drives:
-            return False, f"{drive} is disabled under Settings."
+            return False, f"{shown} is disabled under Settings."
         if pipeline.is_busy:
             # Name the job, because "already ripping" right after pressing
             # Cancel reads as the application being wrong. Usually it is not:
@@ -2405,12 +2410,12 @@ class PipelineManager:
             busy = self._busy_job(drive)
             if busy:
                 return False, (
-                    f"{drive} is still working on job {busy['id']} "
+                    f"{shown} is still working on job {busy['id']} "
                     f"({busy['status']}). Cancel it on the dashboard first, or "
                     "give it a few seconds to stop."
                 )
             return False, (
-                f"{drive} is still finishing the last job. Give it a few "
+                f"{shown} is still finishing the last job. Give it a few "
                 "seconds and try again."
             )
         # In the drive's own words. "No readable disc" covered an empty tray,
@@ -2430,7 +2435,7 @@ class PipelineManager:
         label = _blkid_label(drive)
         logger.info("Manual rip requested for %s (label=%s)", drive, label)
         pipeline.handle_disc_inserted(drive, label, manual=True)
-        return True, f"Started ripping {label or 'the disc'} in {drive}."
+        return True, f"Started ripping {label or 'the disc'} in {shown}."
 
     def rescan_drives(self) -> dict:
         """Re-detect optical drives now, and hot-add any that are new.

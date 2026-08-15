@@ -236,3 +236,76 @@ class TestDuplicateEvent:
         """A duplicate is information, not an alarm."""
         notify.Notifier(_config(notify_events=["duplicate"])).duplicate(_job(), "x")
         assert captured[0]["headers"]["Priority"] != "high"
+
+
+class TestTheDriveIsNamedTheWayItsOwnerNamedIt:
+    """"Saltkråkan DVD 2 in /dev/sr0" is the right sentence in a diagnostics
+    bundle and the wrong one on a phone. Naming the drives — Internal,
+    External — is exactly so that you do not have to remember which node is
+    the one on the shelf.
+    """
+
+    def _config(self, labels, **extra):
+        import types
+
+        base = {
+            "notify_enabled": True, "notify_provider": "ntfy",
+            "notify_url": "https://ntfy.sh/x", "notify_token": "",
+            "notify_events": ["disc_inserted"],
+            "drive_display": lambda d: labels.get(d, d),
+        }
+        base.update(extra)
+        return types.SimpleNamespace(**base)
+
+    def _sent(self, config, drive, label):
+        from adr import notify
+
+        seen = {}
+        notifier = notify.Notifier(config)
+        notifier.notify = lambda event, title, message: seen.update(
+            {"message": message}) or True
+        notifier.disc_inserted(drive, label)
+        return seen["message"]
+
+    def test_a_named_drive_is_named(self):
+        message = self._sent(
+            self._config({"/dev/sr0": "Internal"}), "/dev/sr0", "Saltkråkan DVD 2")
+        assert message == "Saltkråkan DVD 2 in Internal."
+        assert "/dev/sr0" not in message
+
+    def test_an_unnamed_drive_still_says_which_one(self):
+        """Falling back to the node matters most when there are two of them."""
+        message = self._sent(self._config({}), "/dev/sr1", "Saltkråkan DVD 1")
+        assert "/dev/sr1" in message
+
+    def test_a_config_without_the_helper_does_not_break_the_notification(self):
+        """Notifier is handed plain objects in several places; a missing
+        method must not cost the user the notification itself."""
+        import types
+
+        config = types.SimpleNamespace(
+            notify_enabled=True, notify_provider="ntfy",
+            notify_url="https://ntfy.sh/x", notify_token="",
+            notify_events=["disc_inserted"],
+        )
+        assert "/dev/sr0" in self._sent(config, "/dev/sr0", "A disc")
+
+
+class TestTheDriveNameHelper:
+    def _config(self, tmp_path, labels):
+        from adr.config import Config
+
+        config = Config(str(tmp_path / "adr.yaml"))
+        config.update({"drive_labels": labels})
+        return config
+
+    def test_it_prefers_the_name(self, tmp_path):
+        config = self._config(tmp_path, {"/dev/sr1": "External"})
+        assert config.drive_display("/dev/sr1") == "External"
+
+    def test_it_falls_back_to_the_device(self, tmp_path):
+        assert self._config(tmp_path, {}).drive_display("/dev/sr1") == "/dev/sr1"
+
+    def test_a_blank_name_is_not_a_name(self, tmp_path):
+        config = self._config(tmp_path, {"/dev/sr1": ""})
+        assert config.drive_display("/dev/sr1") == "/dev/sr1"

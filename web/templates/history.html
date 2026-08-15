@@ -124,7 +124,7 @@
                     </div>
                     {% endif %}
                 </td>
-                <td class="d-none d-md-table-cell">{{ job.drive }}</td>
+                <td class="d-none d-md-table-cell">{{ job.drive | drivename }}</td>
                 <td data-label="Status">
                     {% if job.status and job.status.value == 'error' and job.error_message %}
                     <span class="badge bg-danger" role="button" style="cursor:pointer;"

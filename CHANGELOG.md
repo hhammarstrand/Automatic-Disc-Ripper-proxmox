@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.32.0
+
+**Drives are called what you called them.** A phone notification read
+"Saltkråkan DVD 2 in /dev/sr0" on a machine whose owner had named that drive
+Internal. Naming the drives is exactly so that nobody has to remember which
+node is the one on the shelf.
+
+The name now appears in the disc-inserted notification, on the job card, in
+History's Drive column, and in all five messages from Rip now — including
+"Internal is still working on job 71", which used to be
+"/dev/sr0 is already ripping". A drive with no name falls back to its device
+node, which matters most when there are two of them.
+
+The diagnostics bundle and the service log keep the node deliberately: that is
+the answer you need when you are about to type `pct exec`, and it is the wrong
+one on a phone.
+
 ## 1.31.0
 
 A full critical review of the repository — nine reviewers in parallel, every

@@ -599,6 +599,16 @@ class Config:
         val = self._data.get("drive_labels", {})
         return val if isinstance(val, dict) else {}
 
+    def drive_display(self, drive_letter: str) -> str:
+        """What a person should read for this drive.
+
+        The name they gave it, or the device node when they gave it none.
+        "/dev/sr1" is the right answer inside a diagnostics bundle, where it
+        is what you type into pct exec — and the wrong one in a notification
+        on a phone, where "External" is the whole point of having named it.
+        """
+        return self.drive_label(drive_letter) or normalize_drive(drive_letter)
+
     def drive_label(self, drive_letter: str) -> str:
         """Return the user-set label for a drive, or empty string."""
         return self.drive_labels.get(normalize_drive(drive_letter), "")
