@@ -101,7 +101,7 @@
                                         {% else %}bg-primary{% endif %}">
                                         {{ d.status | capitalize }}
                                     </span>
-                                    {% if d.job %}<small class="text-secondary text-truncate">{{ d.job.display_title }}</small>{% endif %}
+                                    {% if d.job %}<small class="text-secondary text-truncate">{{ d.job.display_title }}{% if d.job.disc_hint %} · {{ d.job.disc_hint }}{% endif %}</small>{% endif %}
                                 </div>
                             </div>
                             <!-- Action buttons -->
@@ -172,7 +172,13 @@
                             </div>
                             <!-- Info -->
                             <div class="col">
-                                <h6 class="mb-1">{{ job.display_title }}</h6>
+                                <h6 class="mb-1">
+                                    {{ job.display_title }}
+                                    {%- if job.disc_hint %}
+                                    <span class="badge bg-secondary ms-1 align-middle"
+                                          title="Which disc of the set this is">{{ job.disc_hint }}</span>
+                                    {%- endif %}
+                                </h6>
                                 <small class="text-secondary">
                                     Drive: {{ job.drive | drivename }} &middot; Job #{{ job.id }}
                                     &middot; <i class="bi bi-clock me-1"></i><span class="elapsed-timer" data-start="{{ job.started_at | isotime }}">--:--</span>
@@ -393,6 +399,7 @@
                                         <img src="{{ job.poster_url }}" alt="" style="height:40px;" class="me-2 rounded">
                                         {% endif %}
                                         {{ job.display_title }}
+                                        {%- if job.disc_hint %} <span class="text-secondary small">· {{ job.disc_hint }}</span>{% endif %}
                                     </td>
                                     <td>
                                         {% if job.status and job.status.value == 'error' and job.error_message %}

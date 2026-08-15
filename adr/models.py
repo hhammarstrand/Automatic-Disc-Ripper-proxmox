@@ -118,6 +118,37 @@ class Job(Base):
         return self.title or self.disc_label or f"Job #{self.id}"
 
     @property
+    def disc_hint(self) -> str:
+        """Which disc this is, when several jobs look alike. "" when they don't.
+
+        Every disc of a box set renders as the same string — three cards all
+        reading "Life on Seacrow Island (1964)", which is no help at all with
+        two drives loaded and a third disc waiting behind them. The title is
+        deliberately left alone: it names the programme, and it is what the
+        Rematch dialog and the notifications quote. This is the qualifier
+        beside it.
+
+        The episodes are the best answer, because they say what is on the disc
+        rather than merely which one it is — but they are only known once the
+        rip has been planned. Before that the label's disc number is what
+        there is, and often that is all a label carries.
+        """
+        numbers = sorted(
+            t.episode_number for t in (self.tracks or []) if t.episode_number
+        )
+        if numbers:
+            season = 1 if self.series_season is None else int(self.series_season)
+            first, last = numbers[0], numbers[-1]
+            if first == last:
+                return f"S{season:02d}E{first:02d}"
+            return f"S{season:02d}E{first:02d}–E{last:02d}"
+
+        from adr.series import parse_series_label
+
+        disc = parse_series_label(self.disc_label or "")["disc"]
+        return f"Disc {disc}" if disc else ""
+
+    @property
     def progress(self) -> float:
         """Overall progress across rip + encode (0.0 – 1.0)."""
         if self.status == JobStatus.DONE:
@@ -184,6 +215,7 @@ class Job(Base):
             "phase_progress": round(self.phase_progress or 0.0, 4),
             "progress_info": pi,
             "display_title": self.display_title,
+            "disc_hint": self.disc_hint,
             "output_path": self.output_path,
             "error_message": self.error_message,
             "started_at": self.started_at.isoformat() if self.started_at else None,

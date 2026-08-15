@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.36.0
+
+**Two discs of one box set are now told apart.** Every disc rendered as the
+same string — three cards all reading "Life on Seacrow Island (1964)", which is
+no help with two drives loaded and a third disc waiting behind them, and is the
+state a box set spends its whole evening in.
+
+The card carries a qualifier beside the title now: `Disc 2` while it rips,
+taken from the label, and `S01E06–E10` once the episodes are planned — which is
+the better answer, because it says what is *on* the disc rather than merely
+which one it is. Also on the drive row, where the question is literally "what
+is in this drive", and in the history table.
+
+The title itself is deliberately untouched: it names the programme, and it is
+what the rematch dialog and the notifications quote. An ordinary film says
+nothing at all, because two films already have two titles and a badge on every
+card would be noise.
+
 ## 1.35.0
 
 **The Doctor now checks the update mechanism itself.** Three links, and a break

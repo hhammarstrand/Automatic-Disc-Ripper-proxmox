@@ -84,6 +84,9 @@
                     <img src="{{ job.poster_url }}" alt="" style="height:30px;" class="me-2 rounded">
                     {% endif %}
                     {{ job.display_title }}
+                    {%- if job.disc_hint %}
+                    <span class="badge bg-secondary ms-1">{{ job.disc_hint }}</span>
+                    {%- endif %}
                     {% if job.content_type == 'audio_cd' %}
                     <span class="badge bg-info text-dark ms-1" title="Ripped as an audio CD">
                         <i class="bi bi-music-note-beamed me-1"></i>Audio CD
