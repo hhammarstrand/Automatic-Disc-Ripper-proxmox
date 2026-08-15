@@ -33,6 +33,38 @@ SOURCE_FINISHED = "finished"
 SOURCE_NONE = "none"
 
 
+def _all_silent(files: list[Path], config) -> bool:
+    """Whether every finished file carries no audio whatsoever.
+
+    Every one of them, not any: a season with one bad episode is a different
+    problem from a job that encoded silent throughout, and only the second is
+    what this warns about.
+
+    The duration is asked for as well, and that is the point of the function
+    rather than a detail. ``audio_streams`` returns an empty list both for a
+    file with no audio and for a file it could not read at all — no ffprobe
+    installed, a container it does not know — so on its own it would call
+    every finished film silent on a machine without ffprobe and tell people to
+    re-rip discs that are perfectly fine. A duration is proof the probe
+    worked; without one this declines to answer.
+
+    Neither call raises: both answer with a falsy value when ffprobe is
+    missing, times out or refuses the file, which is the same answer this
+    wants for those cases anyway.
+    """
+    from adr.vaapi import audio_streams, probe_duration
+
+    exe = getattr(config, "ffmpeg_path", "") or "ffmpeg"
+    if not files:
+        return False
+    for path in files:
+        if audio_streams(exe, path):
+            return False
+        if not probe_duration(exe, path):
+            return False
+    return True
+
+
 def plan(job, config) -> dict:
     """What re-encoding this job would do. ``{"can_reencode", "source", …}``."""
     from adr import cleanup, retry
@@ -66,6 +98,22 @@ def plan(job, config) -> dict:
 
     finished = cleanup.job_files(job, config)
     if finished:
+        # The one thing re-encoding cannot fix, and the most likely reason
+        # someone is on this page. Versions before 1.24 could encode a film
+        # with no audio at all and report it Done; whoever finds that out is
+        # going to reach for Re-encode, and forty minutes later have a second
+        # silent copy. Sound that is not in the file does not come back out of
+        # it. Said rather than blocked — a container change is still a real
+        # reason to re-encode a silent file, and this module's whole shape is
+        # to report what will happen and leave the choice where it belongs.
+        note = ""
+        if _all_silent(finished, config):
+            note = (
+                " Be aware that this file has no audio at all, and re-encoding "
+                "it cannot put back sound it does not contain — only re-ripping "
+                "the disc can. If the film came out mute, put the disc back in "
+                "and press Rip instead."
+            )
         return {
             "can_reencode": True,
             "source": SOURCE_FINISHED,
@@ -75,7 +123,7 @@ def plan(job, config) -> dict:
                 "That works, and it is a second-generation encode: some "
                 "quality is lost that re-ripping the disc would keep. Worth it "
                 "for a language or container change, less so for a small "
-                "quality adjustment."
+                "quality adjustment." + note
             ),
         }
 

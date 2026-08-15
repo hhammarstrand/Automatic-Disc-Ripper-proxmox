@@ -144,6 +144,46 @@ class TestEncodingAgain:
         assert plan["source"] == "finished"
         assert "second-generation" in plan["reason"]
 
+    def test_a_silent_finished_file_says_re_encoding_cannot_fix_it(self, app, monkeypatch):
+        """The trap for anyone whose film came out mute before 1.24: they see
+        no sound, press Re-encode, and forty minutes later have a second
+        silent copy. Sound that is not in the file does not come back out of
+        it, and only the disc has it."""
+        from adr import vaapi
+
+        flask_app, _, tmp_path = app
+        job_id, _ = _finished_job(tmp_path)
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: [])
+        monkeypatch.setattr(vaapi, "probe_duration", lambda exe, path: 5400.0)
+
+        plan = flask_app.test_client().get(f"/api/jobs/{job_id}/reencode").get_json()
+        assert "no audio at all" in plan["reason"]
+        assert "press Rip" in plan["reason"]
+        assert plan["can_reencode"] is True, "a container change is still a real reason"
+
+    def test_a_file_with_audio_gets_no_such_warning(self, app, monkeypatch):
+        from adr import vaapi
+
+        flask_app, _, tmp_path = app
+        job_id, _ = _finished_job(tmp_path)
+        monkeypatch.setattr(
+            vaapi, "audio_streams", lambda exe, path: [{"codec": "ac3", "language": "swe"}])
+        plan = flask_app.test_client().get(f"/api/jobs/{job_id}/reencode").get_json()
+        assert "no audio at all" not in plan["reason"]
+
+    def test_without_ffprobe_no_film_is_accused_of_being_silent(self, app, monkeypatch):
+        """audio_streams answers [] both for "no audio" and "could not look".
+        Reading the first as the second would tell everyone on a machine
+        without ffprobe to re-rip discs that are perfectly fine."""
+        from adr import vaapi
+
+        flask_app, _, tmp_path = app
+        job_id, _ = _finished_job(tmp_path)
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: [])
+        monkeypatch.setattr(vaapi, "probe_duration", lambda exe, path: 0.0)
+        plan = flask_app.test_client().get(f"/api/jobs/{job_id}/reencode").get_json()
+        assert "no audio at all" not in plan["reason"]
+
     def test_nothing_on_disk_is_refused_with_a_reason(self, app):
         flask_app, _, tmp_path = app
         job_id, movie = _finished_job(tmp_path)

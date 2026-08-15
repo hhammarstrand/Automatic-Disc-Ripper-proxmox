@@ -157,3 +157,160 @@ class TestItReachesTheJobLog:
         encoder.log_sink = lines.append
         encoder.encode(source, output_dir=tmp_path / "out")
         assert any("Audio:" in line for line in lines), lines
+
+
+class TestASilentFilmIsNotASuccess:
+    """An encoder can drop every audio track and still exit 0.
+
+    HandBrake does it whenever the language list matched nothing, and twice
+    more besides — an Auto Passthru that could not be satisfied, a mixdown at
+    a samplerate the encoder will not take. All three log a line and carry on.
+    The film plays perfectly, in silence, and the job says Done; the only
+    thing that notices is somebody sitting down to watch it a week later,
+    with the raw files long cleaned up and the disc back on the shelf.
+    """
+
+    def _files(self, tmp_path):
+        source = tmp_path / "in.mkv"
+        source.write_bytes(b"x")
+        produced = tmp_path / "out.mp4"
+        produced.write_bytes(b"x")
+        return source, produced
+
+    def test_audio_in_and_none_out_is_a_complaint(self, tmp_path, monkeypatch):
+        source, produced = self._files(tmp_path)
+        monkeypatch.setattr(
+            vaapi, "audio_streams",
+            lambda exe, path: SWEDISH_DISC if path.suffix == ".mkv" else [],
+        )
+        said = vaapi.audio_went_missing("/usr/bin/ffmpeg", source, produced)
+        assert "no audio at all" in said
+        assert "in.mkv" in said and "out.mp4" in said
+
+    def test_it_says_what_to_do_about_it(self, tmp_path, monkeypatch):
+        """A failure nobody can act on is only half reported."""
+        source, produced = self._files(tmp_path)
+        monkeypatch.setattr(
+            vaapi, "audio_streams",
+            lambda exe, path: SWEDISH_DISC if path.suffix == ".mkv" else [],
+        )
+        said = vaapi.audio_went_missing("/usr/bin/ffmpeg", source, produced)
+        assert "Retry" in said and "disc is not needed" in said
+
+    def test_a_source_that_never_had_sound_is_not_a_fault(self, tmp_path, monkeypatch):
+        """Refusing to finish a genuinely silent disc would be a new bug
+        replacing the old one."""
+        source, produced = self._files(tmp_path)
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: [])
+        assert vaapi.audio_went_missing("/usr/bin/ffmpeg", source, produced) == ""
+
+    def test_audio_that_survived_says_nothing(self, tmp_path, monkeypatch):
+        source, produced = self._files(tmp_path)
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: SWEDISH_DISC)
+        assert vaapi.audio_went_missing("/usr/bin/ffmpeg", source, produced) == ""
+
+    def test_a_missing_file_is_not_answered_with_a_guess(self, tmp_path, monkeypatch):
+        """This exists to catch a definite loss, not to block an encode over a
+        question it could not answer."""
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: SWEDISH_DISC)
+        assert vaapi.audio_went_missing(
+            "/usr/bin/ffmpeg", tmp_path / "gone.mkv", tmp_path / "gone.mp4",
+        ) == ""
+
+    def test_no_ffprobe_lets_the_encode_stand(self, tmp_path, monkeypatch):
+        """audio_streams returns [] when it cannot run at all, and an
+        installation without ffprobe must not fail every encode."""
+        source, produced = self._files(tmp_path)
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: [])
+        assert vaapi.audio_went_missing("/usr/bin/ffmpeg", source, produced) == ""
+
+
+class TestTheEncodersRefuseToCallItDone:
+    """The check is only worth having if it reaches the result."""
+
+    def _handbrake(self, tmp_path):
+        import stat
+        import textwrap
+
+        exe = tmp_path / "hb"
+        exe.write_text(textwrap.dedent('''\
+            #!/bin/sh
+            for a in "$@"; do
+              if [ "$prev" = "-o" ]; then printf video > "$a"; fi
+              prev="$a"
+            done
+        '''))
+        exe.chmod(exe.stat().st_mode | stat.S_IXUSR)
+        source = tmp_path / "in.mkv"
+        source.write_bytes(b"x")
+        config = types.SimpleNamespace(
+            handbrake_path=str(exe), handbrake_preset="Fast 1080p30",
+            handbrake_preset_file="", handbrake_extra_args="",
+            completed_path=tmp_path / "out", audio_language="swe",
+            video_quality=0, max_height=0, libva_driver="",
+            ffmpeg_path="/usr/bin/ffmpeg",
+        )
+        return config, source
+
+    def test_handbrake_exiting_0_with_no_audio_is_a_failure(self, tmp_path, monkeypatch):
+        from adr.encoder import HandBrakeEncoder
+
+        config, source = self._handbrake(tmp_path)
+        monkeypatch.setattr(
+            vaapi, "audio_streams",
+            lambda exe, path: SWEDISH_DISC if path.suffix == ".mkv" else [],
+        )
+        result = HandBrakeEncoder(config).encode(source, output_dir=tmp_path / "out")
+        assert result.success is False
+        assert "no audio at all" in result.error
+
+    def test_it_says_so_in_the_job_s_own_log(self, tmp_path, monkeypatch):
+        """Not journalctl. The History page, beside the film it is about."""
+        from adr.encoder import HandBrakeEncoder
+
+        config, source = self._handbrake(tmp_path)
+        monkeypatch.setattr(
+            vaapi, "audio_streams",
+            lambda exe, path: SWEDISH_DISC if path.suffix == ".mkv" else [],
+        )
+        lines = []
+        encoder = HandBrakeEncoder(config)
+        encoder.log_sink = lines.append
+        encoder.encode(source, output_dir=tmp_path / "out")
+        assert any("no audio at all" in line for line in lines), lines
+
+    def test_a_normal_encode_still_succeeds(self, tmp_path, monkeypatch):
+        from adr.encoder import HandBrakeEncoder
+
+        config, source = self._handbrake(tmp_path)
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: SWEDISH_DISC)
+        result = HandBrakeEncoder(config).encode(source, output_dir=tmp_path / "out")
+        assert result.success is True
+        assert result.error is None
+
+
+class TestTheLogNamesTheDiscThatCannotAnswer:
+    def _config(self, tmp_path, **values):
+        base = {
+            "audio_language": "swe", "video_quality": 0, "max_height": 0,
+            "handbrake_preset": "Super HQ 1080p30 Surround (Svenska)",
+            "ffmpeg_path": "/usr/bin/ffmpeg",
+        }
+        base.update(values)
+        return types.SimpleNamespace(**base)
+
+    def test_it_says_the_language_is_not_on_this_disc(self, tmp_path, monkeypatch):
+        english = [{"codec": "ac3", "language": "eng"}]
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: english)
+        said = describe_audio_request(self._config(tmp_path), tmp_path / "in.mkv")
+        assert "has no track in it" in said
+        assert "0:eng" in said
+        assert "'any'" in said
+
+    def test_it_no_longer_claims_a_fallback_that_does_not_exist(self, tmp_path, monkeypatch):
+        """This line used to end "if the disc has no track in that language
+        the preset falls back to its own rules". HandBrake has no such rule,
+        and the log said everything was fine while the film came out mute."""
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: SWEDISH_DISC)
+        said = describe_audio_request(self._config(tmp_path), tmp_path / "in.mkv")
+        assert "falls back to its own rules" not in said

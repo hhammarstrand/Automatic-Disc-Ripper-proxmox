@@ -27,6 +27,7 @@ shows up in two seconds instead of after a rip.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ def clamp_quality(value: object) -> int:
     return max(QUALITY_RANGE[0], min(QUALITY_RANGE[1], quality))
 
 
-def handbrake_overrides(config) -> list[str]:
+def handbrake_overrides(config, input_path=None) -> list[str]:
     """The command-line flags that impose the shared settings on HandBrake.
 
     HandBrake applies its own flags *after* the preset, so each of these
@@ -66,10 +67,13 @@ def handbrake_overrides(config) -> list[str]:
     Nothing is emitted for a setting left at its default, so an installation
     that has never touched this page produces exactly the command it produced
     before.
+
+    *input_path* is the file about to be encoded, when there is one. It is
+    what makes the language list safe — see :func:`audio_language_list`.
     """
     args: list[str] = []
 
-    wanted = language(config)
+    wanted = audio_language_list(config, input_path)
     if wanted:
         # The list only. How many matching tracks to take is the preset's
         # AudioTrackSelectionBehavior, and forcing --all-audio here would
@@ -88,6 +92,85 @@ def handbrake_overrides(config) -> list[str]:
         args += ["-q", str(quality)]
 
     return args
+
+
+#: HandBrake's "match every language", and the reason this module has to look
+#: at the file at all.
+#:
+#: It is ``any`` and not ``und``. ``und`` is a real language in HandBrake's
+#: table — Unknown — and matches only tracks actually tagged that way; ``any``
+#: is a synthetic entry (``lang.c``: ``{"Any", "", "yy", "any"}``) that
+#: ``find_audio_track`` compares against explicitly. Older presets had ``und``
+#: rewritten to ``any`` on import, which is where the belief that they are
+#: interchangeable comes from; for anything declaring a modern preset version
+#: that rewrite no longer runs, so ``und`` on a disc tagged ``eng`` would go
+#: on matching nothing.
+ANY_LANGUAGE = "any"
+
+
+def audio_language_list(config, input_path=None) -> str:
+    """What to put in ``--audio-lang-list``: a language the file actually has.
+
+    HandBrake does not fall back, and this is not an oversight that a flag
+    somewhere turns off. ``hb_preset_job_add_audio`` only reaches for the
+    wildcard when the language *list* is empty — never when the list is
+    non-empty and matched nothing — so ``--audio-lang-list swe`` against a
+    disc with no Swedish track selects no audio, writes the film silent, and
+    exits 0. A successful encode of a silent movie. Old region-1 pressings
+    are exactly that shape, which is why *The Black Cauldron*, *Jumanji* and
+    *Charlotte's Web* all came out mute with the job saying Done.
+
+    So the miss has to be detected here, before HandBrake runs. When the
+    wanted language is on the file this returns it and nothing changes at all.
+    When it is not, this returns ``any``, and the preset's own
+    ``AudioTrackSelectionBehavior`` then does what it always does with it —
+    ``first`` takes one track, the first non-commentary one.
+
+    The disc still cannot answer in the language asked for; that is a fact
+    about the disc and no flag changes it. The choice is only between the
+    wrong language and no sound, and the wrong language is watchable.
+
+    ``any`` rather than the first track's actual tag, which was the other
+    candidate: the tag has to survive ffprobe and HandBrake reading it the
+    same way, and if they disagree the result is silence again. ``any``
+    cannot miss.
+
+    Nothing readable means nothing changed — without ffprobe the wanted
+    language goes out exactly as before, and the check after the encode is
+    what catches the silence.
+    """
+    wanted = language(config)
+    if not wanted or input_path is None:
+        return wanted
+
+    from adr.vaapi import audio_streams, language_matches
+
+    exe = getattr(config, "ffmpeg_path", "") or "ffmpeg"
+    streams = audio_streams(exe, Path(input_path))
+    if not streams:
+        return wanted
+    if any(language_matches(s.get("language", ""), wanted) for s in streams):
+        return wanted
+
+    logger.info(
+        "No '%s' audio in %s — asking HandBrake for '%s' instead so the film "
+        "is not encoded silent", wanted,
+        getattr(input_path, "name", input_path), ANY_LANGUAGE,
+    )
+    return ANY_LANGUAGE
+
+
+def requested_language(overrides: list[str]) -> str:
+    """The language a built override list ends up asking HandBrake for.
+
+    Reading it back off the arguments rather than working it out a second time
+    keeps the job log and the command that ran in step, and saves probing the
+    file twice to answer one question.
+    """
+    try:
+        return overrides[overrides.index("--audio-lang-list") + 1]
+    except (ValueError, IndexError):
+        return ""
 
 
 def describe(config) -> str:

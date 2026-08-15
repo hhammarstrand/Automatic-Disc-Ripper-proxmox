@@ -1,5 +1,46 @@
 # Changelog
 
+## 1.24.0
+
+**Some films encoded with no audio at all, and the job said Done.** *The Black
+Cauldron*, *Jumanji* and *Charlotte's Web* all came out mute. HandBrake has no
+language fallback and this is not a setting: `hb_preset_job_add_audio` reaches
+for the wildcard only when the language list is *empty*, never when a
+non-empty list matched nothing. So `--audio-lang-list swe` against an old
+American pressing — English track, nothing else — selected no audio, wrote the
+film silent, and exited 0. A successful encode of a silent movie, with
+`AudioTrackSelectionBehavior`, `--all-audio` and `AudioEncoderFallback` all
+powerless to change it; the last of those is the fallback *encoder*, not a
+fallback track, which is part of why this looked covered.
+
+The file is now read before the encode. When the wanted language is on it,
+nothing changes at all — the flag goes out exactly as before. When it is not,
+the list becomes `any`, and the preset's own `AudioTrackSelectionBehavior`
+does what it always does with it. `any` and not `und`: `und` is a real
+language in HandBrake's table, Unknown, matching only tracks tagged that way,
+and older presets merely had it rewritten to `any` on import. The disc still
+cannot answer in the language asked for — that is the disc, and no flag
+changes it — but the choice is between the wrong language and no sound, and
+the wrong language is watchable. The job log now says so and lists what the
+disc actually carries.
+
+**And the output is checked afterwards, because the language list is not the
+only way to get there.** An Auto Passthru that cannot be satisfied, and a
+mixdown at a samplerate the encoder will not take, both drop tracks and carry
+on to exit 0. So the source and the output are compared: audio going in and
+none coming out is now a failed encode rather than a finished film, named in
+the job log, with Retry re-encoding from the raw files and no disc needed. A
+source that never had sound is not a fault and is left alone, and a machine
+without ffprobe fails nothing — the check exists to catch a definite loss, not
+to block an encode over a question it could not answer.
+
+**Re-encode says when it cannot help.** Whoever finds a mute film is going to
+press Re-encode, and when the raw rip is gone that re-encodes the silent file
+into a second silent file forty minutes later. Sound that is not in the file
+does not come back out of it. The page says so and still allows it, since a
+container change is a real reason to re-encode a silent file. Films already in
+the library from before this release need the disc again.
+
 ## 1.23.0
 
 The general review reached the three modules nothing had ever reviewed —

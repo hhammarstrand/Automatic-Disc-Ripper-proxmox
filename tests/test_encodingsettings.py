@@ -312,3 +312,94 @@ class TestThePresetIsTheTemplate:
         data = json.loads(files[0].read_text())
         entry = encodingsettings._find_preset(data, data["PresetList"][0]["PresetName"])
         assert entry["AudioLanguageList"] == ["swe"]
+
+
+class TestAFilmIsNeverEncodedSilent:
+    """The bug this class exists for: *The Black Cauldron*, *Jumanji* and
+    *Charlotte's Web* all encoded with no audio at all and reported Done.
+
+    HandBrake has no fallback. ``hb_preset_job_add_audio`` reaches for the
+    wildcard only when the language list is *empty* — never when a non-empty
+    list matched nothing — so ``--audio-lang-list swe`` on an American
+    pressing selects no audio, writes the film mute, and exits 0. Old discs
+    carry English and nothing else, which is exactly that case.
+    """
+
+    ENGLISH_ONLY = [{"codec": "ac3", "language": "eng"}]
+    HAS_SWEDISH = [
+        {"codec": "ac3", "language": "eng"},
+        {"codec": "ac3", "language": "swe"},
+    ]
+    UNTAGGED = [{"codec": "ac3", "language": ""}]
+
+    def _config(self, **values):
+        base = {
+            "audio_language": "swe", "video_quality": 0, "max_height": 0,
+            "ffmpeg_path": "/usr/bin/ffmpeg",
+        }
+        base.update(values)
+        return types.SimpleNamespace(**base)
+
+    def _asked(self, monkeypatch, streams, **values):
+        from adr import vaapi
+
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: streams)
+        return encodingsettings.audio_language_list(
+            self._config(**values), "/raw/1/title00.mkv",
+        )
+
+    def test_a_disc_with_the_language_is_left_completely_alone(self, monkeypatch):
+        """The common case must not change. Someone with Swedish discs has a
+        working installation and an update that started keeping English
+        alongside would be a regression dressed as a fix."""
+        assert self._asked(monkeypatch, self.HAS_SWEDISH) == "swe"
+
+    def test_a_disc_without_it_asks_for_whatever_is_there(self, monkeypatch):
+        assert self._asked(monkeypatch, self.ENGLISH_ONLY) == "any"
+
+    def test_the_wildcard_is_any_and_not_und(self, monkeypatch):
+        """'und' is a real language in HandBrake's table — Unknown — and
+        matches only tracks tagged that way. Getting this wrong reintroduces
+        the silence with a flag that looks like it fixed it."""
+        assert self._asked(monkeypatch, self.ENGLISH_ONLY) != "und"
+        assert encodingsettings.ANY_LANGUAGE == "any"
+
+    def test_an_untagged_disc_still_gets_its_audio(self, monkeypatch):
+        """Nothing to match against is not a reason to produce silence."""
+        assert self._asked(monkeypatch, self.UNTAGGED) == "any"
+
+    def test_an_unreadable_file_changes_nothing(self, monkeypatch):
+        """Without ffprobe there is no evidence either way, and guessing
+        'any' would quietly undo the language setting on every disc. The
+        check after the encode is what catches this case."""
+        assert self._asked(monkeypatch, []) == "swe"
+
+    def test_no_language_wanted_means_no_flag_at_all(self, monkeypatch):
+        assert self._asked(monkeypatch, self.ENGLISH_ONLY, audio_language="") == ""
+
+    def test_a_two_letter_setting_is_matched_against_the_disc(self, monkeypatch):
+        """Someone types 'sv' and the disc says 'swe'. Failing to connect
+        those would fall back on a disc that has exactly what was asked for."""
+        assert self._asked(monkeypatch, self.HAS_SWEDISH, audio_language="sv") == "swe"
+
+    def test_the_flag_the_encoder_gets_carries_the_fallback(self, monkeypatch):
+        """audio_language_list is only right if handbrake_overrides uses it."""
+        from adr import vaapi
+
+        monkeypatch.setattr(vaapi, "audio_streams", lambda exe, path: self.ENGLISH_ONLY)
+        args = encodingsettings.handbrake_overrides(
+            self._config(), "/raw/1/title00.mkv",
+        )
+        assert args == ["--audio-lang-list", "any"]
+
+    def test_without_a_file_the_arguments_are_unchanged(self, monkeypatch):
+        """The encoder test builds a command with no source to probe, and must
+        still produce the command a real encode would."""
+        args = encodingsettings.handbrake_overrides(self._config())
+        assert args == ["--audio-lang-list", "swe"]
+
+    def test_the_language_can_be_read_back_off_the_arguments(self):
+        overrides = ["--audio-lang-list", "any", "-q", "20"]
+        assert encodingsettings.requested_language(overrides) == "any"
+        assert encodingsettings.requested_language(["-q", "20"]) == ""
+        assert encodingsettings.requested_language(["--audio-lang-list"]) == ""

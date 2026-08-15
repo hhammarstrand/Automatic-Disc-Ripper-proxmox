@@ -234,6 +234,40 @@ def describe_audio_choice(streams: list[dict], wanted: str) -> str:
     )
 
 
+def audio_went_missing(exe: str, source: Path, produced: Path) -> str:
+    """Why the encode should be treated as failed, or "" if the audio survived.
+
+    An encoder can drop every audio track and still exit 0: HandBrake does it
+    whenever the language list matches nothing on the disc. The result is a
+    film that plays perfectly, in silence, reported as a success — and the
+    only thing that notices is somebody sitting down to watch it a week later,
+    by which time the raw files have been cleaned up and the disc is back on
+    the shelf.
+
+    So the output is asked what it ended up with. The source is asked too,
+    because the two facts are only worth anything together: a disc that never
+    had sound is not a fault, and refusing to finish one would be a new bug
+    replacing the old one. The complaint is made only when audio existed and
+    then did not.
+
+    Anything unreadable — no ffprobe, an odd container — counts as no
+    complaint. This exists to catch a definite loss, not to block an encode
+    over a question it could not answer.
+    """
+    if not source.exists() or not produced.exists():
+        return ""
+    if not audio_streams(exe, source):
+        return ""
+    if audio_streams(exe, produced):
+        return ""
+    return (
+        f"The encode finished with no audio at all: {source.name} has sound "
+        f"and {produced.name} has none. Nothing that plays silently is worth "
+        "keeping, so this counts as a failure rather than a finished film. "
+        "Retry re-encodes it from the raw files — the disc is not needed."
+    )
+
+
 def audio_plan(
     exe: str, input_path: Path, output_path: Path, language: str = "",
 ) -> list[str]:
@@ -572,6 +606,17 @@ class VaapiEncoder:
             self._active_proc = None
 
         if proc.returncode == 0 and output_path.exists() and output_path.stat().st_size > 0:
+            # A clean exit is not proof there is anything to listen to. The
+            # mapping here always keeps a track, but a codec that refused
+            # halfway would still leave ffmpeg happy and the film mute, and
+            # that is not a thing to find out a week later.
+            silent = audio_went_missing(self._exe, input_path, output_path)
+            if silent:
+                result.error = silent
+                logger.error("Encode produced no audio: %s", output_path)
+                if self.log_sink:
+                    self.log_sink(silent)
+                return result
             result.success = True
             return result
 

@@ -611,6 +611,25 @@ encoders because HandBrake could not reach the GPU, got English again with
 nothing saying why. A language typed into Settings still wins, because someone
 typed it; the job log names which of the two the answer came from.
 
+**A disc that cannot answer in that language still gets its audio.** HandBrake
+has no fallback of its own: `hb_preset_job_add_audio` reaches for the wildcard
+only when the language list is *empty*, never when a non-empty list matched
+nothing. So `--audio-lang-list swe` against an American pressing selects no
+audio, writes the film silent, and exits 0 — which is how *The Black
+Cauldron*, *Jumanji* and *Charlotte's Web* all came out mute with the job
+saying Done. The file is therefore checked before the encode, and when the
+wanted language is not on it the list becomes `any` instead, which the
+preset's `AudioTrackSelectionBehavior` then treats as it treats everything
+else. The job log says the language was not on this disc and lists what was.
+
+**And the output is checked afterwards, because that is not the only way.** An
+Auto Passthru that cannot be satisfied and a mixdown at a samplerate the
+encoder refuses both drop tracks and carry on, all the way to exit 0. So the
+source and the output are compared: audio going in and none coming out is a
+failed encode, not a finished film. Retry re-encodes it from the raw files
+without the disc. A source that never had sound is not a fault and is left
+alone.
+
 The encoder test runs the same overrides a real encode would, so a flag
 HandBrake rejects shows up in two seconds instead of forty minutes into a rip.
 

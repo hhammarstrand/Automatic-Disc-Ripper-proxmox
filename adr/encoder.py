@@ -52,7 +52,7 @@ def _last_meaningful(lines: list[str]) -> str:
     return candidates[-1]
 
 
-def describe_audio_request(config) -> str:
+def describe_audio_request(config, input_path=None, overrides=None) -> str:
     """What HandBrake has been told about audio, for the job log.
 
     HandBrake's language rules live in the preset — a JSON file nobody opens
@@ -61,8 +61,8 @@ def describe_audio_request(config) -> str:
     gone wrong (the setting, the preset, the disc) and no way to tell them
     apart.
     """
-    from adr.encodingsettings import handbrake_overrides, language
-    from adr.vaapi import normalise_language
+    from adr.encodingsettings import handbrake_overrides, language, requested_language
+    from adr.vaapi import audio_streams, normalise_language
 
     preset = getattr(config, "handbrake_preset", "") or "the preset"
     wanted = language(config)
@@ -81,13 +81,35 @@ def describe_audio_request(config) -> str:
         "Settings → Encoding → Spoken language" if explicit
         else f"the preset '{preset}', since Settings → Encoding leaves it blank"
     )
-    overrides = handbrake_overrides(config)
+    if overrides is None:
+        overrides = handbrake_overrides(config, input_path)
+    asked = requested_language(overrides)
+
+    # The interesting case, and the one that used to produce a silent film:
+    # the language asked for is not on this disc. Worth a second probe to say
+    # what is, because "why is this in English" and "why is this mute" are the
+    # same question and this line answers both.
+    if asked and asked != wanted:
+        streams = audio_streams(
+            getattr(config, "ffmpeg_path", "") or "ffmpeg", Path(input_path),
+        ) if input_path else []
+        listing = ", ".join(
+            f"{index}:{stream.get('language') or 'untagged'}"
+            for index, stream in enumerate(streams)
+        ) or "no readable tracks"
+        return (
+            f"Audio: '{wanted}' was asked for (from {source}), but this file "
+            f"has no track in it — it carries {listing}. So HandBrake is being "
+            f"asked for '{asked}' instead and will keep what the disc does "
+            "have. Left as it was it would have matched nothing and written "
+            "the film with no sound at all."
+        )
+
     flags = " ".join(overrides) if overrides else "(none)"
     return (
         f"Audio: asking HandBrake for '{wanted}' (from {source}) — {flags}. "
         "How many matching tracks it keeps is the preset's "
-        "AudioTrackSelectionBehavior; if the disc has no track in that "
-        "language the preset falls back to its own rules."
+        "AudioTrackSelectionBehavior."
     )
 
 
@@ -237,7 +259,12 @@ class HandBrakeEncoder:
         # The settings that mean the same thing whichever encoder runs.
         # HandBrake applies its own flags after the preset, so each of these
         # replaces one preset value and leaves the rest of it intact.
-        cmd.extend(handbrake_overrides(self._config))
+        #
+        # The input file goes along because the audio flag depends on it: a
+        # language list matching nothing on this disc makes HandBrake write
+        # the film with no sound and exit 0.
+        overrides = handbrake_overrides(self._config, input_path)
+        cmd.extend(overrides)
 
         # Append extra args if configured — last, so a hand-written argument
         # still wins over anything the settings page produced.
@@ -255,7 +282,9 @@ class HandBrakeEncoder:
         # what was asked for — and the setting, the preset and the disc are
         # three different places it could have gone wrong.
         if self.log_sink:
-            self.log_sink(describe_audio_request(self._config))
+            self.log_sink(
+                describe_audio_request(self._config, input_path, overrides)
+            )
 
         env = encode_env(self._config)
         if env is not None:
@@ -405,8 +434,24 @@ class HandBrakeEncoder:
                 self._process_registry.unregister(job_id, proc)
 
             if proc.returncode == 0 and output_path.exists():
-                result.success = True
-                logger.info("Encode complete: %s (%.1f MB)", output_path, output_path.stat().st_size / BYTES_PER_MB)
+                # Exit 0 is not the same as a film worth keeping. HandBrake
+                # drops every audio track and still reports success whenever
+                # the language list matched nothing, so the output is asked
+                # what it actually ended up with before this says Done.
+                from adr.vaapi import audio_went_missing
+
+                silent = audio_went_missing(
+                    getattr(self._config, "ffmpeg_path", "") or "ffmpeg",
+                    input_path, output_path,
+                )
+                if silent:
+                    result.error = silent
+                    logger.error("Encode produced no audio: %s", output_path)
+                    if self.log_sink:
+                        self.log_sink(silent)
+                else:
+                    result.success = True
+                    logger.info("Encode complete: %s (%.1f MB)", output_path, output_path.stat().st_size / BYTES_PER_MB)
             else:
                 result.error = f"HandBrake exited with code {proc.returncode}"
                 if not output_path.exists():
