@@ -855,6 +855,30 @@ def _register_api_routes(app: Flask) -> None:
         finally:
             session.close()
 
+    @app.get("/api/jobs/<int:job_id>/series-suggestion")
+    def api_series_suggestion(job_id):
+        """Where this disc should start numbering, for the dialog to fill in.
+
+        The pipeline already works this out when it recognises a series on its
+        own. Nobody let it, most of the time: a disc gets marked as a series by
+        hand from the dashboard, and that path used episode 1 every time
+        however plainly the label said "dvd 2" — which is how a box set ends up
+        as three copies of S01E01. The person doing the marking is precisely
+        the one who should be shown the answer.
+        """
+        from adr.series import suggest_numbering
+
+        session = get_session()
+        try:
+            job = session.get(Job, job_id)
+            if not job:
+                return fail("Job not found", 404)
+            return jsonify({"ok": True, **suggest_numbering(session, job)})
+        except SQLAlchemyError as exc:
+            return fail(str(exc), 500)
+        finally:
+            session.close()
+
     # ------------------------------------------------------------------ #
     # Series mode
     # ------------------------------------------------------------------ #

@@ -884,14 +884,14 @@ class TestFindingTheEarlierDiscs:
 
     def test_it_matches_the_show_across_different_labels(self, tmp_path):
         from adr.models import get_session, init_db
-        from adr.pipeline import _earlier_discs
+        from adr.series import earlier_discs
 
         init_db()
         session = get_session()
         try:
             self._job(session, "SALTKRAKAN_D1", 1, [1, 2, 3, 4, 5])
             this = self._job(session, "SALTKRAKAN_D2", 1, [])
-            found = _earlier_discs(session, "Saltkrakan", this)
+            found = earlier_discs(session, "Saltkrakan", this)
             assert found == [{"disc": 1, "last_episode": 5}]
         finally:
             session.close()
@@ -899,51 +899,248 @@ class TestFindingTheEarlierDiscs:
     def test_another_season_is_not_carried_on_from(self, tmp_path):
         """Season 2 disc 1 must not continue season 1."""
         from adr.models import get_session, init_db
-        from adr.pipeline import _earlier_discs
+        from adr.series import earlier_discs
 
         init_db()
         session = get_session()
         try:
             self._job(session, "SALTKRAKAN_S01_D1", 1, [1, 2, 3])
             this = self._job(session, "SALTKRAKAN_S02_D2", 2, [])
-            assert _earlier_discs(session, "Saltkrakan", this) == []
+            assert earlier_discs(session, "Saltkrakan", this) == []
         finally:
             session.close()
 
     def test_a_different_show_is_not_carried_on_from(self, tmp_path):
         from adr.models import get_session, init_db
-        from adr.pipeline import _earlier_discs
+        from adr.series import earlier_discs
 
         init_db()
         session = get_session()
         try:
             self._job(session, "THE_WIRE_D1", 1, [1, 2, 3])
             this = self._job(session, "SALTKRAKAN_D2", 1, [])
-            assert _earlier_discs(session, "Saltkrakan", this) == []
+            assert earlier_discs(session, "Saltkrakan", this) == []
         finally:
             session.close()
 
     def test_a_disc_ripped_as_a_film_is_ignored(self, tmp_path):
         from adr.models import get_session, init_db
-        from adr.pipeline import _earlier_discs
+        from adr.series import earlier_discs
 
         init_db()
         session = get_session()
         try:
             self._job(session, "SALTKRAKAN_D1", 1, [], content_type="movie")
             this = self._job(session, "SALTKRAKAN_D2", 1, [])
-            assert _earlier_discs(session, "Saltkrakan", this) == []
+            assert earlier_discs(session, "Saltkrakan", this) == []
         finally:
             session.close()
 
     def test_a_nameless_disc_looks_nothing_up(self, tmp_path):
         from adr.models import get_session, init_db
-        from adr.pipeline import _earlier_discs
+        from adr.series import earlier_discs
 
         init_db()
         session = get_session()
         try:
             this = self._job(session, "", 1, [])
-            assert _earlier_discs(session, "", this) == []
+            assert earlier_discs(session, "", this) == []
         finally:
             session.close()
+
+
+class TestMarkingADiscAsASeriesByHand:
+    """The path that actually gets used, and the one the continuation missed.
+
+    Saltkråkan was tagged as a series by hand from the dashboard, not by
+    detection — and that path set episode 1 every time, however plainly the
+    label said "dvd 2". Three discs, three claims on S01E01.
+    """
+
+    def _job(self, session, label, season=None, episodes=(), content_type="movie",
+             first_episode=None):
+        from adr.models import Job, Track
+
+        job = Job(disc_label=label, drive="/dev/sr0", content_type=content_type,
+                  series_season=season, series_first_episode=first_episode)
+        session.add(job)
+        session.commit()
+        for number in episodes:
+            session.add(Track(job_id=job.id, track_number=number,
+                              filename=f"t{number}.mkv", episode_number=number))
+        session.commit()
+        return job
+
+    def _suggest(self, session, job):
+        from adr.series import suggest_numbering
+
+        return suggest_numbering(session, job)
+
+    def test_a_dvd_2_label_is_offered_the_next_episode(self, tmp_path):
+        from adr.models import get_session, init_db
+
+        init_db()
+        session = get_session()
+        try:
+            self._job(session, "Saltkrakan dvd 1", season=1, episodes=[1, 2, 3, 4, 5],
+                      content_type="series", first_episode=1)
+            this = self._job(session, "Saltkrakan dvd 2")
+            out = self._suggest(session, this)
+            assert out["disc"] == 2
+            assert out["first_episode"] == 6
+            assert out["apply"] is True
+            assert "episode 6" in out["reason"]
+        finally:
+            session.close()
+
+    def test_the_first_disc_is_offered_episode_one_quietly(self, tmp_path):
+        from adr.models import get_session, init_db
+
+        init_db()
+        session = get_session()
+        try:
+            this = self._job(session, "Saltkrakan dvd 1")
+            out = self._suggest(session, this)
+            assert out["first_episode"] == 1
+            assert out["reason"] == ""
+        finally:
+            session.close()
+
+    def test_a_label_with_no_disc_number_suggests_nothing(self, tmp_path):
+        """Which is every home-burned disc. The dialog must be left alone."""
+        from adr.models import get_session, init_db
+
+        init_db()
+        session = get_session()
+        try:
+            this = self._job(session, "LG_COMBI_RECORDER")
+            out = self._suggest(session, this)
+            assert out["disc"] is None
+            assert out["apply"] is False
+        finally:
+            session.close()
+
+    def test_reopening_the_dialog_cannot_overwrite_a_chosen_number(self, tmp_path):
+        """Someone who typed 12 and reopened the dialog must still see 12."""
+        from adr.models import get_session, init_db
+
+        init_db()
+        session = get_session()
+        try:
+            self._job(session, "Saltkrakan dvd 1", season=1, episodes=[1, 2, 3],
+                      content_type="series", first_episode=1)
+            this = self._job(session, "Saltkrakan dvd 2", season=1,
+                             content_type="series", first_episode=12)
+            assert self._suggest(session, this)["apply"] is False
+        finally:
+            session.close()
+
+    def test_the_season_comes_off_the_label_when_it_says_one(self, tmp_path):
+        from adr.models import get_session, init_db
+
+        init_db()
+        session = get_session()
+        try:
+            this = self._job(session, "THE_WIRE_S02_D1")
+            assert self._suggest(session, this)["season"] == 2
+        finally:
+            session.close()
+
+    def test_the_endpoint_answers_for_the_dialog(self, flask_client_factory=None):
+        """Wired up, not merely written."""
+        import queue
+
+        from adr.config import Config
+        from adr.models import get_session, init_db
+        from web.app import create_app
+
+        import tempfile
+        from pathlib import Path
+
+        root = Path(tempfile.mkdtemp())
+        for name in ("raw", "completed", "staging"):
+            (root / name).mkdir()
+        config = Config(str(root / "adr.yaml"))
+        config.update({
+            "completed_path": str(root / "completed"),
+            "raw_path": str(root / "raw"),
+            "staging_path": str(root / "staging"),
+        })
+        init_db()
+        session = get_session()
+        try:
+            self._job(session, "Saltkrakan dvd 1", season=1, episodes=[1, 2, 3, 4, 5],
+                      content_type="series", first_episode=1)
+            this = self._job(session, "Saltkrakan dvd 2")
+            job_id = this.id
+        finally:
+            session.close()
+
+        client = create_app(config).test_client()
+        body = client.get(f"/api/jobs/{job_id}/series-suggestion").get_json()
+        assert body["ok"] is True
+        assert body["first_episode"] == 6
+        assert body["apply"] is True
+
+    def test_a_missing_job_is_a_404(self):
+        import tempfile
+        from pathlib import Path
+
+        from adr.config import Config
+        from adr.models import init_db
+        from web.app import create_app
+
+        root = Path(tempfile.mkdtemp())
+        for name in ("raw", "completed", "staging"):
+            (root / name).mkdir()
+        config = Config(str(root / "adr.yaml"))
+        config.update({"completed_path": str(root / "completed"),
+                       "raw_path": str(root / "raw"),
+                       "staging_path": str(root / "staging")})
+        init_db()
+        client = create_app(config).test_client()
+        assert client.get("/api/jobs/999999/series-suggestion").status_code == 404
+
+
+class TestTheDiscMarkerIsReadCorrectly:
+    """"dvd 2" found the right number by accident and cut the show name in the
+    wrong place — "Saltkråkan dvd 2" parsed as show "Saltkråkan dv", because
+    the bare `d` alternative matched the second d of "dvd". Both discs of a
+    set mangled it identically, so they still matched each other, which is
+    exactly how a bug like that survives being used."""
+
+    def _parse(self, label):
+        from adr.series import parse_series_label
+
+        return parse_series_label(label)
+
+    def test_dvd_2_gives_a_clean_show_name(self):
+        assert self._parse("Saltkråkan dvd 2") == {
+            "show": "Saltkråkan", "season": None, "disc": 2}
+
+    def test_dvd_without_a_space(self):
+        assert self._parse("Saltkråkan dvd1")["disc"] == 1
+        assert self._parse("Saltkråkan dvd1")["show"] == "Saltkråkan"
+
+    def test_an_underscore_label_still_works(self):
+        """\\b would have broken this: "_" is a word character, and every
+        second disc label is SHOW_D2."""
+        assert self._parse("SALTKRAKAN_D2") == {
+            "show": "Saltkrakan", "season": None, "disc": 2}
+        assert self._parse("SALTKRAKAN_DVD2")["disc"] == 2
+
+    def test_the_older_spellings_still_work(self):
+        assert self._parse("Firefly Season 1 Disc 2") == {
+            "show": "Firefly", "season": 1, "disc": 2}
+        assert self._parse("THE_WIRE_S02_D3")["disc"] == 3
+        assert self._parse("Disk 4")["disc"] == 4
+
+    def test_a_title_ending_in_d_and_a_number_is_not_a_disc(self):
+        """"Deadwood 2" claimed to be disc 2 on the d of "-wood"."""
+        assert self._parse("Deadwood 2")["disc"] is None
+
+    def test_a_year_in_a_title_is_not_a_disc_number(self):
+        assert self._parse("Blade Runner 2049")["disc"] is None
+
+    def test_dvd_with_no_number_is_not_a_disc_marker(self):
+        assert self._parse("MY_DVD")["disc"] is None

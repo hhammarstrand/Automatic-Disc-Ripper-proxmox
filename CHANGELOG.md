@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.28.0
+
+**"dvd 2" now reads as disc 2, and marking a disc as a series by hand gets the
+same answer detection would.**
+
+Two faults, both found by someone saying how they actually use this.
+
+The disc marker matched `disc`, `disk` and a bare `d`, but not `dvd` — so
+"Saltkråkan dvd 2" found the right number by accident, on the *second* d of
+"dvd", and then cut the show name in the wrong place: show "Saltkråkan dv".
+Every disc of a set mangled it identically, so they still matched each other,
+which is exactly how a fault like that survives being used. `dvd` is in the
+alternation now, and the bare `d` is fenced by lookarounds — without them
+"Deadwood 2" claimed to be disc 2. Not `\b`, which treats "_" as a word
+character and would have broken every SHOW_D2 label.
+
+More important: 1.27.0 wired the disc-to-disc numbering into *detection* only.
+Most box sets never go that way — a disc is marked as a series by hand from the
+dashboard, and that path set episode 1 every time however plainly the label
+said which disc it was. So the dialog now asks where this disc belongs and
+fills the answer in, with the reason beside it. It is a suggestion in a field
+that was already editable, it never overwrites a number someone has already
+chosen, and a label with no disc number leaves the dialog exactly as it was.
+
 ## 1.27.0
 
 **A box set disc that names itself continues where the last one stopped.**

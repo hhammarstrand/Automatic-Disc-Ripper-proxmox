@@ -52,6 +52,7 @@ from adr.notify import Notifier
 from adr.plex import PlexNotifier
 from adr.ripper import MakeMKVRipper
 from adr.series import (
+    earlier_discs,
     episode_after_previous_discs,
     looks_like_series,
     parse_series_label,
@@ -173,55 +174,6 @@ def _remove_superseded(task: "EncodeTask", result) -> None:
             Path(source).parent.rmdir()          # only if it is now empty
     except OSError:
         logger.warning("Could not remove the superseded %s", source, exc_info=True)
-
-
-def _earlier_discs(session, show: str, job) -> list[dict]:
-    """What earlier discs of this show and season did: disc number and last episode.
-
-    Identity comes from the *parsed* show name rather than the raw label,
-    because that is the part two discs of one box set agree on:
-    ``SALTKRAKAN_D2`` and ``SALTKRAKAN_D3`` are the same programme and
-    different strings. The season has to match too — season 2 disc 1 must not
-    continue season 1.
-
-    Only jobs that actually numbered something count. A disc that failed, or
-    was ripped as a film, has nothing to say about where the next one starts.
-    """
-    from adr.models import Job, Track
-    from adr.series import parse_series_label
-
-    wanted = (show or "").strip().casefold()
-    if not wanted:
-        return []
-
-    season = int(1 if job.series_season is None else job.series_season)
-    out: list[dict] = []
-    try:
-        candidates = (
-            session.query(Job)
-            .filter(Job.content_type == "series")
-            .filter(Job.id != job.id)
-            .filter(Job.series_season == season)
-            .order_by(Job.id.desc())
-            .limit(60)
-            .all()
-        )
-        for other in candidates:
-            other_label = parse_series_label(other.disc_label or "")
-            if (other_label["show"] or "").strip().casefold() != wanted:
-                continue
-            numbers = [
-                t.episode_number for t in (other.tracks or [])
-                if t.episode_number
-            ]
-            out.append({
-                "disc": other_label["disc"],
-                "last_episode": max(numbers) if numbers else None,
-            })
-    except Exception:                      # noqa: BLE001 - never fail a rip
-        logger.debug("Could not look up earlier discs", exc_info=True)
-        return []
-    return out
 
 
 def _cancelled(session, job) -> bool:
@@ -1441,7 +1393,7 @@ class DrivePipeline:
                         # folder alone cannot.
                         first, why = episode_after_previous_discs(
                             guess["disc"],
-                            _earlier_discs(session, guess["show"], job),
+                            earlier_discs(session, guess["show"], job),
                         )
                         job.series_first_episode = first
                         session.commit()

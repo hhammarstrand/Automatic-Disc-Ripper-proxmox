@@ -946,8 +946,31 @@ function editSeries(jobId, season, firstEpisode, suggestedShow, suggestedYear) {
     document.getElementById('seriesShowName').value = suggestedShow || '';
     document.getElementById('seriesShowYear').value = suggestedYear || '';
     document.getElementById('seriesModeHint').classList.add('d-none');
+    const discHint = document.getElementById('seriesDiscHint');
+    discHint.classList.add('d-none');
+    discHint.textContent = '';
     previewSeries();
     new bootstrap.Modal(document.getElementById('seriesModal')).show();
+
+    // Where the disc label says this one belongs. Asked for after the dialog
+    // is already open and filled in, so a slow answer never delays it and a
+    // failed one changes nothing.
+    fetch(`/api/jobs/${jobId}/series-suggestion`)
+        .then(r => r.json())
+        .then(d => {
+            if (!d.ok || !d.apply) return;
+            // Still the same job? The dialog may have been closed and
+            // reopened on another one while this was in flight.
+            if (document.getElementById('seriesJobId').value !== String(jobId)) return;
+            document.getElementById('seriesSeason').value = d.season;
+            document.getElementById('seriesFirstEpisode').value = d.first_episode;
+            if (d.reason) {
+                discHint.textContent = d.reason;
+                discHint.classList.remove('d-none');
+            }
+            previewSeries();
+        })
+        .catch(() => {});
 }
 
 // The show has to be looked up against TMDb's *TV* namespace. Identification

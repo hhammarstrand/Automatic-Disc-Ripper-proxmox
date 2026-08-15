@@ -49,7 +49,23 @@ _SxxExx_RE = re.compile(r"[Ss](\d{1,2})[\s._-]?[Ee](\d{1,3})")
 _SEASON_WORD_RE = re.compile(
     r"(?:season|series|s(?:sn)?)[\s._-]*(\d{1,2})", re.IGNORECASE,
 )
-_DISC_RE = re.compile(r"(?:disc|disk|d)[\s._-]*(\d{1,2})", re.IGNORECASE)
+#: "Disc 2", "D2", "DVD 2" — the marker that says which disc of a set this is.
+#:
+#: ``dvd`` comes first because alternation is ordered: without it the bare
+#: ``d`` matched the *second* d of "dvd", which found the right number by
+#: accident and then cut the show name in the wrong place — "Saltkråkan dvd 2"
+#: parsed as show "Saltkråkan dv". Both discs of a set mangled it identically
+#: so they still matched each other, which is exactly how a bug like this
+#: survives being used.
+#:
+#: The lookarounds are what keep the bare ``d`` honest: without them
+#: "Deadwood 2" matched on the d of "-wood" and claimed to be disc 2. They
+#: check for an alphanumeric rather than using \b, because \b treats "_" as a
+#: word character and every second disc label is SHOW_D2.
+_DISC_RE = re.compile(
+    r"(?<![A-Za-z0-9])(?:dvd|disc|disk|d)[\s._-]*(\d{1,2})(?![A-Za-z0-9])",
+    re.IGNORECASE,
+)
 
 
 def _hms(seconds: int) -> str:
@@ -261,6 +277,86 @@ def episode_after_previous_discs(
         f"ended at episode {max(earlier)}, so this one starts at episode "
         f"{start}. Change it above if the box set is not in disc order."
     )
+
+
+def earlier_discs(session, show: str, job) -> list[dict]:
+    """What earlier discs of this show and season did: disc number and last episode.
+
+    Identity comes from the *parsed* show name rather than the raw label,
+    because that is the part two discs of one box set agree on:
+    ``SALTKRAKAN_D2`` and ``SALTKRAKAN_D3`` are the same programme and
+    different strings. The season has to match too — season 2 disc 1 must not
+    continue season 1.
+
+    Only jobs that actually numbered something count. A disc that failed, or
+    was ripped as a film, has nothing to say about where the next one starts.
+    """
+    from adr.models import Job
+
+    wanted = (show or "").strip().casefold()
+    if not wanted:
+        return []
+
+    season = int(1 if job.series_season is None else job.series_season)
+    out: list[dict] = []
+    try:
+        candidates = (
+            session.query(Job)
+            .filter(Job.content_type == "series")
+            .filter(Job.id != job.id)
+            .filter(Job.series_season == season)
+            .order_by(Job.id.desc())
+            .limit(60)
+            .all()
+        )
+        for other in candidates:
+            other_label = parse_series_label(other.disc_label or "")
+            if (other_label["show"] or "").strip().casefold() != wanted:
+                continue
+            numbers = [
+                t.episode_number for t in (other.tracks or [])
+                if t.episode_number
+            ]
+            out.append({
+                "disc": other_label["disc"],
+                "last_episode": max(numbers) if numbers else None,
+            })
+    except Exception:                      # noqa: BLE001 - never fail a rip
+        logger.debug("Could not look up earlier discs", exc_info=True)
+        return []
+    return out
+
+
+def suggest_numbering(session, job) -> dict:
+    """Where this disc should start, for anyone about to be asked.
+
+    The pipeline works this out when it recognises a series on its own. Half
+    the time nobody lets it: a disc is marked as a series by hand, from the
+    dashboard, and that path set episode 1 every time however clearly the
+    label said "dvd 2". The person doing the marking is exactly the person who
+    should be shown the answer, so the same rule is available to them.
+
+    ``apply`` is false once a job already carries a series number, so
+    reopening the dialog cannot overwrite a choice someone made.
+    """
+    label = parse_series_label(getattr(job, "disc_label", "") or "")
+    season = label["season"] or (
+        1 if job.series_season is None else int(job.series_season)
+    )
+    first, why = episode_after_previous_discs(
+        label["disc"], earlier_discs(session, label["show"], job),
+    )
+    already = (
+        (job.content_type or "movie") == "series"
+        and job.series_first_episode is not None
+    )
+    return {
+        "season": int(season),
+        "first_episode": int(first),
+        "disc": label["disc"],
+        "reason": why,
+        "apply": bool(label["disc"] and not already),
+    }
 
 
 def make_series_folder_name(show: str, year: int | None) -> str:
