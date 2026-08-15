@@ -1,5 +1,49 @@
 # Changelog
 
+## 1.39.0
+
+**The dashboard no longer reloads itself out from under you.** Three of the
+pollers reload the whole page when the server's answer stops matching what is
+on screen — a new job appeared, a job changed phase, the "ripping will fail"
+banner went stale. That is right for a page nobody is touching and wrong at
+the moment it fires most: this application is operated from a phone at the
+drives, and putting disc 2 in is what creates the new job, while the dialog
+naming disc 1 is still open with a half-typed show name in it. The reload took
+the show name with it, every time, and it looked like the phone had dropped
+the connection.
+
+A reload asked for by a timer now waits until nothing is open — no modal, no
+sheet, no field with the cursor in it — and then happens. Waits, rather than
+being cancelled: a dashboard that quietly never catches up is a second bug,
+and a harder one to notice. The reloads that follow a button press are
+untouched, because by then the dialog has closed and the press was the request.
+
+**The phone asks for four files nobody ever told it to ask for, and now gets
+them.** A favicon, two spellings of the Apple touch icon, and a web manifest:
+all four were 404s, several per page load, in the one log anybody reads when
+something is actually wrong. With the manifest and an icon, adding the
+dashboard to the home screen produces an application — its own window, the
+dark background behind the status bar from the first frame — instead of a
+Safari window with a screenshot of the page as its tile.
+
+The icons are drawn by `tools/make_icons.py`, which uses zlib and struct and
+nothing else. Pillow is the obvious tool and is deliberately not one:
+regenerating four files about once a year is a poor reason to put an imaging
+library into a container that exists to rip discs, and icons that can only be
+recreated on a machine that happens to have one are worse than icons with a
+script. There is no service worker and there is not meant to be — a ripper you
+cannot reach is a ripper that is not running, and a cache serving yesterday's
+dashboard would say the opposite.
+
+**Touch fundamentals.** Every control declares `touch-action: manipulation`,
+which drops the 300ms the browser otherwise holds each tap in case a second
+one follows; on a page already sized for a phone there is nothing to
+double-tap-zoom to, so the delay was pure lag. Buttons, selects and nav links
+join the 44px floor the small buttons already had. And every field is pinned
+to 16px: below that iOS zooms the page in when the field takes focus and does
+not zoom back out, so one tap on the season number left the dashboard
+magnified and panned for the rest of the evening.
+
 ## 1.38.1
 
 **A play-all title that fits inside the episode window is no longer numbered

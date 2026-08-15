@@ -495,3 +495,205 @@ class TestThePageFitsAPhone:
     def test_the_bulk_bar_wraps(self):
         """Five controls in one non-wrapping row is wider than any phone."""
         assert "flex-wrap" in Path("web/templates/history.html").read_text()
+
+    def test_a_tap_is_not_treated_as_half_a_double_tap(self):
+        """Without touch-action the browser holds every tap for 300ms in case
+        a second one follows, and the whole application feels slow to answer
+        on the device it is mostly used from."""
+        css = Path("web/static/css/style.css").read_text()
+        assert "touch-action: manipulation" in css
+
+    def test_a_field_does_not_zoom_the_page_in_when_tapped(self):
+        """iOS zooms in on any input under 16px and does not zoom back out, so
+        one tap on the season number leaves the dashboard magnified and panned
+        for the rest of the session."""
+        css = Path("web/static/css/style.css").read_text()
+        mobile = css[css.index("max-width: 767.98px"):]
+        block = mobile[mobile.index(".form-control,"):]
+        assert "font-size: 1rem" in block[:400]
+
+
+class TestARefreshDoesNotInterruptTyping:
+    """The dashboard reloads itself when the server's answer stops matching
+    the page — a new job, a phase change, the preflight banner going stale.
+
+    That is correct for a page nobody is touching and wrong at the moment it
+    fires most often: inserting the next disc is what creates the new job, and
+    it happens while the previous disc is being named in the series dialog. The
+    reload took the half-typed show name with it. So the poller-driven reloads
+    wait for the dialog to close; the ones the user asked for by pressing a
+    button do not, because by then the dialog is gone and they are waiting for
+    exactly that.
+    """
+
+    #: The four that fire from a timer rather than from a click.
+    POLLERS = ["refreshDashboard", "updateActiveJobs", "checkPreflight"]
+
+    @staticmethod
+    def _body(name: str) -> str:
+        source = Path("web/static/js/app.js").read_text()
+        start = source.index(f"function {name}(")
+        # To the next top-level function, which is where the body ends.
+        end = source.find("\nfunction ", start + 1)
+        return source[start:end if end != -1 else len(source)]
+
+    def test_the_guard_exists(self):
+        source = Path("web/static/js/app.js").read_text()
+        assert "function uiIsBusy(" in source
+        assert "function safeReload(" in source
+
+    def test_it_rechecks_rather_than_remembering(self):
+        """Busy ends without an event to listen for, so the pending reload has
+        to keep asking. Caching the answer at scheduling time would reload the
+        moment the interval fired, dialog or not."""
+        body = self._body("safeReload")
+        assert "setInterval" in body
+        assert body.count("uiIsBusy()") >= 2
+
+    def test_one_pending_reload_however_many_pollers_ask(self):
+        """Three loops on a five-second tick would otherwise leave a queue of
+        timers all racing to reload the same page."""
+        body = self._body("safeReload")
+        assert "_reloadPending" in body
+
+    def test_it_reloads_at_once_when_nobody_is_doing_anything(self, guard):
+        assert guard["idle"] == 1
+
+    def test_an_open_dialog_holds_the_reload(self, guard):
+        """The whole point. Disc 2 going into the drive is what creates the
+        new job, and the dialog naming disc 1 is open when it happens."""
+        assert guard["whileModalOpen"] == 0
+        assert guard["whileModalOpenAfterTicks"] == 0
+
+    def test_a_focused_field_holds_it_too(self, guard):
+        """The show name is typed into a field on a page whose poller is
+        running the whole time."""
+        assert guard["whileTyping"] == 0
+        assert guard["afterTyping"] == 1
+
+    def test_an_open_sheet_holds_it(self, guard):
+        assert guard["whileSheetOpen"] == 0
+        assert guard["afterSheetClosed"] == 1
+
+    def test_the_reload_still_happens_once_the_dialog_closes(self, guard):
+        """Deferred, not cancelled: a dashboard that never catches up is its
+        own bug, and a quieter one."""
+        assert guard["afterModalClosed"] == 1
+
+    def test_it_reloads_once_and_stops_asking(self, guard):
+        """A pending reload that leaves its interval running reloads the page
+        again every second after it fires."""
+        assert guard["afterMoreTicks"] == 1
+
+    @pytest.mark.parametrize("name", POLLERS)
+    def test_no_poller_reloads_behind_the_users_back(self, name):
+        body = self._body(name)
+        assert "location.reload()" not in body, (
+            f"{name} reloads the page directly again — it has to go through "
+            "safeReload() or it will do it mid-dialog"
+        )
+        assert "safeReload" in body
+
+    def test_the_reloads_the_user_asked_for_are_left_alone(self):
+        """cancelJob and friends run after the dialog closed and after the
+        user pressed the button. Deferring those would look like the button
+        did nothing."""
+        source = Path("web/static/js/app.js").read_text()
+        assert "location.reload()" in source
+
+
+#: The script is run rather than read, because reading it is what a reviewer
+#: already did. It is loaded into a context with just enough of a browser to
+#: answer the three questions uiIsBusy asks, and then the reload is actually
+#: requested and the reloads counted.
+RELOAD_HARNESS = r"""
+const fs = require('fs');
+const vm = require('vm');
+
+const state = {modal: false, sheet: false, focus: null};
+let reloads = 0;
+let ticks = [];
+
+const context = {
+    console,
+    setTimeout: (fn) => fn,
+    clearTimeout: () => {},
+    setInterval: (fn) => { ticks.push(fn); return ticks.length; },
+    clearInterval: (id) => { ticks[id - 1] = null; },
+    fetch: () => new Promise(() => {}),
+    navigator: {},
+    location: {pathname: '/x', reload: () => { reloads += 1; }},
+    document: {
+        body: {classList: {contains: (name) =>
+            name === 'modal-open' && state.modal}},
+        querySelector: (sel) =>
+            (sel === '.offcanvas.show' && state.sheet) ? {} : null,
+        querySelectorAll: () => [],
+        getElementById: () => null,
+        addEventListener: () => {},
+        get activeElement() {
+            return state.focus === null ? null
+                : {matches: (sel) => sel.includes(state.focus)};
+        },
+    },
+};
+context.window = context;
+vm.createContext(context);
+vm.runInContext(fs.readFileSync(process.argv[2], 'utf8'), context);
+
+const tick = () => ticks.filter(Boolean).forEach(fn => fn());
+const answers = {};
+
+// Nobody is doing anything: reload straight away.
+context.safeReload();
+answers.idle = reloads;
+
+// A modal is open. It must wait, and keep waiting, however many ticks pass.
+reloads = 0; ticks = []; state.modal = true;
+context.safeReload();
+answers.whileModalOpen = reloads;
+tick(); tick();
+answers.whileModalOpenAfterTicks = reloads;
+
+// It closes. The next tick reloads, once, and stops asking.
+state.modal = false;
+tick();
+answers.afterModalClosed = reloads;
+tick(); tick();
+answers.afterMoreTicks = reloads;
+
+// A field has focus — the case the dashboard poller kept interrupting.
+reloads = 0; ticks = []; state.focus = 'input';
+context.safeReload();
+answers.whileTyping = reloads;
+state.focus = null;
+tick();
+answers.afterTyping = reloads;
+
+// A bottom sheet is open.
+reloads = 0; ticks = []; state.sheet = true;
+context.safeReload();
+answers.whileSheetOpen = reloads;
+state.sheet = false;
+tick();
+answers.afterSheetClosed = reloads;
+
+console.log(JSON.stringify(answers));
+"""
+
+
+@pytest.fixture(scope="module")
+def guard():
+    """What safeReload actually does, run in node against a stub browser."""
+    import json
+
+    if not shutil.which("node"):
+        pytest.skip("node is not installed")
+    with tempfile.TemporaryDirectory() as folder:
+        harness = Path(folder) / "harness.js"
+        harness.write_text(RELOAD_HARNESS)
+        result = subprocess.run(  # noqa: S603
+            ["node", str(harness), "web/static/js/app.js"],
+            capture_output=True, text=True)
+        assert result.returncode == 0, result.stderr
+        return json.loads(result.stdout)

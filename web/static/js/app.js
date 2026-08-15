@@ -151,6 +151,52 @@ const REFRESH_INTERVAL = 5000;
 // ------------------------------------------------------------------ //
 const _inflight = new Set();
 
+// ------------------------------------------------------------------ //
+// Reloading the page without throwing away what someone is doing
+//
+// Several of the pollers reload the whole page when the server's answer no
+// longer matches what is on screen — a new job appeared, a job changed phase,
+// the preflight warning became wrong. That is the right thing to do with a
+// page nobody is touching, and the wrong thing to do at the exact moment it
+// happens most: you are standing at the drives, naming disc 1 in the series
+// dialog, and inserting disc 2 is what creates the new job. The reload took
+// the half-typed show name with it.
+//
+// So a reload waits for the user to be finished rather than being cancelled —
+// a stale dashboard is its own problem. Busy means a modal or sheet is open,
+// or the focus is in a field; the check is repeated at fire time rather than
+// remembered, because "busy" is a state that ends without an event we can
+// listen for.
+// ------------------------------------------------------------------ //
+
+let _reloadPending = false;
+
+function uiIsBusy() {
+    return document.body.classList.contains('modal-open')
+        || document.querySelector('.offcanvas.show') !== null
+        || (document.activeElement !== null
+            && typeof document.activeElement.matches === 'function'
+            && document.activeElement.matches('input, textarea, select'));
+}
+
+function safeReload() {
+    if (!uiIsBusy()) { location.reload(); return; }
+    // One pending reload, however many pollers asked for one: five seconds of
+    // a busy dialog would otherwise leave five timers all racing to reload.
+    if (_reloadPending) return;
+    _reloadPending = true;
+    const timer = setInterval(() => {
+        if (uiIsBusy()) return;
+        clearInterval(timer);
+        // Cleared before the navigation, not after: a reload a browser
+        // declines to perform — an unload handler, a page already leaving —
+        // would otherwise leave the flag set and every later reload request
+        // silently dropped for the life of the page.
+        _reloadPending = false;
+        location.reload();
+    }, 1000);
+}
+
 function pollWithoutStacking(name, work) {
     if (_inflight.has(name)) return Promise.resolve();
     _inflight.add(name);
@@ -184,7 +230,7 @@ function refreshDashboard() {
             );
             const hasNewJob = activeJobs.some(j => !displayedIds.has(j.id));
             if (hasNewJob) {
-                location.reload();
+                safeReload();
                 return;
             }
 
@@ -211,7 +257,7 @@ function updateActiveJobs(jobs) {
         // If status changed (e.g. ripped→encoding), reload to get correct layout
         const prevStatus = card.dataset.jobStatus;
         if (prevStatus && prevStatus !== job.status) {
-            location.reload();
+            safeReload();
             return;
         }
         card.dataset.jobStatus = job.status;
@@ -277,7 +323,7 @@ function updateActiveJobs(jobs) {
     const activeIds = jobs.map(j => j.id);
     const finishedAny = displayedIds.some(id => !activeIds.includes(id));
     if (finishedAny) {
-        setTimeout(() => location.reload(), 500);
+        setTimeout(safeReload, 500);
     }
 }
 
@@ -295,7 +341,7 @@ function checkPreflight() {
     fetch('/api/preflight')
         .then(r => r.json())
         .then(d => {
-            if (d.ok === shownAsBlocked) location.reload();
+            if (d.ok === shownAsBlocked) safeReload();
         })
         .catch(() => {});
 }

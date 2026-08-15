@@ -633,16 +633,50 @@ html, body {
     overflow-x: clip;
 }
 
+/* Every touch of a control is meant as a tap. Without this a browser waits
+   300ms after each one in case a second tap follows and it was a
+   double-tap-to-zoom — on a page whose text is already sized for a phone
+   there is nothing to zoom to, and the delay reads as the application being
+   slow to answer. Not on the whole document: pinch-zoom on a log or a file
+   path is worth keeping. */
+a, button, .btn, .nav-link, label, summary,
+input, select, textarea, .list-group-item-action {
+    touch-action: manipulation;
+}
+
 @media (max-width: 767.98px) {
     /* Fingers, not pointers. Apple's floor is 44px; the table rows'
        icon buttons were 26px, and the difference is mis-taps on the
        delete button beside the retry button. */
-    .btn-sm {
+    .btn-sm,
+    .btn,
+    .form-select,
+    .navbar .nav-link,
+    .list-group-item-action {
         min-height: 44px;
+    }
+    .btn-sm {
         min-width: 44px;
+    }
+    /* inline-flex, not flex: a block-level button would take the whole row
+       and the action strips here are several buttons side by side. The list
+       items keep their own layout — several of them stack a heading over a
+       paragraph, and a flex row would put those beside each other. */
+    .btn-sm,
+    .btn {
         display: inline-flex;
         align-items: center;
         justify-content: center;
+    }
+    /* Below 16px iOS zooms the page in when a field takes focus and does not
+       zoom back out, so tapping the season number leaves the dashboard
+       magnified and panned. Bootstrap's .form-control-sm is 0.875rem, which
+       is exactly under the line. */
+    .form-control,
+    .form-select,
+    .form-control-sm,
+    .form-select-sm {
+        font-size: 1rem;
     }
     .form-check-input {
         width: 1.35em;

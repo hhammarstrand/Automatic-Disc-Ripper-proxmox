@@ -4,7 +4,19 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>{% block title %}Automatic Disc Ripper{% endblock %}</title>
+    <!-- Added to the home screen, this is an application rather than a page:
+         standalone display, the page's own background behind the status bar,
+         and an icon that is not the browser's letter tile. The iPhone asks for
+         each of these by name and logs a 404 for every one it does not find,
+         which is what the service log was full of. -->
+    <meta name="theme-color" content="#0d1117">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ADR">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="/static/icons/icon-32.png">
     <!-- Served locally rather than from a CDN. This application is an
          appliance on a LAN: the ripper keeps working when the internet is
          down, and a dashboard that renders as bare unstyled HTML at exactly

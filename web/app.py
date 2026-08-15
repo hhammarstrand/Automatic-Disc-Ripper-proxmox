@@ -10,7 +10,15 @@ import time
 from pathlib import Path
 
 import psutil
-from flask import Flask, abort, jsonify, render_template, request, send_file
+from flask import (
+    Flask,
+    abort,
+    jsonify,
+    render_template,
+    request,
+    send_file,
+    send_from_directory,
+)
 from sqlalchemy.exc import SQLAlchemyError
 
 from adr import joblog
@@ -414,6 +422,27 @@ def _register_ui_routes(app: Flask) -> None:
             "doctor.html",
             ctid=os.environ.get("ADR_CTID", "").strip() or "",
         )
+
+    # The three files a browser asks for without being told to.
+    #
+    # None of them were served, so every page load from the iPhone wrote three
+    # 404s into the service log — which is noise in the one place someone
+    # looks when something is actually wrong. Safari asks for the touch icon
+    # under two names because the precomposed spelling predates iOS 7 and it
+    # still tries it; both are answered with the same file rather than with a
+    # redirect, because a redirect is a second request for no gain.
+    #
+    # A PNG at /favicon.ico is not the ICO the name implies and every browser
+    # in current use reads it by sniffing the content anyway. The SVG in the
+    # head is still what any of them will prefer.
+    @app.route("/favicon.ico")
+    def favicon():
+        return send_from_directory(app.static_folder, "icons/icon-32.png")
+
+    @app.route("/apple-touch-icon.png")
+    @app.route("/apple-touch-icon-precomposed.png")
+    def apple_touch_icon():
+        return send_from_directory(app.static_folder, "icons/apple-touch-icon.png")
 
 
 # ------------------------------------------------------------------ #
