@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.29.0
+
+**A box-set disc now works out which show it is.** Identification runs TMDb's
+*film* search, which for a box set returns a confident-looking film — so a
+detected series was named after whatever movie its disc label happened to
+resemble, and the only cure was to open the dialog and search by hand. The
+label already parses to a show name; the TV search the dialog uses now runs on
+it without being asked.
+
+**And that search only spoke English, which is why it was never going to find
+Saltkråkan.** TMDb answers in the language it is asked in, and the show's
+English name is "Life on Seacrow Island" — a Swedish search term resembles it
+not at all. The film search had done both languages since it was written; the
+TV search had not. It does now, results are merged and de-duplicated, and the
+*original* name is carried through, because that is the field a Swedish query
+actually matches.
+
+A match is only used when the name is genuinely close. Below that the disc
+label becomes the show name — the film TMDb suggested is dropped either way,
+because a box set is not the film its label resembles, and a label at least
+says where it came from. Everything stays correctable from the dashboard
+before encoding starts.
+
+**Tagging a disc by hand also proposes the show**, taken from an earlier disc
+of the same set when there is one: two discs spelled two slightly different
+ways make two folders, which is the same failure as the numbering one.
+
+**A swallowed error, found while doing this.** The earlier-discs lookup caught
+bare `Exception` and answered "no earlier discs" — indistinguishable from a
+correct answer. It hid a `NameError` from an import in the wrong function and
+turned the whole disc-to-disc continuation off silently. It catches database
+errors only, and says so at warning level.
+
 ## 1.28.0
 
 **"dvd 2" now reads as disc 2, and marking a disc as a series by hand gets the

@@ -176,6 +176,52 @@ def _remove_superseded(task: "EncodeTask", result) -> None:
         logger.warning("Could not remove the superseded %s", source, exc_info=True)
 
 
+def _name_the_show(job, parsed_show: str, config) -> str:
+    """Give a detected series a show name worth putting on a folder.
+
+    Returns a line for the job log, or "" when nothing changed.
+
+    The order matters. A TMDb *TV* match is best; the name parsed off the disc
+    label is second, and still better than what the job is carrying, because
+    that came from the film search and is a film. Both are correctable from
+    the dashboard before encoding starts.
+    """
+    from adr.identify import best_series
+
+    if not parsed_show:
+        return ""
+
+    try:
+        show = best_series(parsed_show, getattr(config, "tmdb_api_key", "") or "")
+    except Exception:                      # noqa: BLE001 - never fail a rip
+        logger.debug("TMDb TV lookup failed", exc_info=True)
+        show = None
+
+    if show:
+        job.title = show["name"]
+        job.year = show["year"]
+        job.tmdb_id = show["tmdb_id"]
+        # The poster on the job is a film's, and no longer describes this job.
+        job.poster_url = show.get("poster_url")
+        return (
+            f"TMDb says this is '{show['name']}'"
+            + (f" ({show['year']})" if show["year"] else "")
+            + ". Change it from the dashboard if that is the wrong show."
+        )
+
+    if (job.title or "").strip() != parsed_show:
+        job.title = parsed_show
+        job.year = None
+        job.tmdb_id = None
+        job.poster_url = None
+        return (
+            f"No confident TMDb match for '{parsed_show}', so the disc label is "
+            "used as the show name. The film TMDb suggested was ignored: a box "
+            "set is not the film its label resembles."
+        )
+    return ""
+
+
 def _cancelled(session, job) -> bool:
     """Whether someone has cancelled *job* since this thread last looked.
 
@@ -1396,6 +1442,17 @@ class DrivePipeline:
                             earlier_discs(session, guess["show"], job),
                         )
                         job.series_first_episode = first
+
+                        # And *which* show. Identification ran TMDb's film
+                        # search, which for a box set returns a
+                        # confident-looking film — so a detected series was
+                        # named after whatever movie its label resembled, and
+                        # the only cure was to open the dialog and search by
+                        # hand. The label already parses to a show name; this
+                        # is the dialog's own search, run without being asked.
+                        named = _name_the_show(job, guess["show"], self._config)
+                        if named:
+                            job_log.append("detect", named)
                         session.commit()
                         logger.info(
                             "Job %s looks like a TV disc: %s", job.id, verdict["reason"],

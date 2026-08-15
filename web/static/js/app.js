@@ -964,6 +964,13 @@ function editSeries(jobId, season, firstEpisode, suggestedShow, suggestedYear) {
             if (document.getElementById('seriesJobId').value !== String(jobId)) return;
             document.getElementById('seriesSeason').value = d.season;
             document.getElementById('seriesFirstEpisode').value = d.first_episode;
+            // The show an earlier disc of this set was named as. Two discs of
+            // one box set spelled two slightly different ways make two folders.
+            if (d.show && !document.getElementById('seriesTmdbId').value) {
+                document.getElementById('seriesShowName').value = d.show;
+                document.getElementById('seriesShowYear').value = d.year || '';
+                if (d.tmdb_id) document.getElementById('seriesTmdbId').value = d.tmdb_id;
+            }
             if (d.reason) {
                 discHint.textContent = d.reason;
                 discHint.classList.remove('d-none');

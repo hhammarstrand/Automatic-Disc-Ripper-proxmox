@@ -181,3 +181,174 @@ class TestIdentifyDisc:
         result = identify_disc("THE_MATRIX_1999", "fake_key")
         assert result.title == "The Matrix"
         assert result.tmdb_id is None
+
+
+class TestNamingTheShowWithoutBeingAsked:
+    """A detected series was named after whatever *film* its disc label
+    resembled, because identification runs TMDb's movie search and nothing ran
+    the TV one unless a person clicked the button.
+
+    Saltkråkan is the case that shows why English alone was never going to
+    work: TMDb answers in the language it is asked in, and the show's English
+    name is "Life on Seacrow Island" — which a Swedish search term resembles
+    not at all. The original name is what connects them.
+    """
+
+    SEACROW_EN = {
+        "id": 42, "name": "Life on Seacrow Island",
+        "original_name": "Vi på Saltkråkan", "first_air_date": "1964-02-01",
+        "overview": "", "poster_path": "/p.jpg",
+    }
+
+    def _responses(self, monkeypatch, by_language):
+        """Stub TMDb, answering differently per language like the real one."""
+        from adr import identify
+
+        class Reply:
+            def __init__(self, payload):
+                self._payload = payload
+
+            def raise_for_status(self):
+                pass
+
+            def json(self):
+                return {"results": self._payload}
+
+        calls = []
+
+        def fake_get(url, params=None, timeout=None):
+            params = params or {}
+            calls.append(params.get("language"))
+            return Reply(by_language.get(params.get("language"), []))
+
+        monkeypatch.setattr(identify.requests, "get", fake_get)
+        return calls
+
+    def test_it_searches_swedish_as_well_as_english(self, monkeypatch):
+        from adr import identify
+
+        calls = self._responses(monkeypatch, {"sv-SE": [self.SEACROW_EN]})
+        results = identify.search_series("Saltkråkan", "key")
+        assert "sv-SE" in calls, "English only cannot find a Swedish show"
+        assert results and results[0]["name"] == "Life on Seacrow Island"
+
+    def test_the_original_name_is_what_matches(self, monkeypatch):
+        """The query resembles the original name, not the English one."""
+        from adr import identify
+
+        self._responses(monkeypatch, {"en-US": [self.SEACROW_EN]})
+        results = identify.search_series("Saltkråkan", "key")
+        assert results[0]["original_name"] == "Vi på Saltkråkan"
+        assert results[0]["similarity"] > 0.5
+
+    def test_a_show_is_not_listed_twice_when_both_languages_return_it(
+        self, monkeypatch,
+    ):
+        from adr import identify
+
+        self._responses(
+            monkeypatch, {"en-US": [self.SEACROW_EN], "sv-SE": [self.SEACROW_EN]})
+        assert len(identify.search_series("Saltkråkan", "key")) == 1
+
+    def test_the_best_match_is_used_without_asking(self, monkeypatch):
+        from adr import identify
+
+        self._responses(monkeypatch, {"sv-SE": [self.SEACROW_EN]})
+        best = identify.best_series("Vi på Saltkråkan", "key")
+        assert best["tmdb_id"] == 42
+        assert best["year"] == 1964
+
+    def test_a_poor_match_is_refused(self, monkeypatch):
+        """Naming a whole season from the wrong show is worse than naming it
+        from the disc label, which at least says where it came from."""
+        from adr import identify
+
+        self._responses(monkeypatch, {"en-US": [{
+            "id": 9, "name": "Something Else Entirely",
+            "original_name": "Something Else Entirely",
+            "first_air_date": "2011-01-01", "overview": "", "poster_path": None,
+        }]})
+        assert identify.best_series("Saltkråkan", "key") is None
+
+    def test_no_api_key_asks_nothing(self):
+        from adr import identify
+
+        assert identify.search_series("Saltkråkan", "") == []
+        assert identify.best_series("Saltkråkan", "") is None
+
+    def test_a_failing_search_is_not_a_crash(self, monkeypatch):
+        import requests
+
+        from adr import identify
+
+        def boom(*a, **k):
+            raise requests.RequestException("TMDb is down")
+
+        monkeypatch.setattr(identify.requests, "get", boom)
+        assert identify.search_series("Saltkråkan", "key") == []
+        assert identify.best_series("Saltkråkan", "key") is None
+
+
+class TestTheDetectedSeriesGetsItsName:
+    """The pipeline half: what actually lands on the job."""
+
+    def _job(self, title="Some Unrelated Film", year=1999):
+        import types
+
+        return types.SimpleNamespace(
+            title=title, year=year, tmdb_id=123, poster_url="http://poster",
+        )
+
+    def _config(self):
+        import types
+
+        return types.SimpleNamespace(tmdb_api_key="key")
+
+    def test_a_tmdb_match_replaces_the_film_the_label_resembled(self, monkeypatch):
+        from adr import pipeline
+
+        monkeypatch.setattr(
+            pipeline, "_name_the_show", pipeline._name_the_show)  # real one
+        monkeypatch.setattr(
+            "adr.identify.best_series",
+            lambda q, key: {"tmdb_id": 42, "name": "Life on Seacrow Island",
+                            "year": 1964, "poster_url": "http://p"},
+        )
+        job = self._job()
+        said = pipeline._name_the_show(job, "Saltkråkan", self._config())
+        assert job.title == "Life on Seacrow Island"
+        assert job.year == 1964
+        assert job.tmdb_id == 42
+        assert "Life on Seacrow Island" in said
+
+    def test_without_a_match_the_label_beats_the_film(self, monkeypatch):
+        """A box set is not the film its label resembles, so the film title is
+        dropped either way."""
+        from adr import pipeline
+
+        monkeypatch.setattr("adr.identify.best_series", lambda q, key: None)
+        job = self._job()
+        said = pipeline._name_the_show(job, "Saltkråkan", self._config())
+        assert job.title == "Saltkråkan"
+        assert job.tmdb_id is None
+        assert job.poster_url is None
+        assert "disc label is used" in said
+
+    def test_a_label_with_no_show_name_changes_nothing(self, monkeypatch):
+        from adr import pipeline
+
+        job = self._job()
+        assert pipeline._name_the_show(job, "", self._config()) == ""
+        assert job.title == "Some Unrelated Film"
+
+    def test_tmdb_falling_over_does_not_fail_the_rip(self, monkeypatch):
+        from adr import pipeline
+
+        def boom(query, key):
+            raise RuntimeError("TMDb exploded")
+
+        monkeypatch.setattr("adr.identify.best_series", boom)
+        job = self._job()
+        said = pipeline._name_the_show(job, "Saltkråkan", self._config())
+        assert job.title == "Saltkråkan"
+        assert said

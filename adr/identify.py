@@ -273,37 +273,89 @@ def search_series(query: str, api_key: str, limit: int = 8) -> list[dict[str, An
     if not api_key or not (query or "").strip():
         return []
 
-    try:
-        resp = requests.get(
-            TMDB_TV_SEARCH_URL,
-            params={
-                "api_key": api_key,
-                "query": query.strip(),
-                "include_adult": "false",
-                "language": "en-US",
-            },
-            timeout=10,
-        )
-        resp.raise_for_status()
-        results = resp.json().get("results", [])
-    except (requests.RequestException, ValueError, KeyError):
-        logger.warning("TMDb TV search failed for %r", query, exc_info=True)
-        return []
+    results: list[dict[str, Any]] = []
+    seen: set[Any] = set()
+    # Both languages, as the film search already does. English alone cannot
+    # find "Saltkråkan": TMDb answers in the language it was asked in, and the
+    # show's English name is "Life on Seacrow Island" — nothing a Swedish
+    # search term resembles. The original name is what connects them, so it is
+    # carried through to the scoring and the list.
+    for language in ("en-US", "sv-SE"):
+        try:
+            resp = requests.get(
+                TMDB_TV_SEARCH_URL,
+                params={
+                    "api_key": api_key,
+                    "query": query.strip(),
+                    "include_adult": "false",
+                    "language": language,
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            for result in resp.json().get("results", []):
+                if result.get("id") in seen:
+                    continue
+                seen.add(result.get("id"))
+                results.append(result)
+        except (requests.RequestException, ValueError, KeyError):
+            logger.warning(
+                "TMDb TV search failed for %r in %s", query, language, exc_info=True,
+            )
 
     shows = []
     for result in results[:limit]:
         first_air = result.get("first_air_date") or ""
+        name = result.get("name") or result.get("original_name") or ""
+        original = result.get("original_name") or ""
         shows.append({
             "tmdb_id": result.get("id"),
-            "name": result.get("name") or result.get("original_name") or "",
+            "name": name,
+            "original_name": original,
             "year": int(first_air[:4]) if first_air[:4].isdigit() else None,
             "overview": (result.get("overview") or "")[:300],
             "poster_url": (
                 f"{TMDB_IMAGE_BASE}{result['poster_path']}"
                 if result.get("poster_path") else None
             ),
+            "similarity": max(
+                _title_similarity(query, name),
+                _title_similarity(query, original),
+            ),
         })
-    return [s for s in shows if s["name"]]
+    shows = [s for s in shows if s["name"]]
+    shows.sort(key=lambda s: s["similarity"], reverse=True)
+    return shows
+
+
+#: How close a show name has to be before the application will use it without
+#: being asked. Deliberately high: naming a whole season from the wrong show is
+#: a worse outcome than one wrong film, and the dialog is one click away.
+SERIES_AUTO_CONFIDENCE = 0.75
+
+
+def best_series(query: str, api_key: str) -> dict[str, Any] | None:
+    """The one show a disc label clearly means, or None.
+
+    The film search is the wrong namespace for a box set and returns a
+    confident-looking film — so a detected series was named after whatever
+    movie its label happened to resemble, and the only way to fix it was to
+    open the dialog and search by hand. This is the same search that dialog
+    runs, run for you.
+
+    None unless the name is a close match. A season named after the wrong show
+    is worse than one named after the disc label, which at least says where it
+    came from.
+    """
+    best = next(iter(search_series(query, api_key, limit=8)), None)
+    if best and best["similarity"] >= SERIES_AUTO_CONFIDENCE:
+        return best
+    if best:
+        logger.info(
+            "TMDb TV: best match for %r is %r at %.2f, below %.2f — not using it",
+            query, best["name"], best["similarity"], SERIES_AUTO_CONFIDENCE,
+        )
+    return None
 
 
 def get_season_episodes(tmdb_id: int, season: int, api_key: str) -> list[dict[str, Any]]:

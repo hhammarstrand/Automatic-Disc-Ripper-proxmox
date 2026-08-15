@@ -23,6 +23,8 @@ import logging
 import re
 from typing import Any
 
+from sqlalchemy.exc import SQLAlchemyError
+
 from adr.utils import sanitize_filename
 
 logger = logging.getLogger(__name__)
@@ -291,14 +293,27 @@ def earlier_discs(session, show: str, job) -> list[dict]:
     Only jobs that actually numbered something count. A disc that failed, or
     was ripped as a film, has nothing to say about where the next one starts.
     """
+    out: list[dict] = []
+    for other in _same_show_jobs(session, show, job):
+        numbers = [
+            t.episode_number for t in (other.tracks or [])
+            if t.episode_number
+        ]
+        out.append({
+            "disc": parse_series_label(other.disc_label or "")["disc"],
+            "last_episode": max(numbers) if numbers else None,
+        })
+    return out
+
+
+def _same_show_jobs(session, show: str, job) -> list:
+    """Earlier series jobs for this show and season, newest first."""
     from adr.models import Job
 
     wanted = (show or "").strip().casefold()
     if not wanted:
         return []
-
     season = int(1 if job.series_season is None else job.series_season)
-    out: list[dict] = []
     try:
         candidates = (
             session.query(Job)
@@ -309,22 +324,18 @@ def earlier_discs(session, show: str, job) -> list[dict]:
             .limit(60)
             .all()
         )
-        for other in candidates:
-            other_label = parse_series_label(other.disc_label or "")
-            if (other_label["show"] or "").strip().casefold() != wanted:
-                continue
-            numbers = [
-                t.episode_number for t in (other.tracks or [])
-                if t.episode_number
-            ]
-            out.append({
-                "disc": other_label["disc"],
-                "last_episode": max(numbers) if numbers else None,
-            })
-    except Exception:                      # noqa: BLE001 - never fail a rip
-        logger.debug("Could not look up earlier discs", exc_info=True)
+    except SQLAlchemyError:
+        # Narrow on purpose. This was `except Exception`, and it swallowed a
+        # NameError from an import in the wrong function — answering "no
+        # earlier discs", which is indistinguishable from a correct answer and
+        # silently turned the continuation off.
+        logger.warning("Could not look up earlier discs", exc_info=True)
         return []
-    return out
+    return [
+        other for other in candidates
+        if (parse_series_label(other.disc_label or "")["show"] or "")
+        .strip().casefold() == wanted
+    ]
 
 
 def suggest_numbering(session, job) -> dict:
@@ -350,12 +361,27 @@ def suggest_numbering(session, job) -> dict:
         (job.content_type or "movie") == "series"
         and job.series_first_episode is not None
     )
+    # And which show, when an earlier disc of the same set already answered
+    # that. Cheaper and more certain than asking TMDb again, and it keeps the
+    # discs of one box set on one spelling rather than two near-misses.
+    show = ""
+    year = None
+    tmdb_id = None
+    for other in _same_show_jobs(session, label["show"], job):
+        if (other.title or "").strip():
+            show, year, tmdb_id = other.title, other.year, other.tmdb_id
+            break
+
     return {
         "season": int(season),
         "first_episode": int(first),
         "disc": label["disc"],
         "reason": why,
         "apply": bool(label["disc"] and not already),
+        "show": show,
+        "year": year,
+        "tmdb_id": tmdb_id,
+        "show_from": "an earlier disc of this set" if show else "",
     }
 
 
