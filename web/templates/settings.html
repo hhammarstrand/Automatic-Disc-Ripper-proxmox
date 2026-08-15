@@ -737,7 +737,15 @@
     </div>
 
     <!-- Save -->
-    <div class="d-flex gap-2">
+    <!-- Sticky on a phone, where this page is several screens of scrolling per
+         tab and the button lives at the bottom of whichever one you are on:
+         changing one setting meant scrolling to the end to find out whether
+         there was anything left to change, and then scrolling back. Desktop is
+         untouched — the rule is inside the phone's media query, and on a screen
+         where the button is already visible, pinning it takes space for nothing.
+         "Saved!" rides along with it, because a confirmation attached to a
+         button off the bottom of the screen confirms nothing to anybody. -->
+    <div class="settings-savebar d-flex gap-2">
         <button type="submit" class="btn btn-primary">
             <i class="bi bi-check-lg me-1"></i>Save settings
         </button>

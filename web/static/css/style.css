@@ -796,6 +796,48 @@ input, select, textarea, .list-group-item-action {
         padding-bottom: 0.7rem;
     }
 
+    /* ---- Settings, five tabs wide ----
+     *
+     * The strip is 470px of labels in a 390px window. Bootstrap wraps it, so
+     * Integrations and Advanced dropped onto a second row and the "tabs" read
+     * as two unrelated rows of links — and the panel below joined whichever
+     * row happened to be last. One row that slides instead: the strip is the
+     * thing that scrolls, not the page, and the active tab is scrolled into
+     * the middle of it by app.js so the current one is never the one off the
+     * edge.
+     *
+     * No scrollbar under it. A 3px bar under a tab strip on a phone is not an
+     * affordance anybody reads; the half-visible tab at the edge is.
+     */
+    #settingsTabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+    }
+    #settingsTabs::-webkit-scrollbar {
+        display: none;
+    }
+    #settingsTabs .nav-link {
+        white-space: nowrap;
+    }
+
+    /* The Save button, kept on screen.
+     *
+     * Each tab here is several screens of scrolling and the button was at the
+     * bottom of the last one, so changing a single setting meant scrolling to
+     * the end to reach it and scrolling back to carry on. Above the bottom bar
+     * rather than at the bottom of the window, because the bottom bar is fixed
+     * and would otherwise be drawn straight over it. */
+    .settings-savebar {
+        position: sticky;
+        bottom: calc(64px + env(safe-area-inset-bottom));
+        z-index: 2;
+        padding: 0.6rem 0;
+        background: var(--adr-bg);
+        border-top: 1px solid var(--adr-border);
+    }
+
     /* ---- The search sheets, as steps ----
      *
      * The reported pain point, and the reason for this whole pass: naming a

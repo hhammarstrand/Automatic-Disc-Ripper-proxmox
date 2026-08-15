@@ -602,6 +602,84 @@ class TestARefreshDoesNotInterruptTyping:
         assert "location.reload()" in source
 
 
+class TestSettingsFitsAPhone:
+    """Five tabs are about 470px of labels in a 390px window.
+
+    Bootstrap wrapped them, so Integrations and Advanced dropped onto a second
+    row and the strip stopped reading as tabs at all — two rows of links, with
+    the panel below joined to whichever row happened to be last. And the Save
+    button sat at the bottom of several screens of scrolling, so changing one
+    setting meant scrolling to the end to reach it and scrolling back.
+    """
+
+    def test_the_tab_strip_slides_instead_of_wrapping(self):
+        css = Path("web/static/css/style.css").read_text()
+        mobile = css[css.index("max-width: 767.98px"):]
+        block = mobile[mobile.index("#settingsTabs {"):][:400]
+        assert "flex-wrap: nowrap" in block
+        assert "overflow-x: auto" in block
+
+    def test_the_page_is_not_what_slides(self):
+        """A strip that made the whole page pan would be the sideways-scroll
+        bug this application already fixed once."""
+        css = Path("web/static/css/style.css").read_text()
+        assert "overflow-x: clip" in css
+
+    def test_there_is_no_scrollbar_under_the_tabs(self):
+        """A 3px bar under a tab strip is not an affordance anyone reads on a
+        phone; the half-visible tab at the edge is."""
+        css = Path("web/static/css/style.css").read_text()
+        assert "#settingsTabs::-webkit-scrollbar" in css
+        assert "scrollbar-width: none" in css
+
+    def test_the_tab_you_are_on_is_scrolled_into_the_middle(self):
+        """Advanced is off the edge on a fresh load, and after a save it is
+        the tab you were working in."""
+        source = Path("web/static/js/app.js").read_text()
+        assert "function keepTheActiveSettingsTabInView(" in source
+        start = source.index("function keepTheActiveSettingsTabInView(")
+        body = source[start:start + 700]
+        assert "shown.bs.tab" in body, "it is not re-centred when you switch"
+        assert "inline: 'center'" in body
+        assert "block: 'nearest'" in body, (
+            "without this it drags the page up and down as well as sideways"
+        )
+        assert "keepTheActiveSettingsTabInView()" in source[source.index(
+            "document.addEventListener('DOMContentLoaded'", start):], (
+            "it never runs at load, which is when Advanced is off the edge"
+        )
+
+    def test_the_save_button_stays_on_screen(self):
+        text = Path("web/templates/settings.html").read_text()
+        assert "settings-savebar" in text
+        css = Path("web/static/css/style.css").read_text()
+        mobile = css[css.index("max-width: 767.98px"):]
+        block = mobile[mobile.index(".settings-savebar {"):][:400]
+        assert "position: sticky" in block
+        assert "bottom: calc(64px" in block, (
+            "the bottom bar is fixed and would be drawn straight over it"
+        )
+        assert "background" in block, (
+            "a transparent sticky bar has the page scrolling through it"
+        )
+
+    def test_the_confirmation_rides_with_the_button(self):
+        """"Saved!" attached to a button off the bottom of the screen confirms
+        nothing to anybody."""
+        text = Path("web/templates/settings.html").read_text()
+        bar = text[text.index("settings-savebar"):]
+        bar = bar[:bar.index("</div>", bar.index("</button>"))]
+        assert 'id="saveStatus"' in bar
+
+    def test_the_desktop_is_left_alone(self):
+        """Both are inside the phone's media query. On a screen where the
+        button is already visible, pinning it takes space for nothing."""
+        css = Path("web/static/css/style.css").read_text()
+        desktop = css[:css.index("max-width: 767.98px")]
+        assert ".settings-savebar" not in desktop
+        assert "#settingsTabs" not in desktop
+
+
 class TestTheSearchSheets:
     """Naming a TV disc from the phone was the thing that actually hurt.
 

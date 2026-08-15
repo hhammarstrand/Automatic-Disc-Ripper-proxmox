@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.42.0
+
+**Settings is usable at 390 pixels.** Five tabs are about 470px of labels in a
+390px window, so Bootstrap wrapped them: Integrations and Advanced dropped onto
+a second row, and at that point the strip stopped reading as tabs at all — two
+unrelated rows of links, with the panel below apparently belonging to whichever
+row happened to be last. The strip is one row that slides sideways now, with no
+scrollbar drawn under it, because a 3px bar is not an affordance anybody reads
+on a phone and a half-visible tab at the edge is.
+
+That fixes the layout and leaves a smaller problem, which is that the tab you
+are on can be the one off the edge — Advanced is, on a fresh load, and after
+saving it is whichever one you were working in. So the active tab is scrolled
+into the middle of the strip, at load and on every switch. Sideways only: the
+page does not move.
+
+**The Save button stays on screen.** Each tab is several screens of scrolling
+and the button was at the end of the last one, so changing a single setting
+meant scrolling to the bottom to save it and scrolling back to carry on — and
+the "Saved!" confirmation appeared next to a button nobody was looking at. Both
+are pinned above the bottom bar now. Desktop is untouched: the rules are inside
+the phone's media query, and pinning a button that is already visible takes
+space for nothing.
+
 ## 1.41.0
 
 **Naming a TV disc from the phone was the thing that actually hurt, and it is

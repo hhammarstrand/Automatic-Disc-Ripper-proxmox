@@ -1577,7 +1577,32 @@ function refreshDoctorBadge() {
         .catch(err => { throw err; });
 }
 
+// ------------------------------------------------------------------ //
+// The Settings tab strip, on a phone
+//
+// Five tabs are about 470px of labels in a 390px window, so below md the strip
+// scrolls sideways instead of wrapping. That solves the layout and creates a
+// smaller problem: the tab you are on can be off the edge of it — Advanced is,
+// on a fresh load, and after a reload following a save it is the one you were
+// working in. So the active tab is put in the middle of the strip, at load and
+// on every switch. Sideways, only: block 'nearest' stops it dragging the page
+// up and down as well.
+// ------------------------------------------------------------------ //
+
+function keepTheActiveSettingsTabInView() {
+    const strip = document.getElementById('settingsTabs');
+    if (!strip) return;
+    const centre = () => {
+        const active = strip.querySelector('.nav-link.active');
+        if (active) active.scrollIntoView({inline: 'center', block: 'nearest'});
+    };
+    centre();
+    strip.addEventListener('shown.bs.tab', centre);
+}
+
 document.addEventListener('DOMContentLoaded', () => {
+    keepTheActiveSettingsTabInView();
+
     // Start auto-refresh if on dashboard
     if (window.location.pathname === '/') {
         // Once immediately: the detail line is rendered empty by the server,
