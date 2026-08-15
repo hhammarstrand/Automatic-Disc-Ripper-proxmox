@@ -13,6 +13,21 @@ EnvironmentFile=-/etc/default/adr
 # Clear the request first: the path unit re-arms as soon as the flag is gone, so
 # removing it up front prevents a failed update from triggering itself for ever.
 ExecStartPre=-/bin/rm -f /opt/adr/.update-requested
+# Seed the root-only copy when it is missing, so this unit can still run.
+#
+# 1.31 moved ExecStart here and had update.sh create it — but the update.sh
+# that *performs* that upgrade is the previous version, which knows nothing
+# about the path. So anyone updating from 1.30 or earlier ended up with this
+# unit installed and its ExecStart absent, and in-app updates stopped working
+# entirely until someone ran the script by hand from the Proxmox host. That is
+# the worst possible place to leave people: the mechanism that delivers fixes
+# was the thing that broke.
+#
+# This is not the hole the move closed. On a machine that has completed the
+# migration the file exists, /usr/local/lib/adr is root-owned, and the service
+# user cannot remove it — so the branch is unreachable. On one that has not,
+# the alternative is the old unit running exactly this file as root anyway.
+ExecStartPre=-/bin/sh -c 'test -e /usr/local/lib/adr/update.sh || install -D -o root -g root -m 0755 /opt/adr/scripts/update.sh /usr/local/lib/adr/update.sh'
 # NOT /opt/adr/scripts/update.sh. /opt/adr is owned by the service user, and
 # a directory's owner may rename or replace the entries inside it whatever
 # those entries are owned by — so root-owning scripts/ never protected it. The
@@ -27,6 +42,11 @@ ExecStart=/usr/local/lib/adr/update.sh
 # an attacker-controlled path would have root truncate whatever it points at.
 StandardOutput=truncate:/var/log/adr/update.log
 StandardError=append:/var/log/adr/update.log
+# systemd creates and owns /var/log/adr, so the log directory is never a
+# thing an installer has to remember. Without it, a unit installed by an
+# older update.sh pointed StandardOutput at a directory that did not exist
+# and the service failed before it started.
+LogsDirectory=adr
 TimeoutStartSec=1800
 
 [Install]

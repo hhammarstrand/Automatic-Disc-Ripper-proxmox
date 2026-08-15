@@ -332,3 +332,57 @@ class TestTheServiceUserCannotBecomeRoot:
         user controls hands it ownership of whatever that path points at."""
         assert 'chown "$RUN_USER:$RUN_USER" "$INSTALL_DIR/.commit"' not in update
         assert 'rm -f "$INSTALL_DIR/.commit"' in update
+
+
+class TestTheUpdateMechanismSurvivesItsOwnMigration:
+    """1.31 moved ExecStart to /usr/local/lib/adr/update.sh and had update.sh
+    create it — but the update.sh that *performs* that upgrade is the previous
+    version, which knows nothing about the path. So updating from 1.30 or
+    earlier installed this unit with its ExecStart absent, and in-app updates
+    stopped working entirely:
+
+        adr-update.service: Command /usr/local/lib/adr/update.sh is not
+        executable: No such file or directory
+
+    which is the worst possible thing to break, because it is the mechanism
+    that delivers every other fix. A unit that systemd cannot start also
+    leaves the Doctor reporting "adr-update.path is not running, so an update
+    request would go unnoticed".
+    """
+
+    @staticmethod
+    @pytest.fixture(scope="class")
+    def unit() -> str:
+        return Path("systemd/adr-update.service").read_text()
+
+    def test_it_seeds_its_own_executable_when_missing(self, unit):
+        assert "test -e /usr/local/lib/adr/update.sh ||" in unit, (
+            "a machine whose unit arrived before the file has no way back"
+        )
+        assert "install -D -o root -g root -m 0755" in unit
+
+    def test_the_seed_runs_before_the_thing_it_seeds(self, unit):
+        """ExecStartPre, not ExecStartPost, and above ExecStart in the file."""
+        seed = unit.index("ExecStartPre=-/bin/sh -c 'test -e")
+        start = unit.index("ExecStart=/usr/local/lib/adr/update.sh")
+        assert seed < start, "the seed runs after the thing it seeds"
+
+    def test_the_seed_only_fires_when_the_file_is_absent(self, unit):
+        """On a migrated machine /usr/local/lib/adr is root-owned and the
+        service user cannot remove what is in it, so this branch is dead —
+        which is what keeps the seed from reopening the hole the move
+        closed."""
+        assert "||" in unit
+        assert "test -e" in unit
+
+    def test_systemd_owns_the_log_directory(self, unit):
+        """StandardOutput pointed at a directory nothing created, so the
+        service failed before it ran. LogsDirectory makes systemd create it,
+        and takes the job away from every installer at once."""
+        assert "LogsDirectory=adr" in unit
+        assert "StandardOutput=truncate:/var/log/adr/update.log" in unit
+
+    def test_the_installers_still_create_both_for_a_fresh_machine(self):
+        for script in ("scripts/install-container.sh", "scripts/update.sh"):
+            text = Path(script).read_text()
+            assert "/usr/local/lib/adr" in text, script

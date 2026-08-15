@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.34.1
+
+**I broke in-app updates in 1.31 for everyone updating from an older
+version.** That release moved the update unit's `ExecStart` to
+`/usr/local/lib/adr/update.sh` and had `update.sh` create it — but the
+`update.sh` that *performs* that upgrade is the previous version, which knows
+nothing about the path. So the new unit was installed with its executable
+absent:
+
+    adr-update.service: Command /usr/local/lib/adr/update.sh is not
+    executable: No such file or directory
+
+and the Doctor started reporting "adr-update.path is not running, so an update
+request would go unnoticed". The mechanism that delivers every other fix was
+the thing that broke, which is the worst possible thing to get wrong.
+
+The unit seeds its own executable when it is missing, so it can run once more
+and repair itself. That is not the hole the move closed: on a machine that has
+completed the migration the file exists in a root-owned directory the service
+user cannot touch, so the branch is unreachable — and on one that has not, the
+old unit was running exactly that file as root anyway.
+
+`LogsDirectory=adr` also takes the log directory away from the installers
+entirely: systemd creates and owns `/var/log/adr` before the service starts,
+rather than `StandardOutput` pointing at a directory that a particular version
+of a shell script was supposed to have made.
+
+**If your Doctor page is showing that message,** one run from the Proxmox host
+puts it right — the copy of `update.sh` in the container is already the fixed
+one:
+
+    pct exec <CTID> -- /opt/adr/scripts/update.sh
+
 ## 1.34.0
 
 The rest of the critical review's backlog — everything it confirmed that 1.31
