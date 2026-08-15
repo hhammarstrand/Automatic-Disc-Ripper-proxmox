@@ -1244,6 +1244,7 @@ class DrivePipeline:
         # is worse than no job: it needs clearing, and it says nothing.
         from adr.disc import NOTHING_TO_RIP, media_status
 
+        # No display name here on purpose: this detail is only ever logged.
         state = media_status(drive)
         if state["state"] in NOTHING_TO_RIP:
             logger.info("Ignoring disc event for %s: %s", drive, state["detail"])
@@ -1661,7 +1662,7 @@ class DrivePipeline:
 
             job_log.append(
                 "rip",
-                f"Ripping from {self.drive} "
+                f"Ripping from {self._config.drive_display(self.drive)} "
                 + (f"(title {selected_title_index})" if selected_title_index is not None
                    else "(every title)"),
             )
@@ -2394,7 +2395,8 @@ class PipelineManager:
         # By the name its owner gave it. Someone with an Internal and an
         # External does not think in device nodes, and every one of the
         # sentences below is read on the dashboard rather than in a log.
-        shown = self.config.drive_display(drive)
+        display = getattr(self.config, "drive_display", None)
+        shown = display(drive) if callable(display) else drive
 
         pipeline = self.drive_pipelines.get(drive)
         if pipeline is None:
@@ -2421,7 +2423,7 @@ class PipelineManager:
         # In the drive's own words. "No readable disc" covered an empty tray,
         # an open tray, a missing device node and a cgroup denial with one
         # sentence, and only one of the four is fixed by putting a disc in.
-        state = media_status(drive)
+        state = media_status(drive, shown)
         if not state["ready"]:
             return False, state["detail"]
 

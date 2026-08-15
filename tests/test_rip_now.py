@@ -46,10 +46,15 @@ def manager(tmp_path):
 
 
 def _media(monkeypatch, state, detail=""):
+    """*display* is the second argument now: the name its owner gave the
+    drive, so the refusal reads "There is no disc in Internal" under a card
+    already headed Internal. The stub echoes whichever it was handed."""
     monkeypatch.setattr(
         "adr.disc.media_status",
-        lambda d: {"ready": state == "ready", "state": state,
-                   "detail": detail or f"{d} is {state}."},
+        lambda d, display=None: {
+            "ready": state == "ready", "state": state,
+            "detail": detail or f"{display or d} is {state}.",
+        },
     )
 
 

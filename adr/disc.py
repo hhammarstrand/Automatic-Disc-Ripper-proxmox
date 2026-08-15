@@ -191,7 +191,7 @@ def _has_media(device: str) -> bool:
 NOTHING_TO_RIP = frozenset({"missing", "denied", "empty", "tray_open"})
 
 
-def media_status(device: str) -> dict:
+def media_status(device: str, display: str | None = None) -> dict:
     """Whether *device* has a disc ready to rip, and if not, why.
 
     Returns ``{"ready", "state", "detail"}``. *detail* is written to be shown
@@ -202,12 +202,25 @@ def media_status(device: str) -> dict:
     The states are distinct because the thing to do about them is distinct.
     An empty tray needs a disc; a missing device node needs the passthrough
     fixed on the host; a drive still spinning up needs ten seconds.
+
+    *display* is the name its owner gave the drive, when the caller has a
+    config to ask. Callers that are producing diagnostics — the Doctor page,
+    preflight, adr-doctor — leave it out and get the device node, which is
+    what you type into ``pct exec``.
     """
+    # What to call the drive in these sentences. They are read on the
+    # dashboard, under a card already headed "Internal", so the node alone
+    # contradicts the thing above it. The two states whose fix is an
+    # adr-doctor command on the host keep the node as well, because that
+    # command names it — see Config.drive_display_full.
+    shown = display or device
+    both = f"{shown} ({device})" if shown != device else device
+
     if not os.path.exists(device):
         return {
             "ready": False, "state": "missing",
             "detail": (
-                f"There is no {device} in this container. The drive was not "
+                f"There is no {both} in this container. The drive was not "
                 "passed through when the container started — run "
                 "'adr-doctor --fix <CTID>' on the Proxmox host, or restart the "
                 "container."
@@ -220,7 +233,7 @@ def media_status(device: str) -> dict:
         return {
             "ready": False, "state": "denied",
             "detail": (
-                f"{device} exists but this container is not allowed to open it "
+                f"{both} exists but this container is not allowed to open it "
                 f"({name}). The device cgroup is denying access — run "
                 "'adr-doctor --fix <CTID>' on the Proxmox host."
             ),
@@ -229,29 +242,29 @@ def media_status(device: str) -> dict:
     if status == CDS_TRAY_OPEN:
         return {
             "ready": False, "state": "tray_open",
-            "detail": f"The tray of {device} is open. Close it with a disc in it.",
+            "detail": f"The tray of {shown} is open. Close it with a disc in it.",
         }
     if status == CDS_NO_DISC:
         return {
             "ready": False, "state": "empty",
-            "detail": f"There is no disc in {device}. Put one in and try again.",
+            "detail": f"There is no disc in {shown}. Put one in and try again.",
         }
     if status == CDS_DRIVE_NOT_READY or err in _SPINNING_UP_ERRNOS:
         return {
             "ready": False, "state": "not_ready",
             "detail": (
-                f"{device} is still reading the disc. Give it a few seconds and "
+                f"{shown} is still reading the disc. Give it a few seconds and "
                 "try again."
             ),
         }
 
     if _has_media(device):
-        return {"ready": True, "state": "ready", "detail": f"A disc is loaded in {device}."}
+        return {"ready": True, "state": "ready", "detail": f"A disc is loaded in {shown}."}
 
     return {
         "ready": False, "state": "empty",
         "detail": (
-            f"No readable disc in {device}. The drive answered but reported no "
+            f"No readable disc in {shown}. The drive answered but reported no "
             "media — if a disc is loaded, it may be one this drive cannot read."
         ),
     }

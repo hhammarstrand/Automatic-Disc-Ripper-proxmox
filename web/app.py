@@ -542,7 +542,9 @@ def _register_api_routes(app: Flask) -> None:
         ok = eject_drive(dl)
         if ok:
             return jsonify({"ok": True})
-        return fail(f"Could not eject {dl}", 500)
+        # The card this button sits on is headed "Internal"; the failure
+        # under it should not suddenly be about /dev/sr0.
+        return fail(f"Could not eject {_config.drive_display(dl)}", 500)
 
     def _set_label(drive_letter: str):
         """Set a custom label for a drive. Body: {"label": "My Drive"}"""

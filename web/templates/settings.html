@@ -411,8 +411,9 @@
             <p class="form-text mb-3">These drives are hidden from the dashboard. Click to show them again.</p>
             <div class="d-flex gap-2 flex-wrap" id="hiddenDrivesList">
                 {% for dl in hidden_drives %}
-                <button class="btn btn-outline-success" onclick="unhideDrive('{{ dl }}')">
-                    <i class="bi bi-eye me-1"></i>{{ dl }}
+                <button class="btn btn-outline-success"
+                        onclick="unhideDrive('{{ dl }}', {{ (dl | drivename) | tojson }})">
+                    <i class="bi bi-eye me-1"></i>{{ dl | drivename }}
                 </button>
                 {% endfor %}
             </div>
@@ -954,10 +955,10 @@ if (encoderBackend) {
 }
 
 // ---- Hidden drives management ----
-function unhideDrive(driveLetter) {
+function unhideDrive(driveLetter, shown) {
     confirmAction({
         title: 'Show this drive again?',
-        body: `Drive <code>${driveLetter}</code> will reappear on the dashboard.`,
+        body: `Drive <code>${escapeHtml(shown || driveLetter)}</code> will reappear on the dashboard.`,
         confirmLabel: 'Show it',
     }).then(confirmed => {
         if (!confirmed) return;

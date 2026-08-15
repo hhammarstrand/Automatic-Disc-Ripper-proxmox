@@ -118,11 +118,11 @@
                                 <button class="btn btn-outline-info btn-sm" onclick="ejectDrive('{{ d.letter }}')" title="Eject disc">
                                     <i class="bi bi-eject-fill"></i>
                                 </button>
-                                <button class="btn btn-outline-secondary btn-sm" onclick="toggleDrive('{{ d.letter }}', true)" title="Hide drive">
+                                <button class="btn btn-outline-secondary btn-sm" onclick='toggleDrive({{ d.letter | tojson }}, true, {{ (d.letter | drivename) | tojson }})' title="Hide drive">
                                     <i class="bi bi-eye-slash"></i>
                                 </button>
                                 <button class="btn btn-sm {{ 'btn-outline-warning' if d.auto_eject else 'btn-outline-secondary' }}"
-                                    onclick="toggleEject('{{ d.letter }}', {{ 'false' if d.auto_eject else 'true' }})"
+                                    onclick='toggleEject({{ d.letter | tojson }}, {{ "false" if d.auto_eject else "true" }}, {{ (d.letter | drivename) | tojson }})'
                                     title="{{ 'Auto-eject is ON – click to turn off' if d.auto_eject else 'Auto-eject is OFF – click to turn on' }}">
                                     <i class="bi bi-eject{{ '-fill' if d.auto_eject else '' }}"></i>
                                 </button>

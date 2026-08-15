@@ -62,7 +62,7 @@ def manager(app_config):
 def client(app_config, manager, monkeypatch):
     monkeypatch.setattr(
         "adr.disc.media_status",
-        lambda d: {"ready": True, "state": "ready", "detail": ""},
+        lambda d, display=None: {"ready": True, "state": "ready", "detail": ""},
     )
     monkeypatch.setattr("adr.disc._blkid_label", lambda d: "THE_MATRIX")
     monkeypatch.setattr("web.app.eject_drive", lambda d: True)

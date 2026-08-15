@@ -238,7 +238,7 @@ def test_rip_now_refuses_instead_of_making_another_red_job(config, monkeypatch):
 
     monkeypatch.setattr(
         "adr.disc.media_status",
-        lambda d: {"ready": True, "state": "ready", "detail": ""},
+        lambda d, display=None: {"ready": True, "state": "ready", "detail": ""},
     )
     monkeypatch.setattr("adr.disc._blkid_label", lambda d: "HAPPY_FEET_TWO")
 

@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.32.1
+
+**The rest of the places a drive is named.** 1.32.0 found them by grepping for
+the variable called `drive` — which never saw the ones called `device`, nor the
+sentences JavaScript builds out of a template attribute. A four-lens sweep found
+the remainder:
+
+* the job-log line every video disc writes, "Ripping from /dev/sr0 (every
+  title)";
+* every refusal from the Rip button — no disc, tray open, still spinning up,
+  nothing readable — which came from `media_status` and passed through
+  untouched, so the most common messages of all still named the node on the one
+  button that said "Internal" everywhere else;
+* "Could not eject /dev/sr0", under a card headed Internal;
+* the confirm dialogs for hiding a drive and toggling auto-eject, both built in
+  JavaScript from the device node the template handed them;
+* the hidden-drives list in Settings — the only place a hidden drive can be
+  brought back, and the one place that never used the name it was given.
+
+Two messages deliberately keep the node **as well as** the name: the missing
+passthrough and the denied cgroup, because the fix for both is
+`adr-doctor --fix <CTID>` typed on the Proxmox host and that command names the
+node. Those read "Shelf drive (/dev/sr9)". Callers producing diagnostics — the
+Doctor page, preflight, adr-doctor — pass no name at all and still get the node
+alone.
+
 ## 1.32.0
 
 **Drives are called what you called them.** A phone notification read

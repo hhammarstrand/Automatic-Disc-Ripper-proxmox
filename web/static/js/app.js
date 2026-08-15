@@ -328,11 +328,11 @@ function cancelJob(jobId) {
     });
 }
 
-function toggleDrive(driveLetter, disable) {
+function toggleDrive(driveLetter, disable, shown) {
     const action = disable ? 'disable' : 'enable';
     confirmAction({
         title: "Change this drive?",
-        body: `Do you want to ${action} drive ${driveLetter}?`,
+        body: `Do you want to ${action} drive ${escapeHtml(shown || driveLetter)}?`,
         confirmLabel: "Yes, do it",
         danger: false,
     }).then(confirmed => {
@@ -379,11 +379,11 @@ function ripNow(driveLetter) {
 // Drive eject toggle
 // ------------------------------------------------------------------ //
 
-function toggleEject(driveLetter, enable) {
+function toggleEject(driveLetter, enable, shown) {
     const label = enable ? 'enable auto-eject' : 'disable auto-eject';
     confirmAction({
         title: "Change this drive?",
-        body: `Do you want to ${label} for drive ${driveLetter}?`,
+        body: `Do you want to ${label} for drive ${escapeHtml(shown || driveLetter)}?`,
         confirmLabel: "Yes, do it",
         danger: false,
     }).then(confirmed => {

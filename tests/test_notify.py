@@ -309,3 +309,52 @@ class TestTheDriveNameHelper:
     def test_a_blank_name_is_not_a_name(self, tmp_path):
         config = self._config(tmp_path, {"/dev/sr1": ""})
         assert config.drive_display("/dev/sr1") == "/dev/sr1"
+
+
+class TestTheNameReachesEveryMessageAPersonReads:
+    """A sweep found the places the first pass missed: it grepped for the
+    variable called `drive` and never saw the ones called `device`, nor the
+    sentences JavaScript builds from a template attribute.
+    """
+
+    def _config(self, tmp_path, labels):
+        from adr.config import Config
+
+        config = Config(str(tmp_path / "adr.yaml"))
+        config.update({"drive_labels": labels})
+        return config
+
+    def test_an_empty_tray_is_named(self, tmp_path):
+        """The everyday case: someone presses Rip with nothing in the drive.
+        The card above the toast is headed "Internal"."""
+        from adr.disc import media_status
+
+        config = self._config(tmp_path, {"/dev/sr0": "Internal"})
+        detail = media_status("/dev/null", config.drive_display("/dev/sr0"))["detail"]
+        assert "Internal" in detail
+        assert "/dev/sr0" not in detail
+
+    def test_a_missing_passthrough_keeps_the_node_as_well(self, tmp_path):
+        """Its fix is 'adr-doctor --fix <CTID>' typed on the Proxmox host, and
+        that command names the node — so dropping it makes the sentence
+        unusable. Both, not one."""
+        from adr.disc import media_status
+
+        config = self._config(tmp_path, {"/dev/sr9": "Shelf drive"})
+        detail = media_status("/dev/sr9", config.drive_display("/dev/sr9"))["detail"]
+        assert "Shelf drive" in detail
+        assert "/dev/sr9" in detail
+
+    def test_a_diagnostic_caller_gets_the_node_alone(self, tmp_path):
+        """The Doctor page, preflight and adr-doctor pass no name, because
+        the node is what you type into pct exec."""
+        from adr.disc import media_status
+
+        assert "/dev/null" in media_status("/dev/null")["detail"]
+
+    def test_an_unnamed_drive_reads_as_its_node(self, tmp_path):
+        from adr.disc import media_status
+
+        config = self._config(tmp_path, {})
+        detail = media_status("/dev/null", config.drive_display("/dev/sr0"))["detail"]
+        assert "/dev/sr0" in detail
