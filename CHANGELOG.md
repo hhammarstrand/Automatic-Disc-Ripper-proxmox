@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.49.0
+
+**A drive with its tray hanging out no longer claims to be empty.** The drive
+has been reporting the difference all along: CDS_TRAY_OPEN and CDS_NO_DISC are
+two different answers to the same ioctl, and `media_status` has kept them
+apart since it was written. The dashboard threw the distinction away one line
+short of the screen — both were folded into "Empty".
+
+They are not the same thing to the person standing there. An empty drive is
+waiting for a disc. An open tray is almost always a disc that has just been
+ejected and is waiting to be taken out, which means the machine has finished
+with something — and that is the one fact the fold was discarding. So there is
+a **Tray open** state now, with its own word and its own eject glyph, in the
+same neutral colour as empty, because an open tray is neither work in progress
+nor a fault.
+
+The Rip button stays on an open tray. Pressing it answers "the tray of
+Internal is open — close it with a disc in it", which is a better outcome than
+a missing button on a drive whose ioctl happened to be wrong.
+
 ## 1.48.0
 
 **The episode preview shows the episode.** "Is E06 the right one to start at?"

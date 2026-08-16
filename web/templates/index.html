@@ -80,6 +80,7 @@
                 {% set STATE_ICON = {
                     'ripping': 'bi-record-circle-fill',
                     'loaded': 'bi-disc-fill',
+                    'tray_open': 'bi-eject-fill',
                     'empty': 'bi-circle',
                     'unavailable': 'bi-exclamation-triangle-fill'} %}
                 {% for d in drives %}
@@ -90,7 +91,7 @@
                                  the machine it is, so a row of them reads as a
                                  rack rather than as three identical panels. -->
                             <span class="adr-port">
-                            <i class="bi bi-disc fs-4
+                            <i class="bi {% if d.status == 'tray_open' %}bi-eject{% else %}bi-disc{% endif %} fs-4
                                 {% if d.status == 'ripping' %}text-warning spin
                                 {% elif d.status == 'loaded' %}text-primary
                                 {% elif d.status == 'unavailable' %}text-danger

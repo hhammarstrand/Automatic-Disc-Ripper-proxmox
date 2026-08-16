@@ -12,6 +12,7 @@ there is — a perfectly free drive had no button to start the disc sitting in
 it.
 """
 
+from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
@@ -41,8 +42,23 @@ class TestWhatTheDriveIsDoing:
     def test_a_disc_being_spun_up_is_a_disc_that_is_in_there(self):
         assert drive_state("not_ready", False) == "loaded"
 
-    def test_an_open_tray_holds_nothing(self):
-        assert drive_state("tray_open", False) == "empty"
+    def test_an_open_tray_is_its_own_answer(self):
+        """Not folded into "empty", though neither holds a readable disc.
+
+        The drive reports the two separately — CDS_TRAY_OPEN and CDS_NO_DISC
+        are different answers to the same ioctl — and they mean different
+        things to the person standing there: an empty drive is waiting for a
+        disc, an open tray is usually a disc that has just been ejected and is
+        waiting to be taken out. Collapsing them threw away the one fact that
+        says the machine has finished with something.
+        """
+        assert drive_state("tray_open", False) == "tray_open"
+        assert drive_state("empty", False) == "empty"
+
+    def test_a_tray_that_opens_mid_rip_still_reads_as_ripping(self):
+        """The rip is what the drive is doing; the tray is where it is. The
+        job's own log is where a disc vanishing mid-rip gets reported."""
+        assert drive_state("tray_open", True) == "ripping"
 
     @pytest.mark.parametrize("state", ["missing", "denied"])
     def test_a_drive_this_container_cannot_reach_says_so(self, state):
@@ -168,3 +184,58 @@ class TestTheDashboardSurvivesADriveThatWillNotAnswer:
 
         monkeypatch.setattr("adr.disc.media_status", explode)
         assert client.get("/").status_code == 200
+
+
+class TestTheTrayIsShownWhenItIsOut:
+    """Both drives reported "Empty" with their trays hanging open.
+
+    The information was read and thrown away one line short of the screen:
+    media_status has always separated tray_open from empty, and drive_state
+    collapsed the two. Ejecting a disc and seeing the drive still described as
+    empty is the machine failing to admit it just did something.
+    """
+
+    def test_the_label_says_which(self):
+        from adr.disc import DRIVE_STATE_LABELS
+
+        assert DRIVE_STATE_LABELS["tray_open"] == "Tray open"
+        assert DRIVE_STATE_LABELS["empty"] == "Empty"
+
+    def test_the_dashboard_renders_it(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "adr.disc.media_status",
+            lambda d, display=None: {"ready": False, "state": "tray_open",
+                                     "detail": ""},
+        )
+        page = client.get("/").get_data(as_text=True)
+        drives = page.split('id="drivesRow"', 1)[1].split("Active Jobs", 1)[0]
+        assert "Tray open" in drives
+        assert 'data-drive-status="tray_open"' in drives
+
+    def test_it_has_a_glyph_of_its_own(self):
+        """Colour alone cannot carry it: an open tray is neither activity nor
+        a fault, so it shares the neutral treatment with empty."""
+        index = Path("web/templates/index.html").read_text()
+        assert "'tray_open': 'bi-eject-fill'" in index
+
+    def test_the_rip_button_stays(self, client, monkeypatch):
+        """Pressing it on an open tray answers "the tray of X is open, close
+        it with a disc in it", which is a better outcome than a missing button
+        on a drive whose ioctl was wrong."""
+        monkeypatch.setattr(
+            "adr.disc.media_status",
+            lambda d, display=None: {"ready": False, "state": "tray_open",
+                                     "detail": ""},
+        )
+        page = client.get("/").get_data(as_text=True)
+        assert f"ripNow('{DEVICE}')" in page
+
+    def test_the_endpoint_reports_it_too(self, client, monkeypatch):
+        monkeypatch.setattr(
+            "adr.disc.media_status",
+            lambda d, display=None: {"ready": False, "state": "tray_open",
+                                     "detail": ""},
+        )
+        body = client.get("/api/drives").get_json()
+        assert body[0]["status"] == "tray_open"
+        assert body[0]["state_label"] == "Tray open"

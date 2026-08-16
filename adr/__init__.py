@@ -1,3 +1,3 @@
 """Automatic Disc Ripper: Automatic Disc Ripper."""
 
-__version__ = "1.48.0"
+__version__ = "1.49.0"

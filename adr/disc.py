@@ -195,6 +195,7 @@ NOTHING_TO_RIP = frozenset({"missing", "denied", "empty", "tray_open"})
 DRIVE_STATE_LABELS = {
     "ripping": "Ripping",
     "loaded": "Disc in",
+    "tray_open": "Tray open",
     "empty": "Empty",
     "unavailable": "Unavailable",
 }
@@ -211,16 +212,26 @@ def drive_state(media_state: str, ripping: bool) -> str:
     not in, and because the Rip button only appeared on an "idle" drive, it
     took away the button on a drive that was perfectly able to rip.
 
-    So the drive answers for itself: it is ripping, or it has a disc in it, or
-    it has not, or it is not reachable at all. *media_state* is the ``state``
-    key of :func:`media_status`; "not_ready" counts as loaded because a disc
-    being spun up is a disc that is in there.
+    So the drive answers for itself: it is ripping, its tray is out, it has a
+    disc in it, it has not, or it is not reachable at all. *media_state* is the
+    ``state`` key of :func:`media_status`; "not_ready" counts as loaded because
+    a disc being spun up is a disc that is in there.
+
+    An open tray is deliberately not folded into "empty", though both mean no
+    disc is readable. The drive reports the two separately — CDS_TRAY_OPEN and
+    CDS_NO_DISC are different answers to the same ioctl — and they mean
+    different things to the person standing there: an empty drive is waiting
+    for a disc, and an open tray is usually a disc that has just been ejected
+    and is waiting to be taken out. Collapsing them threw away the one fact
+    that says the machine has finished with something.
     """
     if ripping:
         return "ripping"
     if media_state in ("missing", "denied"):
         return "unavailable"
-    if media_state in ("empty", "tray_open"):
+    if media_state == "tray_open":
+        return "tray_open"
+    if media_state == "empty":
         return "empty"
     return "loaded"
 
