@@ -84,9 +84,9 @@
                             <!-- Disc icon -->
                             <i class="bi bi-disc fs-4
                                 {% if d.status == 'ripping' %}text-warning spin
-                                {% elif d.status == 'encoding' %}text-info
-                                {% elif d.status == 'idle' %}text-secondary
-                                {% else %}text-primary{% endif %}"></i>
+                                {% elif d.status == 'loaded' %}text-primary
+                                {% elif d.status == 'unavailable' %}text-danger
+                                {% else %}text-secondary{% endif %}"></i>
                             <!-- Drive info -->
                             <div class="flex-grow-1" style="min-width:0;">
                                 <div class="d-flex align-items-center gap-2 flex-wrap">
@@ -94,22 +94,25 @@
                                     {% if d.label %}<small class="text-secondary">{{ d.letter }}</small>{% endif %}
                                     {% if d.model %}<small class="text-secondary text-truncate d-none d-md-inline">{{ d.model }}</small>{% endif %}
                                     <span class="badge
-                                        {% if d.status == 'idle' %}bg-secondary
-                                        {% elif d.status == 'ripping' %}bg-warning text-dark
-                                        {% elif d.status == 'encoding' %}bg-info text-dark
-                                        {% elif d.status == 'error' %}bg-danger
-                                        {% else %}bg-primary{% endif %}">
-                                        {{ d.status | capitalize }}
+                                        {% if d.status == 'ripping' %}bg-warning text-dark
+                                        {% elif d.status == 'loaded' %}bg-primary
+                                        {% elif d.status == 'unavailable' %}bg-danger
+                                        {% else %}bg-secondary{% endif %}">
+                                        {{ d.state_label }}
                                     </span>
                                     {% if d.job %}<small class="text-secondary text-truncate">{{ d.job.display_title }}{% if d.job.disc_hint %} · {{ d.job.disc_hint }}{% endif %}</small>{% endif %}
                                 </div>
                             </div>
                             <!-- Action buttons -->
                             <div class="d-flex gap-1 flex-shrink-0">
-                                {% if d.status == 'idle' %}
+                                {% if d.status != 'ripping' %}
                                 <!-- The watcher only fires when a disc appears. After a
                                      failed job the disc is still sitting there and
-                                     nothing restarts it — this is that button. -->
+                                     nothing restarts it — this is that button. It shows
+                                     on any drive that is not mid-rip, including one
+                                     whose last disc is still encoding: that drive is
+                                     free, and it used to lose this button for the
+                                     length of an encode. -->
                                 <button class="btn btn-outline-success btn-sm" onclick="ripNow('{{ d.letter }}')"
                                         title="Rip the disc that is already in this drive">
                                     <i class="bi bi-play-fill"></i> Rip

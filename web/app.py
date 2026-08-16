@@ -23,7 +23,12 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from adr import joblog
 from adr.config import Config
-from adr.disc import eject_drive, get_drive_models
+from adr.disc import (
+    DRIVE_STATE_LABELS,
+    drive_state,
+    eject_drive,
+    get_drive_models,
+)
 from adr.identify import (
     TMDB_DETAIL_URL,
     TMDB_IMAGE_BASE,
@@ -33,7 +38,6 @@ from adr.identify import (
 )
 from adr.models import (
     ACTIVE_STATUSES,
-    ENCODE_PHASE_STATUSES,
     RIP_PHASE_STATUSES,
     TERMINAL_STATUSES,
     Job,
@@ -164,6 +168,25 @@ def _preflight():
     )
     _preflight_cache = (now, result)
     return result
+
+
+def _drive_state_of(device: str, ripping: bool) -> str:
+    """The drive's own state, asked of the drive.
+
+    Two ioctls per drive per render, no disc spin-up, and never fatal: a
+    dashboard that cannot say what is in a drive should still say everything
+    else. An unanswerable drive is reported as ripping-or-not, which is the
+    part that is known from the database alone.
+    """
+    if ripping:
+        return "ripping"
+    try:
+        from adr.disc import media_status
+
+        return drive_state(media_status(device)["state"], False)
+    except Exception:                              # noqa: BLE001 - never fatal
+        logger.debug("Could not read the state of %s", device, exc_info=True)
+        return "empty"
 
 
 def _tmdb_poster(value) -> str | None:
@@ -310,19 +333,16 @@ def _register_ui_routes(app: Flask) -> None:
                         (j for j in active_jobs if j.drive == drive_letter and j.status in RIP_PHASE_STATUSES),
                         None,
                     )
-                    # Also expose the encoding job so the card can show progress
-                    enc_job = next(
-                        (j for j in active_jobs if j.drive == drive_letter and j.status in ENCODE_PHASE_STATUSES),
-                        None,
-                    ) if not rip_job else None
-                    active = rip_job or enc_job
-                    drive_status = "ripping" if rip_job else ("encoding" if enc_job else "idle")
+                    # The drive answers for itself. The encode of the last disc
+                    # is a job, not a drive state — see adr.disc.drive_state.
+                    state = _drive_state_of(drive_letter, rip_job is not None)
                     drives.append({
                         "letter": drive_letter,
                         "model": _drive_models.get(drive_letter, ""),
                         "label": _config.drive_label(drive_letter),
-                        "status": drive_status,
-                        "job": active,
+                        "status": state,
+                        "state_label": DRIVE_STATE_LABELS.get(state, state.capitalize()),
+                        "job": rip_job,
                         "disabled": False,
                         "auto_eject": _config.should_eject(drive_letter),
                     })
@@ -563,22 +583,12 @@ def _register_api_routes(app: Flask) -> None:
                     )
                     .first()
                 )
-                enc_job = None
-                if not rip_job:
-                    enc_job = (
-                        session.query(Job)
-                        .filter(
-                            Job.drive == drive_letter,
-                            Job.status.in_(ENCODE_PHASE_STATUSES),
-                        )
-                        .first()
-                    )
-                active_job = rip_job or enc_job
-                drive_status = "ripping" if rip_job else ("encoding" if enc_job else "idle")
+                state = _drive_state_of(drive_letter, rip_job is not None)
                 result.append({
                     "drive": drive_letter,
-                    "status": drive_status,
-                    "job": active_job.to_dict() if active_job else None,
+                    "status": state,
+                    "state_label": DRIVE_STATE_LABELS.get(state, state),
+                    "job": rip_job.to_dict() if rip_job else None,
                 })
             return jsonify(result)
         finally:

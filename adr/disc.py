@@ -191,6 +191,40 @@ def _has_media(device: str) -> bool:
 NOTHING_TO_RIP = frozenset({"missing", "denied", "empty", "tray_open"})
 
 
+#: What the drive itself is doing, in the words shown beside it.
+DRIVE_STATE_LABELS = {
+    "ripping": "Ripping",
+    "loaded": "Disc in",
+    "empty": "Empty",
+    "unavailable": "Unavailable",
+}
+
+
+def drive_state(media_state: str, ripping: bool) -> str:
+    """What the *drive* is doing — which is not what its last job is doing.
+
+    Encoding is not a drive state. It runs in a worker pool reading files off
+    the disk, and DrivePipeline.is_busy is only the rip lock, so a drive whose
+    previous disc is still encoding is free: put another disc in and it starts
+    ripping immediately. The dashboard used to report the encode on the drive
+    card anyway, which was wrong twice over — it named a state the drive was
+    not in, and because the Rip button only appeared on an "idle" drive, it
+    took away the button on a drive that was perfectly able to rip.
+
+    So the drive answers for itself: it is ripping, or it has a disc in it, or
+    it has not, or it is not reachable at all. *media_state* is the ``state``
+    key of :func:`media_status`; "not_ready" counts as loaded because a disc
+    being spun up is a disc that is in there.
+    """
+    if ripping:
+        return "ripping"
+    if media_state in ("missing", "denied"):
+        return "unavailable"
+    if media_state in ("empty", "tray_open"):
+        return "empty"
+    return "loaded"
+
+
 def media_status(device: str, display: str | None = None) -> dict:
     """Whether *device* has a disc ready to rip, and if not, why.
 

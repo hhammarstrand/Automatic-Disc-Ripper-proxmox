@@ -1,5 +1,30 @@
 # Changelog
 
+## 1.45.0
+
+**A drive card now says what the drive is doing, not what its last disc is
+doing.** "Encoding" under a drive was never true. Encoding runs in a worker
+pool over files that are already on the disk, and a drive pipeline's lock is
+held only for the rip — so the moment a rip finishes, that drive is free, and
+you can feed it the next disc while the previous one is still being encoded.
+The dashboard read the job's status and printed it on the drive, which meant
+the machine reported itself busy for the longest phase of a job it was not
+taking part in.
+
+It cost more than a wrong word. The Rip button — the one for a disc that is
+already sitting in the tray, after a failure or when the watcher missed the
+insertion — was drawn only on a drive whose status was "idle". For the whole
+length of an encode, a free drive had no button to start the disc in it, and
+the reason was a label that was describing something else.
+
+So the drive answers for itself now, by the same cheap ioctl the pipeline
+already uses before every rip: it is **Ripping**, or it has a **Disc in** it,
+or it is **Empty**, or it is **Unavailable** — that last one being the drive
+this container cannot reach, which used to be indistinguishable from an idle
+one. The Rip button shows on anything that is not mid-rip. The encoding job
+has not disappeared; it is in Active Jobs, where it says which drive it came
+off, because that is a fact about the job.
+
 ## 1.44.0
 
 **The covers are back in the pick lists.** Picking the right show out of a
