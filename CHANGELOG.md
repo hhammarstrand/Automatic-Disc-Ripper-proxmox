@@ -1,5 +1,38 @@
 # Changelog
 
+## 1.47.0
+
+**The tray now opens however the job ended, not only when it worked.** The
+eject sat on the success path: a rip that finished ejected the disc, and every
+other way out returned before reaching it — a disc MakeMKV could not read, a
+scan that found no titles, a destination that turned out not to be mounted, a
+duplicate that was skipped, a cancellation, a pipeline exception. That is
+exactly backwards. The disc you want back in your hand is the one that just
+failed, because looking at it is the next thing you do. It also left the drive
+loaded, which is how the disc you pushed in afterwards became the event the
+watcher ignores with "already ripping".
+
+Every path out of a run goes through one place now, including the audio-CD and
+data-disc branches, and it happens in the `finally` — before the drive lock is
+released, so a disc pushed straight back in cannot land on a pipeline that has
+not finished with the old one. A good rip still lets go of its disc early, so
+the next one can go in while this one encodes; the guard stops that being
+reported twice. The per-drive auto-eject setting is unchanged and still wins.
+
+**And the diagnostics could not answer the question they were built for.** The
+auto-eject section ended by saying what actually happened was "below", in the
+recent-jobs section. It was not: that section shows the tail of each job log,
+and the tail of anything that reached encoding is two dozen lines of HandBrake
+output — the eject line is thousands of lines above it. So the bundle sent to
+ask "why doesn't the tray open" contained no evidence about the tray at all,
+which is how an eject that only ever ran on success survived being reported
+twice.
+
+The section now quotes what each of the last eight jobs said about its own
+tray: ejected, refused, deliberately left in — or, for a job whose log says
+nothing about it at all, that nothing tried. That last line is the finding,
+not a gap in the report.
+
 ## 1.46.1
 
 **Two things the render harness could not show, found on the machine itself.**

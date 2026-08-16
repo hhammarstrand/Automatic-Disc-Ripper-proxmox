@@ -460,7 +460,10 @@ def _auto_eject(config) -> str:
         if named not in drives:
             drives.append(named)
     if not drives:
-        return "No optical drives to report on."
+        # Not a reason to stop: a container that has lost its passthrough is a
+        # container whose trays certainly are not opening, and what the last
+        # few jobs said about theirs is the useful half of the answer.
+        return "No optical drives to report on.\n\n" + _eject_history(config)
 
     lines = []
     for device in drives:
@@ -491,12 +494,72 @@ def _auto_eject(config) -> str:
         "is the fallback — in an LXC the command usually fails on its own, "
         "because it consults udev and there is none."
     )
-    lines.append(
-        "What actually happened is in each job's own log, on the History "
-        "page: 'Ejected the disc from …', 'Could not eject … ' or 'Leaving "
-        "the disc in …'. The most recent are below."
-    )
+    lines.append("")
+    lines.append(_eject_history(config))
     return "\n".join(lines)
+
+
+#: How many recent jobs are searched for what their tray actually did.
+EJECT_HISTORY_JOBS = 8
+
+#: The three things _eject_and_report can write, matched on the part of each
+#: sentence that does not vary with the drive's name.
+_EJECT_MARKS = ("Ejected the disc from", "Could not eject", "Leaving the disc in")
+
+
+def _eject_history(config) -> str:
+    """What the tray actually did on the last few jobs, out of their own logs.
+
+    This section used to end by saying the answer was "below", in the recent
+    jobs section. It was not: that section shows the tail of each job log, and
+    the tail of any job that got as far as encoding is two dozen lines of
+    HandBrake output. The eject line is thousands of lines above it, so the one
+    question this whole section exists for could not be answered from a bundle
+    — which is how an eject that only ever ran on the success path survived
+    being reported twice.
+
+    A job with no line at all is the finding, not a gap: it means nothing ever
+    tried to open that tray.
+    """
+    from adr import joblog
+    from adr.models import Job, get_session
+
+    try:
+        session = get_session()
+    except Exception:                              # noqa: BLE001 - never fatal
+        return "Could not open the database to read what the trays did."
+
+    out = ["What the tray actually did, from each job's own log:"]
+    try:
+        jobs = (
+            session.query(Job)
+            .order_by(Job.id.desc())
+            .limit(EJECT_HISTORY_JOBS)
+            .all()
+        )
+        if not jobs:
+            out.append("  no jobs yet, so no tray has been asked to open")
+            return "\n".join(out)
+        for job in jobs:
+            said = []
+            with contextlib.suppress(Exception):
+                said = [
+                    line for line in joblog.read(config, job.id).splitlines()
+                    if any(mark in line for mark in _EJECT_MARKS)
+                ]
+            status = job.status.value if job.status else "unknown"
+            if said:
+                for line in said[-2:]:
+                    out.append(f"  job #{job.id} [{status}] {line.strip()}")
+            else:
+                out.append(
+                    f"  job #{job.id} [{status}] nothing in the log about the "
+                    "tray — no eject was attempted for this disc"
+                )
+    finally:
+        with contextlib.suppress(Exception):
+            session.close()
+    return "\n".join(out)
 
 
 def _recent_jobs(config) -> str:

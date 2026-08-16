@@ -1271,6 +1271,31 @@ class DrivePipeline:
         self._encode_queue = encode_queue
         self._ripper = MakeMKVRipper(config, process_registry=process_registry)
         self._lock = threading.Lock()  # Prevent concurrent rips on same drive
+        #: Whether this run has already let go of its disc. Reset per disc.
+        self._released = False
+
+    def _release(self, job_log=None) -> None:
+        """Let go of the disc, once per run, whatever happened to the job.
+
+        The eject used to sit on the success path only, so the tray opened
+        when everything worked and stayed shut on every failure — a disc
+        MakeMKV could not read, a scan that found no titles, a destination
+        that was not mounted, a duplicate, a cancellation. That is exactly
+        backwards: the disc you want back in your hand is the one that just
+        failed, because the next thing you do is look at it. It also left the
+        drive loaded, which is how the following disc event became the one the
+        watcher ignores.
+
+        Every path out of a run goes through here, including the audio-CD and
+        data-disc branches, and the guard is what stops a good rip — which
+        lets go of the disc early, so the next one can go in while this one
+        encodes — from being reported a second time by the finally.
+        """
+        if getattr(self, "_released", False):
+            return
+        self._released = True
+        with contextlib.suppress(Exception):
+            _eject_and_report(self._config, self.drive, job_log)
 
     @property
     def is_busy(self) -> bool:
@@ -1323,6 +1348,9 @@ class DrivePipeline:
         if not self._lock.acquire(blocking=False):
             logger.warning("Drive %s is already ripping — ignoring new disc event", self.drive)
             return
+
+        # A fresh disc: nothing has been let go of yet.
+        self._released = False
 
         # Opening the session is inside the try because it can fail — a locked
         # or corrupt database — and outside it the exception would escape past
@@ -1469,9 +1497,7 @@ class DrivePipeline:
                     job.completed_at = utcnow()
                     session.commit()
                     logger.info("Job %s skipped as a duplicate", job.id)
-                    _eject_and_report(
-                        self._config, self.drive, JobLog(self._config, job.id),
-                    )
+                    self._release(JobLog(self._config, job.id))
                     return
 
             # 3. Prepare rip
@@ -1787,8 +1813,11 @@ class DrivePipeline:
                 job_log.append("rip", "Cancelled after the rip finished.")
                 return
 
-            # 4. Eject disc (so user can insert next)
-            _eject_and_report(self._config, self.drive, job_log)
+            # 4. Let go of the disc, so the next one can go in while this
+            #    one encodes. Every other way out of this method releases it
+            #    too, in the finally below — this call is only here so a good
+            #    rip does not wait for the encode to be queued first.
+            self._release(job_log)
 
             # 5. Create track records and queue encoding.
             # Naming lives in adr.naming: with television in the picture the
@@ -2079,6 +2108,17 @@ class DrivePipeline:
                     with contextlib.suppress(Exception):
                         session.rollback()
         finally:
+            # The drive is finished with this disc however the job ended, so
+            # this is where it is let go of — before the lock, so a disc
+            # pushed straight back in cannot land on a pipeline that has not
+            # finished with the old one. release() has already run on the
+            # good path and does nothing here.
+            log = None
+            if job is not None:
+                with contextlib.suppress(Exception):
+                    log = JobLog(self._config, job.id)
+            self._release(log)
+
             # Releasing the lock is the one thing that must happen. Everything
             # else here is cleanup; this is what keeps the drive usable.
             self._lock.release()
@@ -2104,7 +2144,7 @@ class DrivePipeline:
         session.commit()
         logger.info("Job %s: %s", job.id, message)
         JobLog(self._config, job.id).append("detect", message)
-        _eject_and_report(self._config, self.drive, JobLog(self._config, job.id))
+        self._release(JobLog(self._config, job.id))
 
     def _run_audio_cd(self, job, session, disc) -> None:
         """Rip an audio CD: identify at MusicBrainz, extract, encode, tag."""
@@ -2225,7 +2265,7 @@ class DrivePipeline:
         log.append("done", f"{len(result.files)} track(s) written to {result.output_dir}")
         logger.info("Job %s: audio CD finished — %d track(s)", job.id, len(result.files))
 
-        _eject_and_report(self._config, self.drive, log)
+        self._release(log)
         Notifier(self._config).job_done(job, str(result.output_dir or ""))
 
     def _run_data_disc(self, job, session, disc) -> None:
@@ -2339,7 +2379,7 @@ class DrivePipeline:
         log.append("done", f"Image written to {result.path} ({result.size_bytes / BYTES_PER_MB:.0f} MB)")
         logger.info("Job %s: disc image finished — %s", job.id, result.path)
 
-        _eject_and_report(self._config, self.drive, log)
+        self._release(log)
         Notifier(self._config).job_done(job, str(result.path or ""))
 
 

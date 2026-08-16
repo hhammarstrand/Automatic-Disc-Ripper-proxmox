@@ -8,6 +8,7 @@ elsewhere it is accepted and nothing happens.
 """
 
 import types
+from pathlib import Path
 
 import pytest
 
@@ -115,12 +116,96 @@ class TestWhenItIsTurnedOff:
 
 class TestEverySiteGoesThroughIt:
     def test_no_call_site_throws_the_answer_away(self):
-        """Five places ejected and ignored the result. Read rather than run:
-        each sits in the middle of a method that needs a disc and a drive."""
-        from pathlib import Path
+        """Five places ejected and ignored the result.
 
+        There are no five any more: they were funnelled into _release, which
+        is the only caller, so the question this test asks is now answered by
+        the shape of the module — and the one thing still worth pinning is
+        that nobody has gone back to ejecting without reporting.
+        """
         source = Path("adr/pipeline.py").read_text()
         assert "eject_drive(self.drive)" not in source, (
             "a call site still ejects without reporting the outcome"
         )
-        assert source.count("_eject_and_report(") >= 6      # 5 sites + the def
+        assert "self._release(" in source
+
+
+class TestEveryWayOutLetsGoOfTheDisc:
+    """The tray opened when the rip worked and stayed shut when it did not.
+
+    Reported from the machine: "släden åker fortfarande inte alltid ut". The
+    eject sat on the success path, and every failure returned before reaching
+    it — a disc MakeMKV could not read, a scan that found no titles, a
+    destination that was not mounted, a duplicate, a cancellation, a pipeline
+    exception. Backwards: the disc you want back is the one that just failed,
+    because looking at it is the next thing you do. It also left the drive
+    loaded, so the disc pushed in after it hit "already ripping".
+    """
+
+    SOURCE = Path(pipeline_mod.__file__).read_text()
+
+    def test_the_eject_has_exactly_one_caller(self):
+        """The funnel is the fix. A new early return cannot forget to eject if
+        there is only one place that ejects, and it is the one the finally
+        calls."""
+        body = self.SOURCE
+        calls = body.count("_eject_and_report(")
+        assert calls == 2, (
+            "expected the definition and the single call inside _release, "
+            f"found {calls} occurrences"
+        )
+        inside = body.split("def _release(")[1].split("\n    def ")[0]
+        assert "_eject_and_report(" in inside
+
+    def test_the_finally_lets_go_before_it_frees_the_drive(self):
+        """Order matters: a disc pushed straight back in must not land on a
+        pipeline that has not finished with the old one."""
+        run = self.SOURCE.split("def _run_pipeline(")[1]
+        # Newline-anchored: the method has a nested finally at a deeper
+        # indent, and an unanchored split lands inside it.
+        tail = run.split("\n        finally:")[1]
+        assert tail.index("self._release(") < tail.index("self._lock.release()")
+
+
+class TestTheReleaseGuard:
+    def _pipeline(self, monkeypatch, calls):
+        drive = pipeline_mod.DrivePipeline.__new__(pipeline_mod.DrivePipeline)
+        drive._config = _config()
+        drive.drive = "/dev/sr0"
+        drive._released = False
+        monkeypatch.setattr(
+            pipeline_mod, "_eject_and_report",
+            lambda config, dev, log=None: calls.append(dev) or True,
+        )
+        return drive
+
+    def test_a_second_call_does_nothing(self, monkeypatch):
+        """A good rip lets go early so the next disc can go in while this one
+        encodes; the finally then runs and must not say it twice."""
+        calls = []
+        drive = self._pipeline(monkeypatch, calls)
+        drive._release(_Log())
+        drive._release(_Log())
+        assert calls == ["/dev/sr0"]
+
+    def test_a_failing_eject_never_escapes(self, monkeypatch):
+        """Releasing the lock is the one thing that must happen, and this runs
+        first."""
+        drive = pipeline_mod.DrivePipeline.__new__(pipeline_mod.DrivePipeline)
+        drive._config = _config()
+        drive.drive = "/dev/sr0"
+        drive._released = False
+
+        def explode(config, dev, log=None):
+            raise OSError("the bus went away")
+
+        monkeypatch.setattr(pipeline_mod, "_eject_and_report", explode)
+        drive._release(_Log())            # must not raise
+        assert drive._released is True
+
+    def test_the_next_disc_starts_from_a_clean_slate(self):
+        """_released is reset per run, not per pipeline: a drive that ejected
+        one disc still has to eject the next."""
+        source = pipeline_mod.__file__
+        body = Path(source).read_text().split("def _run_pipeline(")[1]
+        assert "self._released = False" in body.split("try:")[0]

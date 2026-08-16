@@ -350,9 +350,14 @@ class TestTheEjectPictureIsInOnePlace:
         bundle.build(config)
         assert ejected == []
 
-    def test_it_points_at_where_the_outcome_is_recorded(self, config):
+    def test_it_reports_the_outcome_rather_than_pointing_at_it(self, config):
+        """It used to end "the most recent are below", meaning the recent-jobs
+        section — where the eject line is buried under the encode output that
+        follows it. The outcome is quoted here now."""
         config.update({"drive_labels": {"/dev/sr0": "Internal"}})
-        assert "Could not eject" in bundle.build(config)
+        built = bundle.build(config)
+        assert "What the tray actually did" in built
+        assert "the most recent are below" not in built.lower()
 
 
 class TestTheJobsThatSucceededWrongly:
@@ -427,3 +432,68 @@ class TestTheNewSectionsKeepTheirSecrets:
                        "drive_labels": {"/dev/sr0": "Internal"}})
         text = bundle.build(config)
         assert "abcdef0123456789abcdef0123456789" not in text
+
+
+class TestTheTrayHistory:
+    """The auto-eject section used to end by saying the answer was "below".
+
+    It was not. The recent-jobs section shows the tail of each job log, and the
+    tail of anything that reached encoding is two dozen lines of HandBrake
+    output — the eject line is thousands of lines above it. So the one question
+    the section exists for could not be answered from a bundle, which is how an
+    eject that only ever ran on the success path survived being reported twice.
+    """
+
+    def _job(self, status=JobStatus.DONE):
+        session = get_session()
+        try:
+            job = Job(drive="/dev/sr0", status=status, title="The Film")
+            session.add(job)
+            session.commit()
+            return job.id
+        finally:
+            session.close()
+
+    def test_a_tray_that_opened_is_quoted(self, config):
+        from adr import joblog
+        from adr.bundle import _eject_history
+
+        job_id = self._job()
+        log = joblog.JobLog(config, job_id)
+        log.append("rip", "Ejected the disc from Internal.")
+        log.append("encode", "Encode finished.")
+        out = _eject_history(config)
+        assert f"job #{job_id}" in out
+        assert "Ejected the disc from Internal." in out
+
+    def test_a_tray_that_refused_is_quoted_too(self, config):
+        from adr import joblog
+        from adr.bundle import _eject_history
+
+        job_id = self._job()
+        joblog.JobLog(config, job_id).append(
+            "rip", "Could not eject Internal — the drive refused the command.")
+        assert "Could not eject" in _eject_history(config)
+
+    def test_a_job_that_never_tried_is_the_finding(self, config):
+        """Not a gap in the report: it is the report. A disc nothing tried to
+        eject is exactly the fault being looked for."""
+        from adr.bundle import _eject_history
+
+        job_id = self._job(status=JobStatus.ERROR)
+        out = _eject_history(config)
+        assert f"job #{job_id}" in out
+        assert "no eject was attempted" in out
+
+    def test_it_survives_a_job_with_no_log_file_at_all(self, config):
+        from adr.bundle import _eject_history
+
+        self._job()
+        assert "job #" in _eject_history(config)
+
+    def test_the_section_carries_it(self, config):
+        """Wired in, not merely written."""
+        from adr.bundle import _auto_eject
+
+        self._job()
+        assert "What the tray actually did" in _auto_eject(config)
