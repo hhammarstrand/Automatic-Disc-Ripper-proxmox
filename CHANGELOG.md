@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.46.1
+
+**Two things the render harness could not show, found on the machine itself.**
+
+The completed-jobs list on the dashboard was a five-column table in a
+sideways-scrolling strip. With the short titles the harness seeds it fitted;
+with a shelf of real films — *The NeverEnding Story II: The Next Chapter* —
+the row's buttons were pushed past the right edge, the Plex mark was sliced in
+half, and the strip panned when the page should have. On a phone it is a stack
+now: the title across its own row, then the status and the buttons on one line
+under it. The job number goes, because it is a database id on the screen with
+the least room for one, and History still has it.
+
+And the panels were labelled two ways at once: OPTICAL DRIVES and ACTIVE JOBS
+in small caps with a rule running out of them, and "Encode Queue" and "Watch
+Folder" in sentence case three centimetres below. One system now — every panel
+header is a label, and a button inside one stays a button.
+
 ## 1.46.0
 
 **The dashboard is an instrument now.** You picked Drive Bay out of five

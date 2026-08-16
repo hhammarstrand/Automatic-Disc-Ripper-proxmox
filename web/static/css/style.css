@@ -145,11 +145,23 @@ main {
 .card:hover {
     border-color: #484f58 !important;
 }
+/* A panel label, matching the ruled section headings above it. The two used
+   to be different systems on the same screen: OPTICAL DRIVES in small caps
+   and "Encode Queue" in sentence case, three centimetres apart. */
 .card-header {
-    background-color: rgba(255, 255, 255, 0.04) !important;
+    background-color: var(--adr-card-2) !important;
     border-bottom: 1px solid var(--adr-border) !important;
-    color: var(--adr-text) !important;
-    font-weight: 600;
+    color: var(--adr-text-muted) !important;
+    font-size: 0.6875rem !important;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+}
+/* Buttons inside a header are controls, not labels. */
+.card-header .btn {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 0.8125rem;
 }
 .card-body {
     color: var(--adr-text) !important;
@@ -1251,6 +1263,42 @@ input, select, textarea, .list-group-item-action {
         padding-top: 0.6rem;
         padding-bottom: 0.6rem;
     }
+
+    /* The dashboard's completed list stops being a table.
+       It is five columns in a table-responsive strip, which on a phone
+       means the row's buttons sit off the right edge — the Plex mark was
+       sliced in half — and the strip pans when the page should. Here it
+       is a stack: the title over its own row, then status, time and the
+       buttons on one line under it. The job number goes; it is a database
+       id, and History is where you go when you need it. */
+    #recentTable,
+    #recentTable tbody {
+        display: block;
+    }
+    #recentTable thead {
+        display: none;
+    }
+    #recentTable tr {
+        display: grid;
+        grid-template-columns: auto 1fr auto;
+        align-items: center;
+        gap: 0.4rem 0.6rem;
+        padding: 0.7rem 0.85rem;
+        border-bottom: 1px solid var(--adr-border-2);
+    }
+    #recentTable td {
+        display: block;
+        padding: 0;
+        border: 0;
+        box-shadow: none;
+        background: transparent;
+    }
+    #recentTable td:first-child { display: none; }
+    #recentTable td:nth-child(2) {
+        grid-column: 1 / -1;
+        min-width: 0;
+    }
+    #recentTable td:last-child { justify-self: end; }
 
     /* The history table becomes cards.
        Fourteen columns in a sideways-scrolling strip is unusable with a

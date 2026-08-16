@@ -1207,3 +1207,40 @@ class TestTheDriveBay:
         source = Path("web/static/js/app.js").read_text()
         body = source[source.index("function toggleDriveMore("):]
         assert "aria-expanded" in body.split("\nfunction ")[0]
+
+
+class TestTheCompletedListOnAPhone:
+    """Five columns in a sideways-scrolling strip is not a list on a phone.
+
+    Reported from the real machine, which is where it showed: the seeded
+    titles in the render harness were short enough to fit, and a shelf of
+    actual films — "The NeverEnding Story II: The Next Chapter" — pushed the
+    row's buttons past the right edge, where the Plex mark was sliced in half
+    and the strip panned when the page should have.
+    """
+
+    CSS = Path("web/static/css/style.css")
+
+    def test_the_list_can_be_addressed(self):
+        assert 'id="recentTable"' in Path("web/templates/index.html").read_text()
+
+    def test_it_stacks_below_md(self):
+        mobile = self.CSS.read_text().split("@media (max-width: 767.98px)")[1]
+        for rule in ("#recentTable tr", "#recentTable thead", "#recentTable td"):
+            assert rule in mobile, rule
+        assert "display: grid;" in mobile.split("#recentTable tr")[1][:200]
+
+    def test_the_job_number_goes(self):
+        """A database id, on the screen with the least room for one."""
+        mobile = self.CSS.read_text().split("@media (max-width: 767.98px)")[1]
+        assert "#recentTable td:first-child { display: none; }" in mobile
+
+    def test_the_panels_are_labelled_one_way(self):
+        """OPTICAL DRIVES in small caps beside "Encode Queue" in sentence case
+        was two systems three centimetres apart on the same screen."""
+        css = self.CSS.read_text()
+        header = css.split(".card-header {")[1].split("}")[0]
+        assert "text-transform: uppercase" in header
+        assert "letter-spacing" in header
+        # A button in a header is a control, and controls are not labels.
+        assert ".card-header .btn" in css
