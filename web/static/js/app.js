@@ -329,30 +329,36 @@ function updateActiveJobs(jobs) {
             if (typeof rawPct !== 'number' || isNaN(rawPct)) {
                 console.warn('ADR: non-numeric phase_progress for job', job.id, rawPct);
             }
-            const pct = ((rawPct || 0) * 100).toFixed(1);
+            // Whole percent. The gauge is read from across the room, and a
+            // tenth of a percent on a forty-minute encode is a digit that
+            // changes every few seconds and says nothing.
+            const pct = Math.round((rawPct || 0) * 100);
             bar.style.width = pct + '%';
-            bar.textContent = pct + '%';
             bar.setAttribute('aria-valuenow', pct);
 
             // Update bar colour based on status
-            bar.className = 'progress-bar progress-bar-striped progress-bar-animated';
+            bar.className = 'progress-bar';
             if (job.status === 'ripping') bar.classList.add('bg-warning');
             else if (job.status === 'encoding') bar.classList.add('bg-info');
             else bar.classList.add('bg-primary');
-        }
 
-        // Update status badge.
-        //
-        // By class, not by position: the phase strip added pills above this,
-        // so the first .badge on the card is now "Identify" and the refresh
-        // was rewriting that instead.
-        const badge = card.querySelector('.job-status-badge');
-        if (badge && job.status !== 'ripped') {
-            badge.textContent = capitalize(job.status);
-            badge.className = 'badge job-status-badge';
-            if (job.status === 'ripping') badge.classList.add('bg-warning', 'text-dark');
-            else if (job.status === 'encoding') badge.classList.add('bg-info', 'text-dark');
-            else badge.classList.add('bg-primary');
+            // The counters. The percentage is no longer inside the bar: it is
+            // an element of its own, big enough to read, and measurable by the
+            // contrast audit, which cannot see text in a pseudo-element or
+            // judge it inside a clipped flex box.
+            const pctEl = card.querySelector(`[data-job-pct="${job.id}"]`);
+            if (pctEl) {
+                pctEl.replaceChildren(document.createTextNode(String(pct)));
+                const unit = document.createElement('span');
+                unit.className = 'adr-unit';
+                unit.textContent = '%';
+                pctEl.appendChild(unit);
+            }
+            const leftEl = card.querySelector(`[data-job-remaining="${job.id}"]`);
+            if (leftEl) {
+                const eta = job.progress_info && job.progress_info.eta_seconds;
+                leftEl.textContent = eta > 0 ? '~' + formatRemaining(eta) : '—';
+            }
         }
 
         // Update title (in case of re-match during rip/encode)
@@ -835,7 +841,6 @@ function formatProgressDetail(job) {
         if (pi.pass_total > 1) {
             parts.push(`Pass ${pi.pass_num + 1}/${pi.pass_total}`);
         }
-        if (pi.eta_seconds > 0) parts.push(formatEta(pi.eta_seconds) + ' left');
         if (pi.fps > 0) parts.push(pi.fps.toFixed(0) + ' fps');
         return parts.join(' \u00b7 ');
     }
@@ -858,14 +863,13 @@ function formatProgressDetail(job) {
  * a confident wrong number is worse than a blank.
  */
 function pushPace(parts, pi) {
-    if (pi.eta_seconds != null && pi.eta_seconds > 0) {
-        parts.push(formatEta(pi.eta_seconds) + ' left');
-    }
+    // Neither time goes in here any more. The counters above this line are
+    // the elapsed and the remaining, in figures large enough to read from
+    // across the room; repeating both in 11px monospace underneath was the
+    // same fact stated three times on one card. What is left is the pace,
+    // which the counters cannot show.
     if (pi.bytes_per_second > 0) {
         parts.push(formatSpeed(pi.bytes_per_second));
-    }
-    if (pi.elapsed_seconds > 0) {
-        parts.push(formatEta(pi.elapsed_seconds) + ' elapsed');
     }
 }
 
@@ -889,6 +893,30 @@ function formatEta(seconds) {
     const h = Math.floor(m / 60);
     const rm = m % 60;
     return rm ? `${h}h ${rm}m` : `${h}h`;
+}
+
+function formatRemaining(seconds) {
+    // The counter's own wording, matching adr.progress.format_remaining
+    // exactly: the server renders the first one and the browser every one
+    // after it, and two spellings of the same duration would read as the
+    // figure jumping on the first refresh.
+    if (seconds == null || seconds < 0) return '';
+    if (seconds < 60) return '<1m';
+    const m = Math.floor(seconds / 60);
+    if (m < 60) return `${m}m`;
+    const h = Math.floor(m / 60);
+    const rm = m % 60;
+    return rm ? `${h}h ${rm}m` : `${h}h`;
+}
+
+function toggleDriveMore(button) {
+    // Hide and Auto-eject live behind this on a phone. They are settings, not
+    // things you press while standing at the drive, and four 44px controls do
+    // not fit a 390px bay beside the drive's own name.
+    const bay = button.closest('.card');
+    if (!bay) return;
+    const open = bay.classList.toggle('adr-open');
+    button.setAttribute('aria-expanded', open ? 'true' : 'false');
 }
 
 function escapeHtml(str) {

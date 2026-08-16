@@ -77,28 +77,37 @@
         <div id="driveHealth"></div>
         <div id="drivesRow">
             {% if drives %}
+                {% set STATE_ICON = {
+                    'ripping': 'bi-record-circle-fill',
+                    'loaded': 'bi-disc-fill',
+                    'empty': 'bi-circle',
+                    'unavailable': 'bi-exclamation-triangle-fill'} %}
                 {% for d in drives %}
-                <div class="card mb-2">
+                <div class="card mb-2" data-drive-status="{{ d.status }}">
                     <div class="card-body py-2 px-3">
                         <div class="d-flex align-items-center gap-3">
-                            <!-- Disc icon -->
+                            <!-- The disc port: the drive drawn as the front of
+                                 the machine it is, so a row of them reads as a
+                                 rack rather than as three identical panels. -->
+                            <span class="adr-port">
                             <i class="bi bi-disc fs-4
                                 {% if d.status == 'ripping' %}text-warning spin
                                 {% elif d.status == 'loaded' %}text-primary
                                 {% elif d.status == 'unavailable' %}text-danger
                                 {% else %}text-secondary{% endif %}"></i>
+                            </span>
                             <!-- Drive info -->
                             <div class="flex-grow-1" style="min-width:0;">
                                 <div class="d-flex align-items-center gap-2 flex-wrap">
                                     <strong class="text-truncate">{% if d.label %}{{ d.label }}{% else %}{{ d.letter }}{% endif %}</strong>
                                     {% if d.label %}<small class="text-secondary">{{ d.letter }}</small>{% endif %}
                                     {% if d.model %}<small class="text-secondary text-truncate d-none d-md-inline">{{ d.model }}</small>{% endif %}
-                                    <span class="badge
+                                    <span class="badge adr-state
                                         {% if d.status == 'ripping' %}bg-warning text-dark
                                         {% elif d.status == 'loaded' %}bg-primary
                                         {% elif d.status == 'unavailable' %}bg-danger
                                         {% else %}bg-secondary{% endif %}">
-                                        {{ d.state_label }}
+                                        <i class="bi {{ STATE_ICON.get(d.status, 'bi-circle') }}"></i>{{ d.state_label }}
                                     </span>
                                     {% if d.job %}<small class="text-secondary text-truncate">{{ d.job.display_title }}{% if d.job.disc_hint %} · {{ d.job.disc_hint }}{% endif %}</small>{% endif %}
                                 </div>
@@ -121,13 +130,24 @@
                                 <button class="btn btn-outline-info btn-sm" onclick="ejectDrive('{{ d.letter }}')" title="Eject disc">
                                     <i class="bi bi-eject-fill"></i>
                                 </button>
-                                <button class="btn btn-outline-secondary btn-sm" onclick='toggleDrive({{ d.letter | tojson }}, true, {{ (d.letter | drivename) | tojson }})' title="Hide drive">
+                                <!-- Rip and Eject are what you press standing at
+                                     the machine. The other two are settings you
+                                     change once, and four 44px controls do not
+                                     fit a 390px bay — so they fold behind the
+                                     one below, on phones only. -->
+                                <button class="btn btn-outline-secondary btn-sm adr-fold" onclick='toggleDrive({{ d.letter | tojson }}, true, {{ (d.letter | drivename) | tojson }})' title="Hide drive">
                                     <i class="bi bi-eye-slash"></i>
                                 </button>
-                                <button class="btn btn-sm {{ 'btn-outline-warning' if d.auto_eject else 'btn-outline-secondary' }}"
+                                <button class="btn btn-sm adr-fold {{ 'btn-outline-warning' if d.auto_eject else 'btn-outline-secondary' }}"
                                     onclick='toggleEject({{ d.letter | tojson }}, {{ "false" if d.auto_eject else "true" }}, {{ (d.letter | drivename) | tojson }})'
                                     title="{{ 'Auto-eject is ON – click to turn off' if d.auto_eject else 'Auto-eject is OFF – click to turn on' }}">
                                     <i class="bi bi-eject{{ '-fill' if d.auto_eject else '' }}"></i>
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm adr-more"
+                                        onclick="toggleDriveMore(this)"
+                                        aria-expanded="false"
+                                        title="More drive options">
+                                    <i class="bi bi-three-dots"></i>
                                 </button>
                             </div>
                         </div>
@@ -162,30 +182,34 @@
                 {% for job in active_jobs %}
                 <div class="card mb-3" data-job-id="{{ job.id }}" data-started-at="{{ job.started_at | isotime }}" data-job-status="{{ job.status.value if job.status else 'unknown' }}">
                     <div class="card-body">
-                        <div class="row align-items-center">
-                            <!-- Poster / icon -->
-                            <div class="col-auto">
-                                {% if job.poster_url %}
-                                <img src="{{ job.poster_url }}" alt="Poster" class="rounded" style="height: 80px;">
-                                {% else %}
-                                <div class="d-flex align-items-center justify-content-center bg-secondary rounded" style="width:54px;height:80px;">
-                                    <i class="bi bi-film fs-3"></i>
-                                </div>
-                                {% endif %}
-                            </div>
+                        <div class="row align-items-start">
                             <!-- Info -->
                             <div class="col">
-                                <h6 class="mb-1">
-                                    {{ job.display_title }}
-                                    {%- if job.disc_hint %}
-                                    <span class="badge bg-secondary ms-1 align-middle"
-                                          title="Which disc of the set this is">{{ job.disc_hint }}</span>
-                                    {%- endif %}
-                                </h6>
-                                <small class="text-secondary">
-                                    Drive: {{ job.drive | drivename }} &middot; Job #{{ job.id }}
-                                    &middot; <i class="bi bi-clock me-1"></i><span class="elapsed-timer" data-start="{{ job.started_at | isotime }}">--:--</span>
-                                </small>
+                                <!-- Poster, title and plate stamp are one head,
+                                     so the counters and the gauge below get the
+                                     card's whole width instead of being squeezed
+                                     into a column beside the artwork. -->
+                                <div class="adr-jobhead">
+                                    {% if job.poster_url %}
+                                    <img src="{{ job.poster_url }}" alt="Poster" class="rounded adr-jobposter">
+                                    {% else %}
+                                    <div class="d-flex align-items-center justify-content-center bg-secondary rounded adr-jobposter">
+                                        <i class="bi bi-film fs-3"></i>
+                                    </div>
+                                    {% endif %}
+                                    <div class="adr-jobhead-text">
+                                        <h6 class="mb-1">
+                                            {{ job.display_title }}
+                                            {%- if job.disc_hint %}
+                                            <span class="badge bg-secondary ms-1 align-middle"
+                                                  title="Which disc of the set this is">{{ job.disc_hint }}</span>
+                                            {%- endif %}
+                                        </h6>
+                                        <small class="text-secondary adr-meta">
+                                            Drive: {{ job.drive | drivename }} &middot; Job #{{ job.id }}
+                                        </small>
+                                    </div>
+                                </div>
 
                                 {% if job.content_type == 'series' %}
                                 <!-- The disc looked like episodes. It is a guess from
@@ -228,18 +252,40 @@
                                     <span class="badge bg-secondary"><i class="bi bi-hourglass-split me-1"></i>Queued for encoding</span>
                                 </div>
                                 {% else %}
-                                <!-- Progress bar -->
-                                <div class="progress mt-2" style="height: 22px;">
-                                    {% set pct = (job.phase_progress * 100) | round(1) %}
-                                    <div class="progress-bar progress-bar-striped progress-bar-animated
+                                <!-- The three questions, answered as counters.
+                                     The percentage used to live inside the bar
+                                     at 12px, where it is unreadable from arm's
+                                     length and — being a child of an
+                                     overflow:hidden flex box — could not be
+                                     made bigger without escaping the bar. It is
+                                     a real element now, which is also the only
+                                     way the contrast audit can measure it. -->
+                                {% set pct = (job.phase_progress * 100) | round | int %}
+                                <div class="adr-readout-row">
+                                    <div class="adr-readout-cell">
+                                        <div class="adr-readout-label">Elapsed</div>
+                                        <div class="adr-readout"><span class="elapsed-timer" data-start="{{ job.started_at | isotime }}">--:--</span></div>
+                                    </div>
+                                    <div class="adr-readout-cell">
+                                        <div class="adr-readout-label">Remaining</div>
+                                        <div class="adr-readout" data-job-remaining="{{ job.id }}">{% if job.progress_eta %}~{{ job.progress_eta | remaining }}{% else %}&mdash;{% endif %}</div>
+                                    </div>
+                                    <div class="adr-readout-cell">
+                                        <div class="adr-readout-label">Done</div>
+                                        <div class="adr-readout" data-job-pct="{{ job.id }}">{{ pct }}<span class="adr-unit">%</span></div>
+                                    </div>
+                                </div>
+                                <!-- The gauge: a count of ticks passed, not a
+                                     striped bar sliding. -->
+                                <div class="progress mt-2">
+                                    <div class="progress-bar
                                         {% if job.status and job.status.value == 'ripping' %}bg-warning
                                         {% elif job.status and job.status.value == 'encoding' %}bg-info
                                         {% else %}bg-primary{% endif %}"
                                         role="progressbar"
                                         style="width: {{ pct }}%"
-                                        aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100">
-                                        {{ pct }}%
-                                    </div>
+                                        aria-valuenow="{{ pct }}" aria-valuemin="0" aria-valuemax="100"
+                                        aria-label="Progress of this job"></div>
                                 </div>
                                 {% endif %}
                                 <!-- Where this job is in the run.
@@ -268,24 +314,19 @@
                                     {% endfor %}
                                 </div>
 
-                                <div class="d-flex justify-content-between align-items-center mt-1 flex-wrap gap-2">
-                                    <small class="text-secondary">
-                                        <span class="badge job-status-badge
-                                            {% if job.status and job.status.value == 'ripping' %}bg-warning text-dark
-                                            {% elif job.status and job.status.value == 'encoding' %}bg-info text-dark
-                                            {% elif job.status and job.status.value == 'ripped' %}bg-secondary
-                                            {% else %}bg-primary{% endif %}">
-                                            {% if job.status and job.status.value == 'ripped' %}Queued
-                                            {% else %}{{ job.status.value | capitalize if job.status else 'Unknown' }}{% endif %}
-                                        </span>
-                                    </small>
+                                <!-- The status word used to be repeated here as a
+                                     badge. The stage strip above already says
+                                     which phase this is, and the counters say
+                                     how far — a third statement of the same
+                                     fact was the loudest thing on the card. -->
+                                <div class="d-flex justify-content-end align-items-center mt-1 flex-wrap gap-2 adr-detailrow">
                                     <small class="text-secondary progress-detail" data-job-detail="{{ job.id }}"></small>
                                 </div>
                                 <!-- What the tool itself is saying, when it says
                                      something worth repeating: "Saving title 2
                                      to file". Kept on its own line because it is
                                      the sentence, not a statistic. -->
-                                <small class="text-secondary d-block text-truncate job-saying"
+                                <small class="text-secondary d-block text-truncate job-saying adr-detailrow"
                                        data-job-saying="{{ job.id }}"></small>
                             </div>
                             <!-- Actions -->

@@ -6,6 +6,8 @@ has thousands of rows, so the page got slower every week and the browser-side
 status filter could only hide rows that had already been sent.
 """
 
+from pathlib import Path
+
 import pytest
 
 from adr.config import Config
@@ -249,17 +251,22 @@ class TestTheElapsedTimer:
             session.close()
         assert client.get("/").status_code == 200
 
-    def test_the_status_badge_can_be_found_by_name(self, client):
-        """The phase strip put badges above it, so the refresh was rewriting
-        the first phase pill instead of the status."""
+    def test_the_status_is_stated_once(self, client):
+        """There used to be a status badge here as well as the phase strip.
+
+        It caused its own bug — the refresh, looking for "the first badge on
+        the card", rewrote the leading phase pill instead — which was fixed by
+        giving it a class. The badge is gone now: the strip says which phase
+        this is, the counters say how far, and a third statement of the same
+        fact was the loudest thing on the card. This test is what is left of
+        that one, and it fails if the duplicate ever comes back.
+        """
         self._running_job()
         html = client.get("/").data.decode()
-        assert "job-status-badge" in html
-        strip_at = html.index("data-job-phases")
-        badge_at = html.index("job-status-badge")
-        assert strip_at < badge_at, (
-            "the phase pills come first, which is why the status badge needs "
-            "its own class"
+        assert "data-job-phases" in html, "the phase strip is the statement"
+        assert "job-status-badge" not in html
+        assert "job-status-badge" not in Path("web/static/js/app.js").read_text(), (
+            "the refresh still writes a badge the page no longer has"
         )
 
 

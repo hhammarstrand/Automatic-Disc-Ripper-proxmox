@@ -1,5 +1,52 @@
 # Changelog
 
+## 1.46.0
+
+**The dashboard is an instrument now.** You picked Drive Bay out of five
+directions, and this is it: the screen is read standing at a machine, often in
+a bright room, on a phone at arm's length, to answer three questions — which
+disc, how far along, how much longer. It answers them in counters.
+
+The job card leads with a labelled readout: **ELAPSED**, **REMAINING**,
+**DONE**, in monospaced tabular figures, above a gauge with ticks cut into it
+that the fill advances through. The percentage used to live *inside* the
+progress bar at twelve pixels, where nobody could read it — and it could not
+simply be made bigger, because the bar is an overflow-hidden flex box that
+clips anything placed above it and because the contrast audit cannot measure
+text in a pseudo-element. So it is a real element, and so is the remaining
+time: that estimate has been in the data all along, reported by HandBrake
+outright and derived from throughput for the rip, and it was being shown in
+eleven-pixel grey at the end of a line nobody reads. The line under the gauge
+stopped repeating it, and says the pace instead.
+
+**Colour finally carries meaning.** Ripping is amber, encoding is teal, and
+waiting is blue, on the card's left edge, on the drive's edge, on the gauge
+and on the stage you are standing on — one hue for one state, each behind its
+own glyph so the distinction survives a colour-blind reader and a screen in
+sunlight. Before this, ripping and encoding were separated by the word alone.
+The status badge that repeated that word a third time is gone: the stage strip
+says which phase, the counters say how far.
+
+**A drive is drawn as the front of a machine.** A port, a state edge and the
+machine's own word for what it is doing — RIPPING, DISC IN, EMPTY,
+UNAVAILABLE. On a phone the two settings controls, Hide and Auto-eject, fold
+behind one button, because four 44-pixel controls and a disc port do not fit
+390 pixels next to the drive's own name.
+
+**And the ground is lighter than a design studio would pick.** A near-black
+canvas separated by three percent lightness steps is a decision made in a dark
+room for a screen used in a bright one, and those steps are the first thing to
+disappear when a phone dims itself. There are four surfaces now, far enough
+apart to survive daylight, and the body text is half a weight heavier because
+thin type haloes on dark. On a wide screen the instrument keeps a working
+width instead of stretching to nineteen hundred pixels, where one tick of the
+gauge would mean a third of a percent.
+
+The contrast audit still ends at zero failures, and it caught one thing on the
+way: a job still identifying its disc had no state colour of its own and
+inherited the grey meant for an idle drive edge — 2.1:1 as text. Every status a
+job can be in has a colour now, and a test fails if a new one arrives without.
+
 ## 1.45.0
 
 **A drive card now says what the drive is doing, not what its last disc is

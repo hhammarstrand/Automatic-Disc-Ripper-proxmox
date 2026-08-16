@@ -44,6 +44,7 @@ from adr.models import (
     JobStatus,
     get_session,
 )
+from adr.progress import format_remaining
 from adr.utils import (
     BYTES_PER_MB,
     extract_tmdb_year,
@@ -270,6 +271,10 @@ def create_app(config: Config, pipeline_manager=None) -> Flask:
     app.jinja_env.filters["drivename"] = (
         lambda d: _config.drive_display(d) if (_config and d) else (d or "")
     )
+    # The remaining-time counter, in the same words the browser will use for
+    # it on the next poll — a server render that disagreed with the first
+    # refresh would read as the figure jumping for no reason.
+    app.jinja_env.filters["remaining"] = format_remaining
 
     # Register routes
     _register_ui_routes(app)

@@ -193,6 +193,26 @@ class Job(Base):
             return int((self.completed_at - self.started_at).total_seconds())
         return None
 
+    @property
+    def progress_eta(self) -> int | None:
+        """Seconds left in the current phase, as the tool itself reported it.
+
+        Both phases write one: HandBrake states it outright, and the ripper
+        derives it from throughput. This is the same number the detail line has
+        always shown in passing — it is a property so the dashboard can put it
+        somewhere a person actually looks for it.
+        """
+        import json as _json
+
+        try:
+            info = _json.loads(self.progress_info) if self.progress_info else None
+        except (ValueError, TypeError):
+            return None
+        if not isinstance(info, dict):
+            return None
+        eta = info.get("eta_seconds")
+        return int(eta) if isinstance(eta, (int, float)) and eta > 0 else None
+
     def to_dict(self) -> dict:
         """Serialise to JSON-friendly dict for the API."""
         import json as _json

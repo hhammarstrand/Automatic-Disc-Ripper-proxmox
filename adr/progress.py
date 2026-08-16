@@ -120,6 +120,27 @@ def format_eta(seconds: int | None) -> str:
     return f"{hours}h {minutes}m" if minutes else f"{hours}h"
 
 
+def format_remaining(seconds: int | None) -> str:
+    """The same duration, coarse enough to sit in a counter.
+
+    :func:`format_eta` is for a line of text that is read once. This is for a
+    figure on the dashboard that is repainted every few seconds and read from
+    across the room, where a ticking seconds column is noise: nobody standing
+    at a drive needs to know the difference between eleven and twelve seconds
+    of a forty-minute encode, and the digit changing draws the eye every time.
+    Under a minute stops counting and says so.
+    """
+    if seconds is None or seconds < 0:
+        return ""
+    if seconds < 60:
+        return "<1m"
+    minutes, _ = divmod(int(seconds), 60)
+    if minutes < 60:
+        return f"{minutes}m"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+
+
 def format_speed(bytes_per_second: float | None) -> str:
     """A human transfer rate: '8.4 MB/s'. Empty for None.
 

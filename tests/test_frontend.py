@@ -1099,3 +1099,111 @@ class TestThePickListsShowTheCover:
     @pytest.mark.parametrize("opener", ["editSeries", "startSeriesMode"])
     def test_opening_the_dialog_drops_the_last_job_s_cover(self, opener):
         assert "seriesPosterUrl').value = ''" in self._body(opener)
+
+
+class TestTheInstrumentIsWiredUp:
+    """The readout replaces a number that used to live inside the bar.
+
+    That number was 12px of white-on-amber inside an overflow:hidden flex box,
+    which is why it could not simply be made bigger: a pseudo-element above it
+    is clipped away, and a pseudo-element is invisible to the contrast audit
+    besides. So it became a real element, and these are the four wires that
+    have to stay connected for it to show anything.
+    """
+
+    SOURCE = Path("web/static/js/app.js")
+    INDEX = Path("web/templates/index.html")
+
+    def _body(self, name: str) -> str:
+        source = self.SOURCE.read_text()
+        start = source.index(f"function {name}(")
+        end = source.index("\nfunction ", start + 1)
+        return source[start:end]
+
+    def test_the_bar_no_longer_carries_the_number(self):
+        """Both halves: the server render and the poll that repaints it."""
+        assert "bar.textContent" not in self.SOURCE.read_text(), (
+            "the refresh writes the percentage back inside the gauge"
+        )
+        index = self.INDEX.read_text()
+        # The content of the bar, not its attributes: the width is still a
+        # percentage and always will be.
+        opening = index.split('class="progress-bar', 1)[1]
+        content = opening.split(">", 1)[1].split("</div>", 1)[0]
+        assert content.strip() == "", f"the gauge still contains {content!r}"
+
+    def test_the_counters_exist_in_the_markup(self):
+        index = self.INDEX.read_text()
+        for hook in ("adr-readout-row", "data-job-remaining", "data-job-pct",
+                     "elapsed-timer"):
+            assert hook in index, hook
+
+    def test_the_poll_writes_all_three(self):
+        body = self._body("updateActiveJobs")
+        assert "data-job-pct" in body
+        assert "data-job-remaining" in body
+        assert "Math.round" in body, "the percentage is rendered to one decimal"
+
+    def test_the_remaining_time_is_the_tool_s_own_estimate(self):
+        """Not extrapolated in the browser: both phases already report one,
+        and a straight line drawn through MakeMKV's progress is wrong early in
+        every title."""
+        assert "eta_seconds" in self._body("updateActiveJobs")
+        assert "progress_eta" in Path("adr/models.py").read_text()
+        assert "progress_eta" in self.INDEX.read_text()
+
+    def test_the_two_spellings_of_a_duration_agree(self):
+        """The server renders the first value and the browser every one after
+        it. Two formatters that disagree read as the figure jumping."""
+        from adr.progress import format_remaining
+
+        js = self._body("formatRemaining")
+        for seconds, expected in ((30, "<1m"), (600, "10m"), (5400, "1h 30m"),
+                                  (7200, "2h")):
+            assert format_remaining(seconds) == expected
+            assert f"'{expected}'" in js or f"`{expected}`" in js or "${" in js
+
+    def test_the_detail_line_no_longer_repeats_the_counters(self):
+        """It said "18m 12s left · 41 fps" under a counter reading ~18m."""
+        assert "left'" not in self._body("pushPace")
+        assert "' left'" not in self._body("formatProgressDetail")
+
+
+class TestTheDriveBay:
+    """A drive is drawn as the front of the machine: a port, a state edge, and
+    a word for what it is doing. The two settings buttons fold away on a phone
+    because four 44px controls plus a 34px port do not fit 390px."""
+
+    INDEX = Path("web/templates/index.html")
+    CSS = Path("web/static/css/style.css")
+
+    def test_the_bay_says_which_state_it_is_in(self):
+        index = self.INDEX.read_text()
+        assert 'data-drive-status="{{ d.status }}"' in index
+        assert "adr-port" in index
+
+    def test_the_state_is_not_carried_by_colour_alone(self):
+        """Each state word sits behind its own glyph, which is what the
+        contrast file deliberately does not try to measure."""
+        index = self.INDEX.read_text()
+        assert "STATE_ICON" in index
+        assert 'STATE_ICON.get(d.status' in index
+
+    def test_the_settings_controls_fold_on_a_phone(self):
+        index = self.INDEX.read_text()
+        assert index.count("adr-fold") == 2, "Hide and Auto-eject fold, nothing else"
+        assert "toggleDriveMore(this)" in index
+        mobile = self.CSS.read_text().split("@media (max-width: 767.98px)")[1]
+        assert ".adr-more { display: inline-flex; }" in mobile
+        assert "adr-open" in mobile
+
+    def test_the_fold_control_is_hidden_where_it_is_not_needed(self):
+        """Above md all four buttons fit, and a menu holding two things that
+        are already on screen is worse than no menu."""
+        css = self.CSS.read_text()
+        assert "#drivesRow .adr-more { display: none; }" in css
+
+    def test_the_toggle_says_whether_it_is_open(self):
+        source = Path("web/static/js/app.js").read_text()
+        body = source[source.index("function toggleDriveMore("):]
+        assert "aria-expanded" in body.split("\nfunction ")[0]

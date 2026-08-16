@@ -1,37 +1,71 @@
 /* Automatic Disc Ripper custom styles — dark theme */
 
 :root {
-    --adr-bg: #0d1117;
-    --adr-card: #161b22;
-    --adr-border: #30363d;
-    --adr-text: #e6edf3;
-    --adr-text-muted: #8b949e;
-    --adr-accent: #58a6ff;
-    --adr-success: #3fb950;
-    --adr-warning: #d29922;
-    --adr-danger: #f85149;
-    --adr-info: #58a6ff;
+    /* The ground is deliberately lighter than a design studio would pick.
+       This screen is read standing at a machine, often in a bright room, on a
+       phone held at arm's length — a near-black canvas separated by three
+       percent lightness steps is a decision made in the dark for a screen
+       used in the light, and the steps disappear first. Four surfaces, far
+       enough apart to survive daylight and a phone's auto-brightness. */
+    --adr-bg: #14171c;
+    --adr-card: #1c2027;
+    --adr-card-2: #232830;
+    --adr-bg-alt: #080b0e;
+    --adr-border: #38404b;
+    --adr-border-2: #2a313a;
+    --adr-text: #f2f5f9;
+    --adr-text-muted: #aeb8c4;
+
+    /* One saturated colour means "in motion", and it is amber because a
+       transport light on a machine is amber. Encoding gets its own hue: the
+       two states a job spends its life in were previously separated by the
+       word alone, which is not a distinction you can make from across a
+       room, and not one a colour-blind reader gets at all. */
+    --adr-accent: #e8a13a;
+    --adr-encode: #5fc9d6;
+    --adr-link: #79b8ff;
+    --adr-success: #4cc45c;
+    --adr-warning: #e8a13a;
+    --adr-danger: #ff6b60;
+    --adr-info: #5fc9d6;
+
+    /* Counters are monospaced and tabular so a digit changing does not move
+       the ones beside it. Prose stays proportional — this is a dashboard, not
+       a terminal. */
+    --adr-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
     /* Alert backgrounds: the accent colour sunk into the dark ground rather
        than laid on top of it. Solid rather than a translucent overlay so the
        result does not depend on what an alert happens to be sitting on — an
        alert appears both on the page and inside a card, and a colour that
        shifts between the two cannot be checked. */
-    --adr-info-bg: #10243e;
+    --adr-info-bg: #12233a;
     --adr-success-bg: #0f2417;
     --adr-warning-bg: #2b2413;
     --adr-danger-bg: #2d1618;
 
     /* Bootstrap writes code in #d63384, picked for a white page; on the card
        here that is 3.84:1. Same hue, lifted until it clears AA. */
-    --adr-code: #ff7b9c;
+    --adr-code: #ff9ab0;
+
+    /* Motion, as two values rather than a number typed into forty rules.
+       Nothing here is decorative: a width that eases between polls, a press
+       that acknowledges itself, and the disc glyph turning while a disc is
+       actually turning. */
+    --adr-dur-fast: 120ms;
+    --adr-dur-base: 240ms;
+
+    /* The state colour of whatever this is inside — a drive bay or a job
+       card. Declared here so every component inherits a sane default and only
+       the two that have states override it. */
+    --adr-state: #4a5361;
 
     /* The chrome at the top and the bottom of the screen: one shade below the
        page, so a bar reads as frame rather than as content. A token rather
        than the literal it used to be in .navbar, because two bars now share
        it and the labels on the bottom one are small enough that the ratio
        against it has to be checked rather than assumed. */
-    --adr-nav-bg: #010409;
+    --adr-nav-bg: #0f1216;
 }
 
 body {
@@ -40,6 +74,10 @@ body {
     flex-direction: column;
     background-color: var(--adr-bg) !important;
     color: var(--adr-text) !important;
+    /* Half a step heavier than default. Thin type on a dark ground haloes,
+       and this one is read at arm's length in whatever light the room has. */
+    font-weight: 500;
+    -webkit-font-smoothing: antialiased;
 }
 
 main {
@@ -146,15 +184,15 @@ main {
 
 /* ---- Forms / Inputs ---- */
 .form-control, .form-select {
-    background-color: #0d1117 !important;
+    background-color: var(--adr-bg-alt) !important;
     color: var(--adr-text) !important;
     border-color: var(--adr-border) !important;
 }
 .form-control:focus, .form-select:focus {
-    background-color: #0d1117 !important;
+    background-color: var(--adr-bg-alt) !important;
     color: var(--adr-text) !important;
     border-color: var(--adr-accent) !important;
-    box-shadow: 0 0 0 0.2rem rgba(88, 166, 255, 0.25) !important;
+    box-shadow: 0 0 0 0.2rem rgba(232, 161, 58, 0.28) !important;
 }
 .form-control::placeholder {
     color: var(--adr-text-muted) !important;
@@ -234,12 +272,67 @@ main {
 
 /* ---- Progress bars ---- */
 .progress {
-    background-color: #21262d !important;
-    border-radius: 6px;
+    background-color: var(--adr-bg-alt) !important;
+    border-radius: 2px;
 }
 .progress-bar {
     font-size: 0.75rem;
     font-weight: 600;
+}
+
+/* The one filled button on a page: Save, Update, Use these names. Bootstrap's
+   #0d6efd belongs to a light theme and to no palette here — and it is
+   deliberately not the amber, because amber means the machine is moving and a
+   button that has not been pressed is not moving. */
+.btn-primary {
+    background-color: var(--adr-link) !important;
+    border-color: var(--adr-link) !important;
+    color: var(--adr-bg) !important;
+    font-weight: 600;
+}
+.btn-primary:hover, .btn-primary:focus {
+    background-color: #92c5ff !important;
+    border-color: #92c5ff !important;
+    color: var(--adr-bg) !important;
+}
+
+/* ---- The tick gauge ----
+
+   A job's own bar only. A trough with ticks cut into it and a fill that
+   advances through them, so the eye counts rather than estimates. What it
+   replaces was 22px of animated candy-stripe with the number inside it, and
+   the stripes slide whether or not the job is moving — the one thing a
+   progress bar must not do. Storage keeps a plain bar: that is a quantity,
+   not work in progress, and its percentage still lives inside it. */
+.card[data-job-id] .progress {
+    height: 16px;
+    box-shadow: inset 0 0 0 1px var(--adr-border);
+    padding: 3px;
+    position: relative;
+    overflow: hidden;
+}
+.card[data-job-id] .progress::before {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    background-image: repeating-linear-gradient(90deg,
+        #2d343e 0 5px, transparent 5px 8px);
+}
+.card[data-job-id] .progress-bar {
+    position: relative;
+    background-color: transparent !important;
+    background-image: repeating-linear-gradient(90deg,
+        var(--adr-accent) 0 5px, transparent 5px 8px);
+    border-radius: 0;
+    transition: width var(--adr-dur-base) linear;
+}
+.card[data-job-id] .progress-bar.bg-info {
+    background-image: repeating-linear-gradient(90deg,
+        var(--adr-encode) 0 5px, transparent 5px 8px);
+}
+.card[data-job-id] .progress-bar.bg-primary {
+    background-image: repeating-linear-gradient(90deg,
+        var(--adr-link) 0 5px, transparent 5px 8px);
 }
 
 /* ---- Badges ---- */
@@ -529,6 +622,215 @@ a:not(.btn):not(.nav-link):not(.navbar-brand):not(.dropdown-item):not(.page-link
 /* ---- Job cards ---- */
 [data-job-id] {
     transition: background-color 0.3s ease;
+}
+
+/* ======================================================================
+   The instrument
+   ----------------------------------------------------------------------
+   Everything below turns the two things this application is actually
+   about — a drive, and the work coming off it — into something readable
+   from across a room. The rest of the page stays a plain dashboard on
+   purpose: a machine face applied to Settings would be costume.
+   ====================================================================== */
+
+/* ---- Ruled section headers ----
+
+   A small caps label with a rule running out of it, which is how a panel is
+   labelled on equipment. The page title keeps its rank; only the section
+   headings below it become labels, because a heading that is smaller than the
+   button beside it has stopped being a heading. */
+main h5 {
+    font-size: 0.6875rem !important;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--adr-text-muted) !important;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+main h5::after {
+    content: "";
+    flex: 1 1 auto;
+    height: 1px;
+    background: var(--adr-border);
+}
+main h5 i { margin-right: 0 !important; font-size: 0.875rem; }
+
+/* ---- Drive bays ----
+
+   A drive is a hole in the front of a machine with a light beside it. The
+   state colour runs down the left edge of the bay, so a rack of four is
+   scannable without reading any of them. */
+#drivesRow > .card {
+    min-height: 64px;
+    border-left: 4px solid var(--adr-state) !important;
+    margin-bottom: 6px !important;
+}
+#drivesRow > .card[data-drive-status="ripping"] { --adr-state: var(--adr-accent); }
+#drivesRow > .card[data-drive-status="loaded"] { --adr-state: var(--adr-link); }
+#drivesRow > .card[data-drive-status="unavailable"] { --adr-state: var(--adr-danger); }
+
+/* The disc port: a CSS-drawn hole, with the drive's own glyph in it. */
+.adr-port {
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%,
+        #0a0d11 0 42%, #2b323c 42% 49%, #181c22 49%);
+    box-shadow: inset 0 0 0 1px #3a424e;
+    display: grid;
+    place-items: center;
+}
+.adr-port > i.bi-disc {
+    font-size: 1rem !important;
+    line-height: 1;
+    color: var(--adr-state) !important;
+}
+
+/* The state word, not a pill: the machine's own word for what it is doing,
+   in the state colour, always behind a glyph of its own so the distinction
+   survives a colour-blind reader and a bright room. */
+#drivesRow .badge.adr-state {
+    background: transparent !important;
+    padding: 0 !important;
+    font-size: 0.625rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--adr-state) !important;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+#drivesRow .badge.adr-state i { font-size: 0.6875rem; }
+#drivesRow .adr-more { display: none; }
+
+/* ---- The job instrument ---- */
+.card[data-job-id] {
+    border-left: 4px solid var(--adr-state) !important;
+}
+/* Every state a card can be in, because the state colour is also the colour
+   of the stage the job is standing on — and a status with no entry here
+   inherits the grey meant for an idle drive edge, which as text on a card is
+   2.1:1. Waiting, of any kind, is blue. */
+.card[data-job-status="pending"],
+.card[data-job-status="identifying"],
+.card[data-job-status="ripped"] { --adr-state: var(--adr-link); }
+.card[data-job-status="ripping"] { --adr-state: var(--adr-accent); }
+.card[data-job-status="encoding"] { --adr-state: var(--adr-encode); }
+.card[data-job-status="error"] { --adr-state: var(--adr-danger); }
+.card[data-job-status="done"] { --adr-state: var(--adr-success); }
+
+.adr-jobhead {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    min-width: 0;
+}
+.adr-jobhead-text { min-width: 0; flex: 1 1 auto; }
+.adr-jobposter {
+    width: 54px;
+    height: 81px;
+    flex: 0 0 auto;
+    object-fit: cover;
+    border: 1px solid var(--adr-border);
+}
+/* The job's plate stamp: which drive, which job. A sentence in the middle of
+   an instrument reads as an afterthought; this reads as engraving. */
+.card[data-job-id] .adr-meta {
+    display: block;
+    font-family: var(--adr-mono);
+    font-size: 0.6875rem !important;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+}
+
+/* ---- The readout ----
+
+   Three counters, and the largest thing on the card. Elapsed and remaining
+   are the questions somebody walks over to ask; the percentage is how they
+   check the answer. Monospaced and tabular so none of them twitch. */
+.adr-readout-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 1.5rem;
+    margin-top: 0.7rem;
+    padding-top: 0.65rem;
+    border-top: 1px solid var(--adr-border-2);
+}
+.adr-readout-cell { min-width: 0; }
+.adr-readout-label {
+    font-size: 0.6875rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.11em;
+    color: var(--adr-text-muted);
+    margin-bottom: 0.15rem;
+    white-space: nowrap;
+}
+.adr-readout {
+    font-family: var(--adr-mono);
+    font-size: 1.375rem;
+    font-weight: 600;
+    line-height: 1.1;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    color: var(--adr-text);
+    white-space: nowrap;
+}
+.adr-readout .adr-unit {
+    font-size: 0.9375rem;
+    font-weight: 700;
+    color: var(--adr-text-muted);
+    letter-spacing: 0.04em;
+}
+
+/* ---- The stage strip ----
+
+   The interpuncts between the phases become the rail they sit on, so the
+   four pills read as a route with a position on it. */
+.job-phases {
+    align-items: center;
+    gap: 0 !important;
+}
+.job-phases .badge {
+    background: transparent !important;
+    background-color: transparent !important;
+    border-radius: 2px !important;
+    font-size: 0.625rem !important;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 5px !important;
+    color: var(--adr-text-muted) !important;
+    border: 1px solid transparent;
+    white-space: nowrap;
+}
+.job-phases .badge.bg-success { color: var(--adr-success) !important; }
+.job-phases .badge.bg-primary {
+    color: var(--adr-state) !important;
+    border-color: currentColor;
+}
+.job-phases .badge i { margin-right: 0.25rem !important; }
+.job-phases > .text-secondary:not(.badge) {
+    flex: 1 1 auto;
+    height: 1px;
+    background: var(--adr-border);
+    font-size: 0 !important;
+    margin: 0 0.25rem;
+    min-width: 6px;
+}
+
+.card[data-job-id] .progress-detail,
+.card[data-job-id] .job-saying {
+    font-family: var(--adr-mono);
+    font-size: 0.6875rem !important;
+    letter-spacing: 0.04em;
 }
 
 /* ---- Footer ---- */
@@ -1017,4 +1319,59 @@ input, select, textarea, .list-group-item-action {
         display: block;
         text-align: center;
     }
+
+    /* ---- The bay at 390px ----
+
+       A bay holds the drive's name, the state word, the disc title and four
+       controls. Four 44px buttons plus a 34px port leaves nothing for the
+       words, so Hide and Auto-eject — settings, changed once — fold behind
+       one control. Rip and Eject are what a hand reaches for while standing
+       at the machine, and they stay. */
+    #drivesRow .btn.adr-fold { display: none; }
+    #drivesRow .adr-more { display: inline-flex; }
+    #drivesRow > .card.adr-open .btn.adr-fold { display: inline-flex; }
+    #drivesRow .btn {
+        min-height: 40px;
+        min-width: 40px;
+        padding: 0.3rem 0.55rem !important;
+    }
+
+    /* The counters keep their rank but not their size: three of them at
+       22px do not fit 390px beside their own labels. */
+    .adr-readout-row { gap: 1.1rem; }
+    .adr-readout { font-size: 1.25rem; }
+    .adr-readout .adr-unit { font-size: 0.875rem; }
+    .adr-readout-label { font-size: 0.625rem; letter-spacing: 0.09em; }
+
+    /* The poster is a chip here, not a hero — sized to the title block
+       beside it, so the head does not leave a hole above the counters. */
+    .adr-jobposter { width: 44px; height: 66px; }
+    .adr-jobhead { gap: 0.7rem; }
+}
+
+/* ---- The instrument at desk width ----
+
+   A gauge stretched across 1900px stops being a counter: one tick becomes a
+   third of a percent, which is a measurement nobody can use, and the three
+   counters sit in the left tenth of an otherwise empty row. The instrument
+   keeps a working width and the card grows around it. */
+@media (min-width: 992px) {
+    .card[data-job-id] .adr-readout-row,
+    .card[data-job-id] .progress,
+    .card[data-job-id] .job-phases,
+    .card[data-job-id] .adr-detailrow {
+        max-width: 720px;
+    }
+}
+
+/* Under about 360px the middle counter is the one to lose: elapsed is
+   measured, remaining is an estimate, and the percentage is the check. */
+@media (max-width: 359.98px) {
+    .adr-readout-row > .adr-readout-cell:nth-child(2) { display: none; }
+}
+
+/* Motion is for things that are actually moving. */
+@media (prefers-reduced-motion: reduce) {
+    :root { --adr-dur-fast: 1ms; --adr-dur-base: 1ms; }
+    .spin { animation: none !important; }
 }

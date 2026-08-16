@@ -81,7 +81,10 @@ def _sets_colour(selector: str) -> bool:
 def palette() -> dict:
     """The theme's colours, as the stylesheet defines them."""
     text = CSS.read_text()
-    return dict(re.findall(r"--(adr-[a-z-]+):\s*(#[0-9a-fA-F]{6})", text))
+    # Digits count: the surface ladder's upper rungs are --adr-card-2 and
+    # --adr-border-2, and a name pattern that stopped at letters silently
+    # dropped them from the palette rather than failing to find them.
+    return dict(re.findall(r"--(adr-[a-z0-9-]+):\s*(#[0-9a-fA-F]{6})", text))
 
 
 class TestTheKnownRatios:
@@ -332,3 +335,73 @@ class TestTheActiveTab:
         text = CSS.read_text()
         block = text.split(".nav-tabs .nav-link.active")[-1]
         assert "box-shadow" in block
+
+
+class TestTheInstrument:
+    """Drive Bay's own decisions, checked as numbers rather than as taste.
+
+    The direction's argument is that this screen is read standing at a machine
+    in whatever light the room has, so its two riskiest choices are the ones
+    below: a state colour that carries meaning on its own, and a ground lifted
+    far enough that the surfaces stay distinguishable when a phone dims itself.
+    """
+
+    #: The state words and stage pills are 10-11px caps, so they are body text
+    #: by WCAG's reckoning however bold they are.
+    STATES = ["adr-accent", "adr-encode", "adr-link", "adr-danger", "adr-success"]
+
+    @pytest.mark.parametrize("role", STATES)
+    @pytest.mark.parametrize("surface", ["adr-bg", "adr-card"])
+    def test_every_state_colour_is_readable_as_text(self, palette, role, surface):
+        assert contrast(palette[role], palette[surface]) >= AA_TEXT
+
+    def test_the_two_states_a_job_lives_in_are_told_apart(self, palette):
+        """Ripping and encoding used to be one hue with a different word.
+
+        Deliberately not a contrast ratio: amber and teal sit at almost the
+        same luminance (1.13:1), which is what makes them both readable on the
+        same dark ground, and a ratio between two foregrounds is not a WCAG
+        measure of anything. What has to hold is that they are different, and
+        that the difference is not carried by colour alone — the state word
+        and its glyph do that, and test_frontend checks the glyph is there.
+        """
+        assert palette["adr-accent"] != palette["adr-encode"]
+
+    def test_the_readout_labels_are_readable(self, palette):
+        """ELAPSED / REMAINING / DONE are muted, 11px, on the card."""
+        assert contrast(palette["adr-text-muted"], palette["adr-card"]) >= AA_TEXT
+
+    def test_the_surfaces_are_far_enough_apart_to_survive_daylight(self, palette):
+        """Four steps, and each has to be visible against the one below it.
+
+        A tenth of a ratio point is what separates a surface ladder from a
+        flat page on a phone that has dimmed itself in a bright room. These
+        are not text ratios; they are the reason the ground was lifted from
+        #0d1117 in the first place.
+        """
+        ladder = ["adr-bg-alt", "adr-bg", "adr-card", "adr-card-2"]
+        for lower, upper in zip(ladder, ladder[1:]):
+            assert contrast(palette[upper], palette[lower]) >= 1.09, (
+                f"{upper} does not separate from {lower}"
+            )
+
+    def test_the_gauge_trough_is_distinct_from_its_ticks(self, palette):
+        """The ticks are cut into the trough; if they match it there is no
+        gauge, only a bar."""
+        declared = _declared(".card[data-job-id] .progress")
+        assert declared.get("box-shadow"), "the trough has no rim"
+        assert "#2d343e" in CSS.read_text(), "the tick colour is gone"
+        assert contrast("#2d343e", palette["adr-bg-alt"]) >= 1.1
+
+    def test_a_drive_bay_carries_its_state_on_an_edge(self):
+        declared = _declared("#drivesRow > .card")
+        assert "var(--adr-state)" in declared.get("border-left", "")
+
+    def test_every_job_state_has_a_colour(self):
+        """A status with no entry inherits the grey meant for an idle drive
+        edge, which as 10px text on a card measures 2.1:1 — the audit caught
+        exactly that on a job that was still identifying its disc."""
+        text = re.sub(r"/\*.*?\*/", " ", CSS.read_text(), flags=re.S)
+        for status in ("pending", "identifying", "ripping", "ripped",
+                       "encoding", "done", "error"):
+            assert f'.card[data-job-status="{status}"]' in text, status
