@@ -397,3 +397,50 @@ class TestTheUpdateMechanismSurvivesItsOwnMigration:
         enable = text.index("systemctl enable --now adr-update.path")
         closing = text.index("fi", gated)
         assert enable > closing, "the enable is still inside the changed-only branch"
+
+
+class TestTheUpdateReportsTheTruth:
+    """Two things the update script asserted rather than knew.
+
+    Neither shows on a machine where everything works, which is why both
+    survived: the health check happened to name the port this installation
+    uses, and the failure message happened never to be printed.
+    """
+
+    def test_the_health_check_asks_the_configured_port(self, update):
+        """It asked 8080 whatever the settings said, so moving the web UI
+        turned a successful update into "the web UI did not respond" and a
+        non-zero exit — and the next thing that message makes you do is undo
+        something that worked."""
+        assert "http://127.0.0.1:8080/api/status" not in update
+        assert "web_port:" in update, "nothing reads the configured port"
+        assert '${health_port}' in update
+
+    def test_a_missing_setting_still_has_a_port_to_ask(self, update):
+        assert "health_port=8080" in update
+
+    def test_it_reads_the_port_without_importing_the_application(self, update):
+        """An update is exactly the thing that can leave the app unimportable,
+        so the check that says whether the update worked must not need it."""
+        block = update.split("health_port=")[1].split("\nok=0")[0]
+        assert "python" not in block.lower()
+
+    def test_the_stamp_goes_on_after_the_health_check(self, update):
+        """It was written before the restart, so a version that failed to
+        start was still recorded as installed: the Doctor said "up to date"
+        for code that was not running, and the button that would have fetched
+        the fix had nothing to offer."""
+        assert update.index("web UI is responding") < update.index('> "$INSTALL_DIR/.commit"')
+
+    def test_the_failure_message_does_not_promise_a_rollback(self, update):
+        """The new files are copied over the old ones early. Past that point
+        there is no previous version on disk, so "the previous version keeps
+        running" was a promise the script could not keep."""
+        assert "so the previous version keeps running" not in update
+        assert "FILES_REPLACED" in update
+        trap = update.split("cleanup() {")[1].split("trap cleanup EXIT")[0]
+        assert "FILES_REPLACED" in trap, "the message does not consult it"
+
+    def test_the_flag_is_set_where_the_files_are_replaced(self, update):
+        copy_at = update.index('cp -a "$TMP/src/." "$INSTALL_DIR/"')
+        assert update.index("FILES_REPLACED=1") > copy_at

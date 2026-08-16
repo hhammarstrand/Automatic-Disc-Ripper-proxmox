@@ -405,3 +405,34 @@ class TestTheInstrument:
         for status in ("pending", "identifying", "ripping", "ripped",
                        "encoding", "done", "error"):
             assert f'.card[data-job-status="{status}"]' in text, status
+
+
+class TestTheAuditMeasuresAFixture:
+    """The tool seeded its fixtures into the checkout's own adr.db.
+
+    adr.config resolves DATABASE_PATH at import time, so an audit run wrote
+    four jobs into whatever database the working copy was using and then
+    measured them alongside whatever real jobs were already there. Its answer
+    therefore depended on the machine it ran on — a leftover job in a state the
+    fixtures never create is exactly how a 2.1:1 colour appears on one checkout
+    and not another — and every run grew someone's real history.
+    """
+
+    TOOL = Path("tools/contrast_audit.py")
+
+    def test_it_points_the_database_somewhere_disposable(self):
+        source = self.TOOL.read_text()
+        assert "models.DATABASE_PATH" in source
+        assert "audit.db" in source
+
+    def test_it_does_so_before_anything_opens_one(self):
+        """The engine is cached on first use, so a redirect after seed() runs
+        would change nothing."""
+        # Inside main(): "seed(config)" also matches the function's own
+        # definition, which is above everything main does.
+        body = self.TOOL.read_text().split("def main(")[1]
+        assert body.index("models.DATABASE_PATH") < body.index("seed(config)")
+
+    def test_it_clears_the_cached_engine(self):
+        source = self.TOOL.read_text()
+        assert "models._engine = None" in source

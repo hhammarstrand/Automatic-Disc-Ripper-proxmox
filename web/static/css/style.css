@@ -622,6 +622,64 @@ a:not(.btn):not(.nav-link):not(.navbar-brand):not(.dropdown-item):not(.page-link
     flex: 1 1 auto;
 }
 
+/* ---- The episode preview ----
+
+   Three rows: the frame the episode opens on, its number and title, and the
+   file it will become. This replaced a <pre> of three filenames, which
+   answered "what will these be called" and not "is this the right episode to
+   start at" — the question somebody actually has, holding disc two of a box
+   set. */
+.adr-eplist {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+    margin-top: 0.4rem;
+}
+.adr-eprow {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    min-width: 0;
+}
+.adr-still {
+    width: 80px;
+    height: 45px;
+    flex: 0 0 auto;
+    object-fit: cover;
+    border-radius: 3px;
+    background-color: var(--adr-bg-alt);
+    border: 1px solid var(--adr-border);
+}
+.adr-still-none {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--adr-text-muted);
+}
+.adr-eptext { min-width: 0; flex: 1 1 auto; }
+.adr-epname {
+    display: flex;
+    align-items: baseline;
+    gap: 0.4rem;
+    font-size: 0.875rem;
+    color: var(--adr-text);
+}
+.adr-epnum {
+    font-family: var(--adr-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    color: var(--adr-accent);
+    flex: 0 0 auto;
+}
+.adr-eppath {
+    font-family: var(--adr-mono);
+    font-size: 0.6875rem;
+    color: var(--adr-text-muted);
+    word-break: break-all;
+}
+.adr-epmore { margin-top: 0.35rem; }
+
 /* ---- Spinning disc animation ---- */
 @keyframes spin {
     from { transform: rotate(0deg); }

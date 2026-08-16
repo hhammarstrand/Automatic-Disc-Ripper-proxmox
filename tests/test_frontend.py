@@ -1244,3 +1244,77 @@ class TestTheCompletedListOnAPhone:
         assert "letter-spacing" in header
         # A button in a header is a control, and controls are not labels.
         assert ".card-header .btn" in css
+
+
+class TestTheEpisodePreviewShowsTheEpisode:
+    """"Is E06 the right episode to start at?" is the question this dialog is
+    open for, and the preview answered a different one.
+
+    It listed three filenames in a <pre>, with the episode title appended once
+    TMDb replied. A title says which episode this is *meant* to be; the frame
+    it opens on says whether it is — which is what you check when you are
+    holding disc two of a box set. TMDb sends a still with every episode in the
+    same response the titles come from, and it was being dropped on the floor.
+    """
+
+    SOURCE = Path("web/static/js/app.js")
+
+    def _body(self, name: str) -> str:
+        source = self.SOURCE.read_text()
+        start = source.index(f"function {name}(")
+        end = source.index("\nfunction ", start + 1)
+        return source[start:end]
+
+    def test_the_lookup_carries_the_still(self):
+        from adr.identify import TMDB_STILL_BASE, get_season_episodes
+
+        assert TMDB_STILL_BASE.startswith("https://image.tmdb.org/t/p/")
+        assert "still_url" in Path("adr/identify.py").read_text()
+        # The function is a pure transform of the response below the request,
+        # so the shape is what matters here.
+        assert "still_path" in Path("adr/identify.py").read_text()
+        assert callable(get_season_episodes)
+
+    def test_an_episode_without_a_still_is_not_a_broken_row(self):
+        """TMDb has no still for a great many episodes of the kind of series
+        people own on disc."""
+        body = self._body("stillThumb")
+        assert "adr-still-none" in body
+        assert "if (!url)" in body
+
+    def test_a_still_that_will_not_load_falls_back(self):
+        assert "img.replaceWith(stillThumb('')" in self._body("stillThumb")
+
+    def test_the_frame_keeps_its_own_shape(self):
+        """An episode still is 16:9. Stretching one into a poster's 2:3 is
+        worse than showing none."""
+        css = Path("web/static/css/style.css").read_text()
+        block = css.split(".adr-still {")[1].split("}")[0]
+        assert "width: 80px" in block and "height: 45px" in block
+        assert "object-fit: cover" in block
+
+    def test_the_preview_renders_rows_not_a_block_of_text(self):
+        body = self._body("previewSeries")
+        assert "stillThumb(" in body
+        assert "adr-eprow" in body
+        assert "<pre" not in body, "the filenames are still one text block"
+
+    def test_the_filename_is_still_there(self):
+        """It is the contract with Plex, and losing it to make room for a
+        picture would trade the answer for the illustration."""
+        assert "adr-eppath" in self._body("previewSeries")
+
+    def test_the_whole_episode_is_kept_not_just_its_name(self):
+        """The lookup used to be reduced to {number: name} at the boundary,
+        which is where the still would have been thrown away a second time."""
+        body = self._body("previewSeries")
+        assert "byNumber[e.episode_number] = e;" in body
+
+    def test_the_audit_can_see_these_rows(self):
+        """TMDb is unreachable from the audit, so the rows never render on
+        their own — and rows nobody renders are rows nobody measures. That is
+        the hole the series-mode banner fell through, twice."""
+        tool = Path("tools/contrast_audit.py").read_text()
+        assert "_EPISODE_ROWS" in tool
+        assert "adr-eprow" in tool
+        assert "stillThumb(" in tool

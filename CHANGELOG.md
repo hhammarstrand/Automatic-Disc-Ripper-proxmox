@@ -1,5 +1,47 @@
 # Changelog
 
+## 1.48.0
+
+**The episode preview shows the episode.** "Is E06 the right one to start at?"
+is the question that dialog is open for, and the preview answered a different
+one: three filenames in a block of monospace, with the episode title appended
+once TMDb replied. A title says which episode this is *meant* to be. The frame
+it opens on says whether it is — which is what you actually check, standing
+there with disc two of a box set in your hand. TMDb sends a still with every
+episode, in the same response the titles come from, and it was being dropped
+at the boundary. Each row now carries the frame, the number, the title and the
+filename; an episode TMDb has no still for gets a marked tile rather than a
+hole, because a great many episodes of the sort of series people own on disc
+have none.
+
+**Two things the update script asserted rather than knew.** The health check
+that decides whether an update worked asked port 8080 whatever the settings
+said, so anybody who had moved the web UI got "the web UI did not respond" and
+a non-zero exit from an update that had in fact succeeded — and the next thing
+that message makes you do is undo something that worked. It reads the
+configured port now, without importing the application, since an update is
+precisely the thing that can leave the application unimportable.
+
+The installed-version stamp was written *before* the restart, so a version
+that failed to start was still recorded as installed: the Doctor then reported
+"up to date" for code that was not running, and the button that would have
+fetched a fix had nothing to offer. It goes on last, after the web UI has
+answered. And the failure message stopped promising a rollback it cannot
+perform — the new files are copied over the old ones early, so past that point
+there is no previous version left on disk. It now says which of the two
+situations you are in, and that the stamp was not moved, so running the update
+again is the way out.
+
+**The contrast audit stopped measuring your real database.** It resolves the
+database path at import time, which is the working copy's own — so every run
+seeded four fixture jobs into a real history and then measured whatever else
+happened to be in there. Its answer depended on the machine it ran on: a
+leftover job in a state the fixtures never create is exactly how a colour that
+fails at 2.1:1 appears on one checkout and not another. It gets a database of
+its own now, and it has learnt to render the new episode rows — a state nobody
+renders is a state nobody measures, which is the same hole the series-mode
+banner and the poster rows each fell through.
+
 ## 1.47.0
 
 **The tray now opens however the job ended, not only when it worked.** The

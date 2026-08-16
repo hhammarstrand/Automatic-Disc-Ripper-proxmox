@@ -40,6 +40,30 @@
 // Built as elements rather than markup for the same reason the show list is:
 // a title with an apostrophe in it broke every handler on the page the last
 // time this was a template string.
+function stillThumb(url) {
+    // A 16:9 frame, not a 2:3 poster: an episode still is a different shape
+    // and stretching one into the other is worse than showing none. TMDb has
+    // no still for a great many episodes of the sort of series people own on
+    // disc, so the placeholder is not an edge case.
+    if (!url) {
+        const tile = document.createElement('div');
+        tile.className = 'adr-still adr-still-none';
+        const icon = document.createElement('i');
+        icon.className = 'bi bi-camera-reels';
+        tile.appendChild(icon);
+        return tile;
+    }
+    const img = document.createElement('img');
+    img.className = 'adr-still';
+    img.src = url;
+    img.alt = '';
+    img.loading = 'lazy';
+    img.width = 80;
+    img.height = 45;
+    img.addEventListener('error', () => img.replaceWith(stillThumb('')), {once: true});
+    return img;
+}
+
 function posterPlaceholder(kind) {
     const tile = document.createElement('div');
     tile.className = 'adr-poster adr-poster-none';
@@ -1331,14 +1355,53 @@ function previewSeries() {
 
     const pad = n => String(n).padStart(2, '0');
     const folder = show + (yearRaw ? ` (${yearRaw})` : '');
-    const render = titles => {
-        const lines = [0, 1, 2].map(i => {
+
+    // Three rows and an ellipsis: which episode, what it is called, what the
+    // file will be, and — once TMDb has answered — the frame that episode
+    // actually opens on. A title tells you which episode this is meant to be;
+    // the picture tells you whether it is, which is the real question when a
+    // box set starts somewhere other than episode one.
+    const render = episodes => {
+        const head = document.createElement('div');
+        head.className = 'small text-secondary';
+        head.textContent = 'Files will be named:';
+
+        const list = document.createElement('div');
+        list.className = 'adr-eplist';
+        [0, 1, 2].forEach(i => {
             const ep = first + i;
-            const name = titles[ep] ? `   ← ${titles[ep]}` : '';
-            return `${folder}/Season ${pad(season)}/${folder} - S${pad(season)}E${pad(ep)}.mp4${name}`;
+            const info = episodes[ep] || {};
+            const row = document.createElement('div');
+            row.className = 'adr-eprow';
+            row.appendChild(stillThumb(info.still_url));
+
+            const text = document.createElement('div');
+            text.className = 'adr-eptext';
+            const line = document.createElement('div');
+            line.className = 'adr-epname';
+            const num = document.createElement('span');
+            num.className = 'adr-epnum';
+            num.textContent = `S${pad(season)}E${pad(ep)}`;
+            line.appendChild(num);
+            if (info.name) {
+                const name = document.createElement('span');
+                name.textContent = info.name;
+                line.appendChild(name);
+            }
+            const path = document.createElement('div');
+            path.className = 'adr-eppath';
+            path.textContent =
+                `${folder}/Season ${pad(season)}/${folder} - S${pad(season)}E${pad(ep)}.mp4`;
+            text.append(line, path);
+            row.appendChild(text);
+            list.appendChild(row);
         });
-        box.innerHTML = '<div class="small text-secondary">Files will be named:</div>'
-            + '<pre class="small mb-0">' + escapeHtml(lines.join('\n')) + '\n…</pre>';
+
+        const more = document.createElement('div');
+        more.className = 'adr-eppath adr-epmore';
+        more.textContent = '…';
+
+        box.replaceChildren(head, list, more);
     };
     render({});
 
@@ -1357,9 +1420,9 @@ function previewSeries() {
         .then(d => {
             if (seq !== _seriesPreviewSeq) return;
             if (!d.episodes || !d.episodes.length) return;
-            const titles = {};
-            d.episodes.forEach(e => { titles[e.episode_number] = e.name; });
-            render(titles);
+            const byNumber = {};
+            d.episodes.forEach(e => { byNumber[e.episode_number] = e; });
+            render(byNumber);
         })
         .catch(() => {});
 }

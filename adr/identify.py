@@ -26,6 +26,10 @@ TMDB_IMAGE_BASE_SMALL = "https://image.tmdb.org/t/p/w200"
 #: request from every later page load.
 TMDB_IMAGE_PREFIX = "https://image.tmdb.org/t/p/"
 
+#: Episode stills are 16:9, not 2:3, so they get their own width. w185 is the
+#: smallest size TMDb offers that still shows a face.
+TMDB_STILL_BASE = "https://image.tmdb.org/t/p/w185"
+
 
 # Minimum title similarity (0-1) required to trust a TMDb match for renaming.
 # Below this, the file keeps the disc label name.
@@ -388,6 +392,12 @@ def get_season_episodes(tmdb_id: int, season: int, api_key: str) -> list[dict[st
             "episode_number": ep.get("episode_number"),
             "name": ep.get("name") or "",
             "air_date": ep.get("air_date") or "",
+            # The frame TMDb picked for this episode. Already in the response
+            # and thrown away until now: a title tells you which episode this
+            # is meant to be, and a picture tells you whether it is — which is
+            # the actual question when a box set starts at episode six.
+            "still_url": (f"{TMDB_STILL_BASE}{ep['still_path']}"
+                          if ep.get("still_path") else ""),
         }
         for ep in episodes
         if ep.get("episode_number") is not None

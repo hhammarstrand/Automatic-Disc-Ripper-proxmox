@@ -74,6 +74,10 @@ TMP="$(mktemp -d)"
 # the previous version running is a bad afternoon; one that leaves nothing
 # running is a broken appliance.
 SERVICE_STOPPED=0
+#: Whether the new files have already been written over the old ones. Past
+#: that point there is no previous version on disk to go back to, and the
+#: failure message has to stop claiming there is.
+FILES_REPLACED=0
 cleanup() {
     local status=$?
     rm -rf "$TMP"
@@ -81,10 +85,24 @@ cleanup() {
     if [[ "$SERVICE_STOPPED" -eq 1 && "$status" -ne 0 ]]; then
         echo
         msg_error "The update failed partway through (exit ${status})."
-        msg_info "Restarting the service so the previous version keeps running…"
+        msg_info "Starting the service again so the machine is not left dead…"
         if systemctl start adr 2>/dev/null; then
-            msg_ok "adr is running again. Nothing was lost — retry the update once"
-            msg_ok "the cause above is fixed."
+            # Which version comes back up depends on how far this got, and
+            # saying "the previous version" was a promise this script cannot
+            # keep: the new files are copied over the old ones early, so past
+            # that point there is no previous version left on disk to start.
+            # What is true either way is that the stamp was not moved, so the
+            # Doctor still offers the update and pressing it again retries the
+            # whole thing from a clean clone.
+            if [[ "$FILES_REPLACED" -eq 1 ]]; then
+                msg_warn "adr is running, but the new files were already in place when"
+                msg_warn "this failed — so what started is the new version, part-installed."
+                msg_warn "The installed-version stamp was NOT moved: the Doctor still"
+                msg_warn "offers this update, and running it again is the way out."
+            else
+                msg_ok "adr is running again on the version you had — nothing was"
+                msg_ok "replaced. Retry once the cause above is fixed."
+            fi
         else
             msg_error "Could not restart adr. Look at:  journalctl -u adr -e"
         fi
@@ -178,6 +196,7 @@ msg_info "Replacing application code (preserving config, database and media)…"
 # Copy the new tree over the old one. Because everything in PRESERVE lives in
 # paths the repo does not ship, a plain overlay copy leaves them untouched.
 cp -a "$TMP/src/." "$INSTALL_DIR/"
+FILES_REPLACED=1
 
 # Re-assert ownership — but never recurse into 'completed'. On installs made
 # before 1.0 that directory is a bind-mount of the user's media library, and a
@@ -380,6 +399,44 @@ fi
 systemctl enable --now adr-update.path >/dev/null 2>&1 \
     || msg_warn "Could not enable adr-update.path — updates stay host-side."
 
+msg_info "Restarting service…"
+systemctl start adr
+SERVICE_STOPPED=0
+
+# Confirm it actually came back up rather than claiming success blindly.
+#
+# On the port it was configured to use. This asked 8080 whatever the settings
+# said, so anybody who had moved the web UI got "the web UI did not respond"
+# and a non-zero exit from an update that had in fact worked — and the next
+# thing that message makes you do is roll something back. The value is read
+# out of the YAML by hand because this script must not depend on the
+# application's Python being importable, which is exactly what an update can
+# break.
+health_port="$(sed -n 's/^web_port:[[:space:]]*\([0-9]\{1,5\}\).*/\1/p' \
+    "$INSTALL_DIR/config/adr.yaml" 2>/dev/null | head -n 1)"
+[[ -n "$health_port" ]] || health_port=8080
+
+ok=0
+for _ in $(seq 1 20); do
+    if curl -fsS -o /dev/null "http://127.0.0.1:${health_port}/api/status" 2>/dev/null; then ok=1; break; fi
+    sleep 1
+done
+if [[ $ok -eq 1 ]]; then
+    msg_ok "Update complete — web UI is responding."
+else
+    msg_warn "Service restarted but the web UI did not respond on port ${health_port} within 20s."
+    msg_warn "Check: journalctl -u adr -e"
+    exit 1
+fi
+
+# The stamp goes on last, and only now.
+#
+# It used to be written before the restart, so a version that failed to start
+# was still recorded as the installed one: the Doctor then reported "up to
+# date" for code that was not running, and the button that would have fetched
+# a fix had nothing to offer. Written here, a failed update leaves the old
+# commit in place — the Doctor says an update is available, which is true, and
+# pressing it again is the right thing to do.
 if [[ -n "$NEW_COMMIT" ]]; then
     # rm first, and no chown. This runs as root in a directory the service
     # user owns, so a symlink planted at .commit had the redirect truncate
@@ -388,24 +445,6 @@ if [[ -n "$NEW_COMMIT" ]]; then
     rm -f "$INSTALL_DIR/.commit"
     echo "$NEW_COMMIT" > "$INSTALL_DIR/.commit"
     chmod 0644 "$INSTALL_DIR/.commit" 2>/dev/null || true
-fi
-
-msg_info "Restarting service…"
-systemctl start adr
-SERVICE_STOPPED=0
-
-# Confirm it actually came back up rather than claiming success blindly.
-ok=0
-for _ in $(seq 1 20); do
-    if curl -fsS -o /dev/null http://127.0.0.1:8080/api/status 2>/dev/null; then ok=1; break; fi
-    sleep 1
-done
-if [[ $ok -eq 1 ]]; then
-    msg_ok "Update complete — web UI is responding."
-else
-    msg_warn "Service restarted but the web UI did not respond within 20s."
-    msg_warn "Check: journalctl -u adr -e"
-    exit 1
 fi
 
 # adr-setup-nas and adr-doctor are copies of scripts/ living on the Proxmox

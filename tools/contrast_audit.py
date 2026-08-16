@@ -176,9 +176,53 @@ def _open_series_sheet(page):
     return True
 
 
+#: The confirm step with an answer in it. TMDb cannot be reached from here, so
+#: the episode rows never render on their own — and rows nobody renders are
+#: rows nobody measures, which is the hole the series-mode banner fell through
+#: in 1.32 and the poster rows in 1.43.
+_EPISODE_ROWS = r"""
+const box = document.getElementById('seriesPreview');
+const rows = [
+  ['S01E06', 'Vinter på Saltkråkan', '/static/icons/icon-192.png'],
+  // No still: TMDb has none for a great many episodes of the sort of series
+  // people own on disc, so the tile that stands in is a colour pair too.
+  ['S01E07', 'Sommaren börjar', ''],
+].map(([num, name, still]) => {
+  const row = document.createElement('div');
+  row.className = 'adr-eprow';
+  row.appendChild(stillThumb(still));
+  const text = document.createElement('div');
+  text.className = 'adr-eptext';
+  const line = document.createElement('div');
+  line.className = 'adr-epname';
+  const n = document.createElement('span');
+  n.className = 'adr-epnum';
+  n.textContent = num;
+  const t = document.createElement('span');
+  t.textContent = name;
+  line.append(n, t);
+  const path = document.createElement('div');
+  path.className = 'adr-eppath';
+  path.textContent = 'Life on Seacrow Island (1964)/Season 01/… - ' + num + '.mp4';
+  text.append(line, path);
+  row.appendChild(text);
+  return row;
+});
+const list = document.createElement('div');
+list.className = 'adr-eplist';
+list.append(...rows);
+const head = document.createElement('div');
+head.className = 'small text-secondary';
+head.textContent = 'Files will be named:';
+box.replaceChildren(head, list);
+"""
+
+
 def _open_series_confirm(page):
     page.evaluate("startSeriesMode(); pickSeriesShow(1438, 'The Wire', 2002)")
     page.wait_for_timeout(600)
+    page.evaluate(_EPISODE_ROWS)
+    page.wait_for_timeout(200)
     return True
 
 
@@ -269,6 +313,21 @@ def main():
     from web.app import create_app
 
     root = Path(tempfile.mkdtemp())
+
+    # A database of its own, before anything opens one.
+    #
+    # adr.config resolves DATABASE_PATH at import time to the checkout's own
+    # adr.db, so this tool has been seeding its fixtures into the working
+    # copy's real database — and then measuring whatever jobs happened to be
+    # left in it from actual use. That made the audit's results depend on the
+    # machine it ran on: a leftover job in a state the fixtures do not create
+    # is how a colour that fails at 2.1:1 shows up on one checkout and not
+    # another. It also grew somebody's real history by four rows per run.
+    from adr import models
+
+    models.DATABASE_PATH = root / "audit.db"
+    models._engine = None
+    models._SessionFactory = None
     for name in ("raw", "completed", "staging"):
         (root / name).mkdir()
     config = Config(str(root / "adr.yaml"))
