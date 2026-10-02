@@ -141,7 +141,7 @@ class TestTheEndpoint:
 
         assert response.status_code == 200, response.get_json()
         job_id = response.get_json()["job_id"]
-        written = config.raw_path / str(job_id) / "Happy_Feet.mp4"
+        written = config.raw_path / str(job_id) / "Happy Feet.mp4"
         assert written.read_bytes() == b"film" * 100
         manager.import_worker.submit.assert_called_once_with(job_id, written)
 
@@ -258,8 +258,10 @@ class TestImportInPlace:
 
         imports.import_in_place(config, str(iso), worker)
 
-        assert sources == [f"iso:{iso}"]
+        (source,) = sources
+        assert Path(source.removeprefix("iso:")).parent == config.raw_path / "1"
         assert iso.exists(), "somebody's ISO on the share is not ours to delete"
+        assert not Path(source.removeprefix("iso:")).is_symlink(), "only the link went"
         assert encodes.get_nowait().input_path.name == "t00.mkv"
 
     def test_a_file_outside_the_share_is_refused(self, config):
@@ -289,3 +291,124 @@ def test_passthrough_copies_a_linked_original_instead_of_moving_the_link(tmp_pat
     assert not result.output_path.is_symlink()
     assert result.output_path.read_bytes() == b"film"
     assert original.read_bytes() == b"film"
+
+
+def test_an_iso_rips_only_the_feature_when_that_is_the_setting(config, identified, monkeypatch):
+    from adr import ripper as ripper_mod
+
+    job, target = imports.create_job(config, "film.iso")
+    target.write_bytes(b"iso")
+    monkeypatch.setattr(ripper_mod.MakeMKVRipper, "scan_disc", lambda self, src, job_id=None: {
+        0: {"duration": "0:03:00"}, 1: {"duration": "1:42:10"}, 2: {"duration": "0:20:00"}})
+    asked = []
+
+    def fake_rip(self, source, job_id, progress_callback=None, title_index=None):
+        asked.append(title_index)
+        (target.parent / "t01.mkv").write_bytes(b"m")
+        result = ripper_mod.RipResult()
+        result.success = True
+        return result
+    monkeypatch.setattr(ripper_mod.MakeMKVRipper, "rip", fake_rip)
+
+    imports.ImportWorker(config, queue.Queue()).process(job.id, target)
+
+    assert asked == [1]
+
+
+def test_a_whole_upload_can_be_resumed_after_a_restart(config):
+    from adr import retry
+
+    job, target = imports.create_job(config, "film.mp4")
+    target.write_bytes(b"film")
+    imports.arrived(job.id, target)
+    imports.fail(job.id, "Interrupted when the service restarted.")
+
+    session = get_session()
+    try:
+        assert retry.plan(session.get(Job, job.id), config)["can_retry"]
+    finally:
+        session.close()
+
+
+
+@pytest.mark.parametrize("name, safe", [
+    ("Фильм.mkv", "Фильм.mkv"),
+    ("Bröderna Lejonhjärta.iso", "Bröderna Lejonhjärta.iso"),
+    ("../../etc/passwd.mkv", "passwd.mkv"),
+    ("..mkv", "upload.mkv"),
+])
+def test_a_filename_keeps_its_letters_and_its_extension(name, safe):
+    assert imports.safe_name(name) == safe
+
+
+class TestARestart:
+    def test_a_waiting_upload_is_handed_back_not_failed(self, config):
+        from adr import recovery
+
+        job, target = imports.create_job(config, "film.mp4")
+        target.write_bytes(b"film")
+        imports.arrived(job.id, target)
+        recovery.recover_interrupted_jobs(config, queue.Queue())
+        assert _job(job.id).status == JobStatus.PENDING, "not 'put the disc back in'"
+
+        worker = imports.ImportWorker(config, queue.Queue())
+        submitted = []
+        worker.submit = lambda job_id, path: submitted.append((job_id, path))
+        assert imports.resume_pending(config, worker) == [job.id]
+        assert submitted == [(job.id, target)]
+
+    def test_an_upload_still_arriving_is_failed_and_its_part_removed(self, config):
+        job, target = imports.create_job(config, "film.iso")
+        partial = target.with_name(target.name + ".part")
+        partial.write_bytes(b"half")
+        worker = imports.ImportWorker(config, queue.Queue())
+
+        assert imports.resume_pending(config, worker) == []
+        assert _job(job.id).status == JobStatus.ERROR
+        assert not partial.exists()
+
+
+def test_a_dropped_connection_cleans_up(config, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from werkzeug.exceptions import ClientDisconnected
+
+    import web.app as app_mod
+
+    manager = MagicMock()
+    app = create_app(config, pipeline_manager=manager)
+    monkeypatch.setattr(imports, "free_bytes", lambda c: 100 * 1024**3)
+    monkeypatch.setattr("adr.preflight.destination_blocker", lambda c: None)
+    monkeypatch.setattr(app_mod, "_pipeline_manager", manager)
+
+    class Dropping:
+        def read(self, n):
+            raise ClientDisconnected()
+    with app.test_request_context("/api/upload?name=a.iso", method="PUT", data=b"x" * 10):
+        from flask import request
+        monkeypatch.setattr(type(request._get_current_object()), "stream", property(lambda self: Dropping()))
+        response, status = app.view_functions["api_upload"]()
+    assert status == 500
+    assert not list(config.raw_path.rglob("*.part"))
+    assert _job(1).status == JobStatus.ERROR
+
+
+@pytest.mark.skipif(not __import__("shutil").which("ffmpeg"), reason="ffmpeg is not installed")
+def test_passthrough_remuxes_a_container_the_library_does_not_keep(tmp_path):
+    import subprocess
+
+    from adr.pipeline import EncoderWorker, EncodeTask
+
+    source = tmp_path / "raw" / "film.avi"
+    source.parent.mkdir()
+    subprocess.run(["ffmpeg", "-hide_banner", "-loglevel", "error", "-f", "lavfi",
+                    "-i", "testsrc=duration=1:size=64x64", "-c:v", "mpeg4", str(source)], check=True)
+    task = EncodeTask(job_id=1, track_id=1, input_path=source, output_dir=tmp_path / "out",
+                      output_filename="Film (1999)", passthrough=True)
+
+    result = EncoderWorker._passthrough(task)
+
+    assert result.success, result.error
+    assert result.output_path.name == "Film (1999).mkv"
+    head = result.output_path.read_bytes()[:4]
+    assert head == b"\x1aE\xdf\xa3", "a Matroska file, not an AVI with a new name"

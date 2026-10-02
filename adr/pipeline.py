@@ -1142,10 +1142,13 @@ class EncoderWorker(threading.Thread):
 
         result = EncodeResult()
         result.input_path = task.input_path
-        # The container it already is. An uploaded MP4 kept as it came is
-        # still an MP4, and naming it .mkv is a file that lies about itself.
-        suffix = ".mp4" if task.input_path.suffix.lower() in (".mp4", ".m4v") else ".mkv"
+        # The container it already is, when the library keeps that container.
+        # An MP4 stays an MP4; an AVI or a TS is remuxed into MKV below —
+        # renaming it .mkv would be a file that lies about itself.
+        source_suffix = task.input_path.suffix.lower()
+        suffix = ".mp4" if source_suffix in (".mp4", ".m4v") else ".mkv"
         destination = task.output_dir / f"{task.output_filename}{suffix}"
+        remux = source_suffix not in (".mp4", ".m4v", ".mkv")
         try:
             # The destination's parent, not the output directory. An extra's
             # filename is 'Other/Extra 1', so the two differ by exactly the
@@ -1154,7 +1157,17 @@ class EncoderWorker(threading.Thread):
             # HandBrake's own path has created it since extras existed; this
             # one never did, so turning transcoding off broke them.
             destination.parent.mkdir(parents=True, exist_ok=True)
-            if task.input_path.is_symlink():
+            if remux:
+                ffmpeg = shutil.which("ffmpeg") or "/usr/bin/ffmpeg"
+                done = subprocess.run(
+                    [ffmpeg, "-hide_banner", "-loglevel", "error", "-y",
+                     "-i", str(task.input_path), "-map", "0", "-c", "copy", str(destination)],
+                    capture_output=True, text=True, check=False)
+                if done.returncode != 0:
+                    raise OSError(done.stderr.strip()[-300:] or "ffmpeg could not remux it")
+                if task.input_path.is_symlink() or task.input_path.exists():
+                    task.input_path.unlink()
+            elif task.input_path.is_symlink():
                 # A file imported where it lies (adr.imports) is a link to
                 # somebody's original. Moving the link would put a link in
                 # the library, pointing at a file that is not the library's
@@ -1639,17 +1652,10 @@ class DrivePipeline:
                         raise _SeriesDisc
 
                     if scan_titles:
-                        # Parse durations and pick longest; break ties by size_bytes then lowest index
-                        def _sort_key(item):
-                            idx, info = item
-                            dur = parse_duration(info.get("duration", "0:00:00"))
-                            try:
-                                size = int(info.get("size_bytes", 0))
-                            except (ValueError, TypeError):
-                                size = 0
-                            return (dur, size, -idx)
+                        from adr.naming import main_title_index
 
-                        best_idx, best_info = max(scan_titles.items(), key=_sort_key)
+                        best_idx = main_title_index(scan_titles)
+                        best_info = scan_titles[best_idx]
                         selected_title_index = best_idx
                         skipped = len(scan_titles) - 1
                         logger.info(
@@ -2296,11 +2302,10 @@ class DrivePipeline:
         from adr import audiobook
 
         config = self._config
-        if not audiobook.is_active(config):
-            audiobook.start(
-                config, author=album.artist, title=album.album, year=album.year,
-                discs_total=album.disc_count, release_id=album.release_id,
-            )
+        if audiobook.ensure_started(
+            config, author=album.artist, title=album.album, year=album.year,
+            discs_total=album.disc_count, release_id=album.release_id,
+        ):
             log.append("detect", (
                 f"MusicBrainz files this as an audiobook, so audiobook mode is "
                 f"now on for {album.album}. Feed the rest of the discs."
@@ -2343,8 +2348,12 @@ class DrivePipeline:
                 output_root=config.music_path,
                 progress_callback=_progress_committer(job, session, "ripping"),
                 should_cancel=_book_cancelled,
-                into=audiobook.disc_dir(config, number), extension="flac",
+                into=audiobook.disc_part_dir(config, number), extension="flac",
             )
+        except BaseException:
+            # A disc left counted as ripping blocks Finish book for good.
+            audiobook.release_disc(config, number)
+            raise
         finally:
             ripper.log_sink = None
 
@@ -2362,6 +2371,7 @@ class DrivePipeline:
             Notifier(config).job_failed(job)
             return
 
+        audiobook.disc_done(config, number)
         job.progress_rip = job.progress_encode = 1.0
         job.output_path = str(audiobook.disc_dir(config, number))
         job.status = JobStatus.DONE
@@ -2371,8 +2381,12 @@ class DrivePipeline:
         self._release(log)
 
         if audiobook.complete(config):
-            build = audiobook.finish(config)
-            log.append("done", f"Every disc is in. The book is being built as job #{build}.")
+            try:
+                build = audiobook.finish(config)
+                log.append("done", f"Every disc is in. The book is being built as job #{build}.")
+            except ValueError:
+                # The other drive's last disc got there first and is building it.
+                log.append("done", f"Disc {number} ripped; the book is already being built.")
         else:
             book = audiobook.state(config)
             left = (f"{len(book['discs_done'])} of {book['discs_total']} discs in."
@@ -2585,10 +2599,14 @@ class PipelineManager:
         else:
             logger.info("FolderWatcher disabled (no watch_path configured)")
 
-        # Files added by hand in the web UI.
-        from adr.imports import ImportWorker
+        # Files added by hand in the web UI, and whatever of theirs — or of a
+        # book being built — the last shutdown interrupted.
+        from adr import audiobook
+        from adr.imports import ImportWorker, resume_pending
         self.import_worker = ImportWorker(self.config, self.encode_queue)
         self.import_worker.start()
+        resume_pending(self.config, self.import_worker)
+        audiobook.resume_builds(self.config)
 
         logger.info("PipelineManager started: %d drives, %d encoder workers", len(drives), num_workers)
 

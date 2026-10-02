@@ -1,5 +1,45 @@
 # Changelog
 
+## 1.55.0
+
+A hard look at everything since 1.49, and what it found.
+
+**Audiobooks could be built without a disc, or lose one.** A disc counted as
+done the moment its rip *started*, so with two drives the book could be built
+while disc 15 was still being ripped — and then the folder disc 15 was writing
+into was deleted. Discs are now *ripping* until they are whole; Finish book is
+refused while one is, and the book is complete only when none is. Each disc
+rips into `discNN.part` and takes its number only when whole, so two discs can
+never share a folder and a failed re-rip never touches the good copy.
+
+**A build belongs to its book.** Finish moves the book's folder to
+`.building-<id>` with a `book.json` beside the discs, and clears the mode in
+one step. A book started during the build is a separate book; the end of the
+old build can no longer switch it off. A failed build hands the book back with
+Finish book ready to press again, and a restart mid-build starts the build
+again by itself. Two drives that find the first discs of a box at the same
+moment start one book, not two.
+
+**Uploads and restarts.** An upload waiting its turn was failed at restart
+with advice to put a disc back in; it is picked up again instead. One still
+arriving is failed and its partial file deleted — as is one whose browser
+went away mid-transfer, which left a PENDING job and gigabytes of `.part`
+before. A file named in Cyrillic or Japanese lost its whole name and its
+extension; names keep their letters now. An imported ISO is ripped through a
+link in `raw/<job>/`, so a restart can resume it, and the share's file is still
+never touched.
+
+**An ISO rips like a disc.** With *main feature only*, it rips the feature —
+not every title, leaving the rest in `raw/` for good — using the same choice a
+disc gets, now one function rather than two copies. A season on an ISO is
+recognised as one and every episode kept.
+
+**Smaller.** With transcoding off, an AVI or TS is remuxed into MKV instead of
+being renamed `.mkv`. The hookscript waits only for Proxmox storages that are
+mounted — a plain directory storage under `/mnt/pve` held the container five
+minutes and then refused it, every boot. ffmpeg's error output no longer
+blocks a long build, and an author called `..` stays inside the library.
+
 ## 1.54.0
 
 **Audiobooks.** An audiobook is one long work cut into a few hundred CD-sized

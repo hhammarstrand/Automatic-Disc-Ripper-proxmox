@@ -102,6 +102,29 @@ MAIN_FEATURE_RATIO = 1.5
 MAX_STACKED_PARTS = 3
 
 
+def main_title_index(scan_titles: dict) -> int | None:
+    """The scanned title to rip when only the feature is wanted.
+
+    Longest first, then largest, then the lowest index — one rule for a disc
+    in a drive and an image added by hand, which used to keep a copy each.
+    """
+    from adr.utils import parse_duration
+
+    if not scan_titles:
+        return None
+
+    def key(item):
+        index, info = item
+        duration = parse_duration(info.get("duration", "0:00:00") or "0:00:00")
+        try:
+            size = int(info.get("size_bytes", 0) or 0)
+        except (TypeError, ValueError):
+            size = 0
+        return (duration, size, -index)
+
+    return max(scan_titles.items(), key=key)[0]
+
+
 def longest_title(durations) -> int | None:
     """Index of the longest title, ignoring the ones with no duration.
 

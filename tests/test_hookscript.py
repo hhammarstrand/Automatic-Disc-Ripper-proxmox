@@ -94,3 +94,16 @@ class TestTheDoctorInstallsIt:
         section = text[text.index("# 4b."):text.index("# 5. Folder layout")]
         assert "NEEDS_RESTART=1" in section
         assert 'mount "$MEDIA_FSTAB"' in section
+
+
+def test_a_plain_directory_storage_is_not_waited_for(host, tmp_path):
+    (tmp_path / "storage.cfg").write_text(
+        "dir: local\n\tpath /var/lib/vz\n\ndir: media\n\tpath /mnt/pve/media\n\tcontent rootdir\n"
+        "\nnfs: nas\n\tserver 10.0.0.1\n\texport /media\n\tpath /mnt/pve/nas\n")
+    os.environ["ADR_STORAGE_CFG"] = str(tmp_path / "storage.cfg")
+    try:
+        assert host(108, "pre-start", "mp0: /mnt/pve/media/films,mp=/mnt/media\n").returncode == 0
+        result = host(108, "pre-start", "mp0: /mnt/pve/nas/films,mp=/mnt/media\n")
+        assert result.returncode == 1, "an NFS storage is still waited for"
+    finally:
+        del os.environ["ADR_STORAGE_CFG"]

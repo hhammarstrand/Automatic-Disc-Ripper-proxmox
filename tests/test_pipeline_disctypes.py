@@ -594,7 +594,8 @@ class TestAudiobookDisc:
         assert state["active"] and state["title"] == "Mio, min Mio"
         assert state["discs_done"] == [2], "disc two of the box, whatever order it came in"
         assert calls[0]["extension"] == "flac"
-        assert calls[0]["into"] == audiobook.disc_dir(config, 2)
+        assert calls[0]["into"] == audiobook.disc_part_dir(config, 2)
+        assert (audiobook.disc_dir(config, 2) / "01 - Track 01.flac").exists()
 
     def test_the_last_disc_builds_the_book(self, drive, config, monkeypatch, no_notifications):
         from adr import audiobook

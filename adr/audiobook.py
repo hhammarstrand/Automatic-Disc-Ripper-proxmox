@@ -43,7 +43,7 @@ COVER_NAMES = ("cover", "folder", "front")
 
 # Two discs of one book can be ripped at once, in two drives; numbering and the
 # list of discs done are read-modify-written under this.
-_lock = threading.Lock()
+_lock = threading.RLock()
 # One book is built at a time. An M4B is a single long ffmpeg run, and two of
 # them at once only make both slower.
 _build_slot = threading.Semaphore(1)
@@ -58,10 +58,17 @@ def library_root(config) -> Path:
     return Path(value) if value else Path(config.completed_path) / "Audiobooks"
 
 
+def _part(name: str, fallback: str) -> str:
+    """One path component. sanitize_filename keeps dots, and '..' as an
+    author is a folder outside the library."""
+    cleaned = sanitize_filename(name or "").strip(" .")
+    return cleaned or fallback
+
+
 def book_dir(config, author: str, title: str) -> Path:
     return (library_root(config)
-            / sanitize_filename(author or "Unknown Author")
-            / sanitize_filename(title or "Untitled"))
+            / _part(author, "Unknown Author")
+            / _part(title, "Untitled"))
 
 
 def _work_root(config) -> Path:
@@ -70,10 +77,25 @@ def _work_root(config) -> Path:
 
 # ------------------------------------------------------------------ #
 # Audiobook mode
+#
+# A disc is *ripping* from the moment it is claimed until its rip ends, and
+# *done* only once its folder is whole. It rips into discNN.part and is
+# renamed to discNN on success, so two discs never share a folder and a failed
+# re-rip never touches a good one. Each book has an id: a build in progress
+# owns its folder outright, and nothing it does afterwards can reach a book
+# started since.
 # ------------------------------------------------------------------ #
 
 def _get(config, key, default=None):
     return config.as_dict().get(key, default)
+
+
+def _ints(values) -> list[int]:
+    out = []
+    for value in values or []:
+        with contextlib.suppress(TypeError, ValueError):
+            out.append(int(value))
+    return sorted(set(out))
 
 
 def is_active(config) -> bool:
@@ -81,90 +103,151 @@ def is_active(config) -> bool:
 
 
 def state(config) -> dict:
-    done = _get(config, "audiobook_discs_done") or []
     return {
         "active": is_active(config),
+        "id": _get(config, "audiobook_id") or "",
         "author": _get(config, "audiobook_author") or "",
         "title": _get(config, "audiobook_title") or "",
         "narrator": _get(config, "audiobook_narrator") or "",
         "year": _get(config, "audiobook_year"),
         "discs_total": _get(config, "audiobook_discs_total"),
-        "discs_done": sorted(int(d) for d in done),
+        "discs_done": _ints(_get(config, "audiobook_discs_done")),
+        "discs_ripping": _ints(_get(config, "audiobook_discs_ripping")),
         "release_id": _get(config, "audiobook_release_id") or "",
     }
 
 
 def work_dir(config) -> Path:
-    s = state(config)
-    slug = sanitize_filename(f"{s['author']} - {s['title']}") or "book"
-    return _work_root(config) / slug
+    return _work_root(config) / (_get(config, "audiobook_id") or "current")
+
+
+_CLEARED = {
+    "audiobook_mode": False, "audiobook_id": "", "audiobook_title": "",
+    "audiobook_author": "", "audiobook_narrator": "", "audiobook_year": None,
+    "audiobook_discs_total": None, "audiobook_discs_done": [],
+    "audiobook_discs_ripping": [], "audiobook_release_id": "",
+}
 
 
 def start(config, author: str, title: str, narrator: str = "",
           year: int | None = None, discs_total: int | None = None,
           release_id: str = "") -> dict:
+    import uuid
+
     title = (title or "").strip()
     if not title:
         raise ValueError("A title is required.")
     with _lock:
         config.update({
             "audiobook_mode": True,
+            "audiobook_id": uuid.uuid4().hex[:12],
             "audiobook_author": (author or "").strip(),
             "audiobook_title": title,
             "audiobook_narrator": (narrator or "").strip(),
             "audiobook_year": int(year) if year else None,
             "audiobook_discs_total": int(discs_total) if discs_total else None,
             "audiobook_discs_done": [],
+            "audiobook_discs_ripping": [],
             "audiobook_release_id": release_id or "",
         })
-    work_dir(config).mkdir(parents=True, exist_ok=True)
+        work_dir(config).mkdir(parents=True, exist_ok=True)
     logger.info("Audiobook mode on: %s by %s", title, author or "?")
     return state(config)
 
 
+def ensure_started(config, **book) -> bool:
+    """Start the book unless one is already going. True if this started it.
+
+    Atomic, for two drives that each find disc 1 and disc 2 of a box
+    MusicBrainz knows at the same moment: the second must join the book the
+    first one started, not start it again over the first one's claim.
+    """
+    with _lock:
+        if is_active(config):
+            return False
+        start(config, **book)
+        return True
+
+
 def stop(config, discard: bool = False) -> dict:
     """Turn the mode off. With *discard*, the discs ripped so far go too."""
-    if discard:
-        with contextlib.suppress(OSError):
-            shutil.rmtree(work_dir(config))
     with _lock:
-        config.update({"audiobook_mode": False, "audiobook_discs_done": []})
+        if discard:
+            with contextlib.suppress(OSError):
+                shutil.rmtree(work_dir(config))
+        config.update(dict(_CLEARED))
     return state(config)
 
 
-def claim_disc(config, position: int | None = None) -> int:
-    """The number this disc is filed under, recorded as done.
+def _on_disk(config) -> set[int]:
+    numbers = set()
+    with contextlib.suppress(OSError):
+        for entry in work_dir(config).iterdir():
+            match = re.fullmatch(r"disc(\d+)(\.part)?", entry.name)
+            if match:
+                numbers.add(int(match.group(1)))
+    return numbers
 
-    MusicBrainz's medium position when it knows it — discs go in whatever
-    order the box is opened in — and the next free number when it does not.
+
+def claim_disc(config, position: int | None = None) -> int:
+    """The number a disc about to be ripped is filed under.
+
+    MusicBrainz's position in the box when it knows it — the box comes out in
+    any order — unless another drive is ripping that number right now; then,
+    and when there is no position, the next number nobody has used.
     """
     with _lock:
-        done = [int(d) for d in (_get(config, "audiobook_discs_done") or [])]
-        number = int(position) if position else (max(done, default=0) + 1)
-        if number not in done:
-            done.append(number)
-        config.update({"audiobook_discs_done": sorted(done)})
+        s = state(config)
+        busy = set(s["discs_ripping"])
+        if position and int(position) not in busy:
+            number = int(position)
+        else:
+            number = max(busy | set(s["discs_done"]) | _on_disk(config), default=0) + 1
+        part = disc_part_dir(config, number)
+        with contextlib.suppress(OSError):
+            shutil.rmtree(part)
+        part.mkdir(parents=True, exist_ok=True)
+        config.update({"audiobook_discs_ripping": sorted(busy | {number})})
     return number
 
 
-def release_disc(config, number: int) -> None:
-    """Un-count a disc whose rip did not finish, so it can go in again."""
+def disc_done(config, number: int) -> None:
+    """The disc's rip is whole: its folder takes the number."""
     with _lock:
-        done = [int(d) for d in (_get(config, "audiobook_discs_done") or [])]
-        if number in done:
-            done.remove(number)
-            config.update({"audiobook_discs_done": done})
-    with contextlib.suppress(OSError):
-        shutil.rmtree(disc_dir(config, number))
+        final, part = disc_dir(config, number), disc_part_dir(config, number)
+        with contextlib.suppress(OSError):
+            shutil.rmtree(final)
+        part.rename(final)
+        s = state(config)
+        config.update({
+            "audiobook_discs_ripping": [n for n in s["discs_ripping"] if n != number],
+            "audiobook_discs_done": sorted(set(s["discs_done"]) | {number}),
+        })
+
+
+def release_disc(config, number: int) -> None:
+    """A rip that did not finish: its partial folder goes, nothing else."""
+    with _lock:
+        with contextlib.suppress(OSError):
+            shutil.rmtree(disc_part_dir(config, number))
+        s = state(config)
+        config.update({
+            "audiobook_discs_ripping": [n for n in s["discs_ripping"] if n != number],
+        })
 
 
 def disc_dir(config, number: int) -> Path:
     return work_dir(config) / f"disc{number:02d}"
 
 
+def disc_part_dir(config, number: int) -> Path:
+    return work_dir(config) / f"disc{number:02d}.part"
+
+
 def complete(config) -> bool:
     s = state(config)
-    return bool(s["discs_total"]) and len(s["discs_done"]) >= int(s["discs_total"])
+    return (bool(s["discs_total"]) and not s["discs_ripping"]
+            and len(s["discs_done"]) >= int(s["discs_total"]))
 
 
 # ------------------------------------------------------------------ #
@@ -180,7 +263,8 @@ def natural_key(path: Path):
 def collect_files(folder: Path) -> list[Path]:
     files = [p for p in folder.rglob("*")
              if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS
-             and not p.name.startswith(".")]
+             and not p.name.startswith(".")
+             and not any(part.endswith(".part") for part in p.relative_to(folder).parts)]
     return sorted(files, key=natural_key)
 
 
@@ -298,13 +382,18 @@ def build_m4b(config, files: list[Path], meta: dict, destination: Path,
                 "-progress", "pipe:1", "-nostats", "-f", "mp4", str(partial)]
 
         logger.info("Building audiobook %s from %d file(s)", destination.name, len(files))
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        for line in proc.stdout:
-            if line.startswith("out_time_us=") and progress and total:
-                with contextlib.suppress(ValueError):
-                    progress(min(1.0, int(line.split("=", 1)[1]) / 1e6 / total))
-        error = proc.stderr.read()
-        if proc.wait() != 0 or not partial.exists():
+        # stderr to a file, not a pipe: progress is read from stdout until it
+        # ends, and an unread stderr pipe that fills up stops ffmpeg dead.
+        errors = scratch / "ffmpeg.err"
+        with open(errors, "w", encoding="utf-8") as err:
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=err, text=True)
+            for line in proc.stdout:
+                if line.startswith("out_time_us=") and progress and total:
+                    with contextlib.suppress(ValueError):
+                        progress(min(1.0, int(line.split("=", 1)[1]) / 1e6 / total))
+            code = proc.wait()
+        error = errors.read_text(encoding="utf-8", errors="replace")
+        if code != 0 or not partial.exists():
             return False, f"ffmpeg could not build the book: {error.strip()[-400:] or 'no output'}"
 
         final = destination
@@ -349,7 +438,7 @@ def _make_job(author: str, title: str, label: str):
 
 
 def _run_build(config, job_id: int, files: list[Path], meta: dict,
-               cover: Path | None, after_success=None) -> None:
+               cover: Path | None, after_success=None, after_failure=None) -> None:
     from adr.joblog import JobLog
     from adr.models import Job, JobStatus, get_session
     from adr.notify import Notifier
@@ -372,7 +461,7 @@ def _run_build(config, job_id: int, files: list[Path], meta: dict,
         with _build_slot:
             log.append("encode", f"Joining {len(files)} file(s) into one book.")
             destination = book_dir(config, meta.get("author", ""), meta["title"]) \
-                / f"{sanitize_filename(meta['title'])}.m4b"
+                / f"{_part(meta['title'], 'Untitled')}.m4b"
             ok, detail = build_m4b(config, files, meta, destination, report, cover)
 
         job.completed_at = utcnow()
@@ -390,6 +479,8 @@ def _run_build(config, job_id: int, files: list[Path], meta: dict,
             job.error_message = detail
             session.commit()
             log.append("encode", detail)
+            if after_failure:
+                after_failure()
             Notifier(config).job_failed(job)
     except Exception as exc:                            # noqa: BLE001 - recorded
         logger.exception("Audiobook build %s failed", job_id)
@@ -400,6 +491,9 @@ def _run_build(config, job_id: int, files: list[Path], meta: dict,
             job.error_message = f"The book could not be built: {exc}"
             job.completed_at = utcnow()
             session.commit()
+        if after_failure:
+            with contextlib.suppress(Exception):
+                after_failure()
     finally:
         session.close()
 
@@ -410,26 +504,97 @@ def _start(target, *args) -> threading.Thread:
     return thread
 
 
-def finish(config) -> int:
-    """Join the discs ripped in audiobook mode. Returns the build's job id."""
-    s = state(config)
-    if not s["title"]:
-        raise ValueError("No audiobook is being ripped.")
-    work = work_dir(config)
-    files = collect_files(work) if work.is_dir() else []
-    if not files:
-        raise ValueError("No disc of this book has been ripped yet.")
-    meta = {k: s[k] for k in ("author", "title", "narrator", "year")}
-    job_id = _make_job(s["author"], s["title"], f"{s['title']} ({len(s['discs_done'])} discs)")
-    cover = find_cover(work)
+def _building_dir(config, book_id: str) -> Path:
+    return _work_root(config) / f".building-{book_id}"
+
+
+def _launch(config, build_dir: Path, meta: dict) -> int:
+    """Build the book whose discs are in *build_dir*. Returns the job id.
+
+    The folder belongs to this build alone: on success it goes, on failure
+    the book is handed back to audiobook mode — unless another book has been
+    started since, in which case it waits beside it under .failed- with the
+    reason in the job.
+    """
+    files = collect_files(build_dir)
+    label = f"{meta['title']} ({len({p.parent for p in files})} discs)"
+    job_id = _make_job(meta.get("author", ""), meta["title"], label)
 
     def tidy():
         with contextlib.suppress(OSError):
-            shutil.rmtree(work)
-        stop(config)
+            shutil.rmtree(build_dir)
 
-    _start(_run_build, config, job_id, files, meta, cover, tidy)
+    def give_back():
+        with _lock:
+            if is_active(config):
+                build_dir.rename(_work_root(config) / f".failed-{meta['id']}")
+                return
+            build_dir.rename(_work_root(config) / meta["id"])
+            numbers = sorted(int(m.group(1)) for m in (
+                re.fullmatch(r"disc(\d+)", d.name) for d in (_work_root(config) / meta["id"]).iterdir())
+                if m)
+            config.update({
+                "audiobook_mode": True, "audiobook_id": meta["id"],
+                "audiobook_title": meta["title"], "audiobook_author": meta.get("author", ""),
+                "audiobook_narrator": meta.get("narrator", ""), "audiobook_year": meta.get("year"),
+                "audiobook_discs_total": meta.get("discs_total"),
+                "audiobook_discs_done": numbers, "audiobook_discs_ripping": [],
+                "audiobook_release_id": meta.get("release_id", ""),
+            })
+
+    _start(_run_build, config, job_id, files, meta, find_cover(build_dir), tidy, give_back)
     return job_id
+
+
+def finish(config) -> int:
+    """Join the discs ripped in audiobook mode. Returns the build's job id.
+
+    Refused while a disc is still ripping — a book built then is a book
+    without that disc. Otherwise, under the lock, the book's folder becomes
+    the build's (.building-<id>, with the book described in book.json beside
+    the discs) and the mode is cleared: two drives finishing the last discs
+    together cannot both build it, a book started during the build is a new
+    one, and a restart mid-build finds the folder and builds it again.
+    """
+    import json
+
+    with _lock:
+        s = state(config)
+        if not s["active"]:
+            raise ValueError("No audiobook is being ripped.")
+        if s["discs_ripping"]:
+            raise ValueError(
+                f"Disc {', '.join(map(str, s['discs_ripping']))} is still ripping; "
+                "finish the book when it is done.")
+        work = work_dir(config)
+        if not (work.is_dir() and collect_files(work)):
+            raise ValueError("No disc of this book has been ripped yet.")
+        meta = {k: s[k] for k in ("id", "author", "title", "narrator", "year",
+                                  "discs_total", "release_id")}
+        (work / "book.json").write_text(json.dumps(meta), encoding="utf-8")
+        build_dir = _building_dir(config, s["id"])
+        work.rename(build_dir)
+        config.update(dict(_CLEARED))
+    return _launch(config, build_dir, meta)
+
+
+def resume_builds(config) -> list[int]:
+    """Start again every build a restart interrupted. Returns their job ids."""
+    import json
+
+    started = []
+    root = _work_root(config)
+    if not root.is_dir():
+        return started
+    for build_dir in sorted(root.glob(".building-*")):
+        try:
+            meta = json.loads((build_dir / "book.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            logger.warning("Audiobook build folder %s has no book.json; left alone", build_dir)
+            continue
+        logger.info("Resuming the build of %s", meta.get("title"))
+        started.append(_launch(config, build_dir, meta))
+    return started
 
 
 def guess_meta(config, folder: Path, files: list[Path]) -> dict:

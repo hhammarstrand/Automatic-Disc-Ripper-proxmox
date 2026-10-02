@@ -109,6 +109,17 @@ def recover_interrupted_jobs(config, encode_queue) -> dict:
 
 def _recover_one(job, session, config, encode_queue) -> bool:
     """Handle one stranded job. True if it was resumed, False if it was failed."""
+    # An upload waiting in the import worker's inbox is whole on disk; the
+    # worker picks it up again (adr.imports.resume_pending). Telling the user
+    # to put a disc back in, about a file, was the answer this used to give.
+    if job.drive == "upload" and job.status in RIP_PHASE_STATUSES:
+        return False
+    # A book's build restarts from its folder (adr.audiobook.resume_builds)
+    # as a new job; this one says where it went.
+    if job.drive == "audiobook":
+        _fail(job, session, f"{RESTART_PREFIX} The book is built again from the "
+                            "ripped discs, as a new job.")
+        return False
     if job.status in RIP_PHASE_STATUSES:
         _fail(job, session, MID_RIP_MESSAGE)
         logger.info("Job %s was mid-rip and cannot be resumed", job.id)

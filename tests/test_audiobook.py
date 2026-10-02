@@ -48,40 +48,71 @@ def _chapters(path: Path) -> list[dict]:
 
 
 class TestTheMode:
+    def _rip(self, config, position=None):
+        number = audiobook.claim_disc(config, position)
+        (audiobook.disc_part_dir(config, number) / "01 - Track 01.flac").write_bytes(b"x")
+        audiobook.disc_done(config, number)
+        return number
+
     def test_discs_are_numbered_by_their_place_in_the_box(self, config):
         audiobook.start(config, "Astrid Lindgren", "Bröderna Lejonhjärta", discs_total=3)
-        assert audiobook.claim_disc(config, 2) == 2
-        assert audiobook.claim_disc(config, 1) == 1
+        assert self._rip(config, 2) == 2
+        assert self._rip(config, 1) == 1
         assert not audiobook.complete(config)
-        assert audiobook.claim_disc(config, 3) == 3
+        assert self._rip(config, 3) == 3
         assert audiobook.complete(config)
 
     def test_without_a_position_the_next_free_number_is_taken(self, config):
         audiobook.start(config, "", "A Book")
-        assert [audiobook.claim_disc(config) for _ in range(3)] == [1, 2, 3]
+        assert [self._rip(config) for _ in range(3)] == [1, 2, 3]
         assert not audiobook.complete(config), "nobody said how many discs there are"
 
-    def test_a_disc_that_failed_can_go_in_again(self, config):
-        audiobook.start(config, "", "A Book")
-        number = audiobook.claim_disc(config)
-        audiobook.disc_dir(config, number).mkdir(parents=True)
-        audiobook.release_disc(config, number)
-        assert audiobook.state(config)["discs_done"] == []
-        assert not audiobook.disc_dir(config, number).exists()
+    def test_a_disc_still_ripping_is_not_done(self, config):
+        """The last disc to *start* is not the last to finish."""
+        audiobook.start(config, "", "Book", discs_total=2)
+        self._rip(config, 1)
+        audiobook.claim_disc(config, 2)
+        assert not audiobook.complete(config)
+        with pytest.raises(ValueError, match="still ripping"):
+            audiobook.finish(config)
+
+    def test_two_drives_never_share_a_number(self, config):
+        audiobook.start(config, "", "Book")
+        first = audiobook.claim_disc(config, 2)
+        second = audiobook.claim_disc(config, 2)
+        assert first != second
+
+    def test_a_failed_rerip_leaves_the_good_disc_alone(self, config):
+        audiobook.start(config, "", "Book")
+        self._rip(config, 1)
+        audiobook.claim_disc(config, 1)            # the same disc, in again
+        audiobook.release_disc(config, 1)          # ... and it failed
+        assert (audiobook.disc_dir(config, 1) / "01 - Track 01.flac").exists()
+        assert audiobook.state(config)["discs_done"] == [1]
 
     def test_a_title_is_required(self, config):
         with pytest.raises(ValueError):
             audiobook.start(config, "Someone", "  ")
 
+    def test_only_one_of_two_drives_starts_the_book(self, config):
+        assert audiobook.ensure_started(config, author="A", title="Book")
+        book = audiobook.state(config)["id"]
+        assert not audiobook.ensure_started(config, author="A", title="Book")
+        assert audiobook.state(config)["id"] == book
+
     def test_cancelling_throws_the_discs_away(self, config):
         audiobook.start(config, "A", "B")
-        audiobook.disc_dir(config, 1).mkdir(parents=True)
+        self._rip(config)
+        work = audiobook.work_dir(config)
         audiobook.stop(config, discard=True)
         assert not audiobook.is_active(config)
-        assert not audiobook.work_dir(config).exists()
+        assert not work.exists()
 
     def test_the_library_defaults_beside_the_films(self, config):
         assert audiobook.library_root(config) == Path(config.completed_path) / "Audiobooks"
+
+    def test_an_author_cannot_climb_out_of_the_library(self, config):
+        assert audiobook.book_dir(config, "..", "..").parent.parent == audiobook.library_root(config)
 
 
 class TestChapters:
@@ -200,3 +231,65 @@ class TestTheApi:
         http.post("/api/audiobook", json={"active": True, "title": "Mio, min Mio"})
         page = http.get("/settings").get_data(as_text=True)
         assert "Audiobook mode" in page and "Mio, min Mio" in page
+
+
+def _book_with_a_disc(config):
+    from adr.models import init_db
+    init_db()
+    audiobook.start(config, "A", "Book", discs_total=1)
+    number = audiobook.claim_disc(config, 1)
+    (audiobook.disc_part_dir(config, number) / "01.flac").write_bytes(b"x")
+    audiobook.disc_done(config, number)
+
+
+def test_two_drives_finishing_together_build_the_book_once(config, monkeypatch):
+    started = []
+    monkeypatch.setattr(audiobook, "_start", lambda *a: started.append(a))
+    _book_with_a_disc(config)
+
+    audiobook.finish(config)
+    with pytest.raises(ValueError):
+        audiobook.finish(config)
+    assert len(started) == 1
+
+
+def test_a_book_started_during_a_build_is_left_alone(config, monkeypatch):
+    held = []
+    monkeypatch.setattr(audiobook, "_start", lambda target, *args: held.append((target, args)))
+    monkeypatch.setattr(audiobook, "build_m4b", lambda *a, **k: (True, "/lib/Book.m4b"))
+    monkeypatch.setattr("adr.notify.Notifier.job_done", lambda *a, **k: True)
+    _book_with_a_disc(config)
+    audiobook.finish(config)
+    audiobook.start(config, "B", "Next Book")
+    target, args = held[0]
+
+    target(*args)                                  # the first build ends
+
+    assert audiobook.state(config)["title"] == "Next Book"
+    assert audiobook.is_active(config)
+
+
+def test_a_failed_build_hands_the_book_back(config, monkeypatch):
+    monkeypatch.setattr(audiobook, "build_m4b", lambda *a, **k: (False, "ffmpeg said no"))
+    monkeypatch.setattr("adr.notify.Notifier.job_failed", lambda *a, **k: True)
+    monkeypatch.setattr(audiobook, "_start", lambda target, *args: target(*args))
+    _book_with_a_disc(config)
+
+    audiobook.finish(config)
+
+    state = audiobook.state(config)
+    assert state["active"] and state["title"] == "Book", "Finish book is there again"
+    assert state["discs_done"] == [1]
+    assert audiobook.collect_files(audiobook.work_dir(config))
+
+
+def test_a_build_a_restart_interrupted_starts_again(config, monkeypatch):
+    held = []
+    monkeypatch.setattr(audiobook, "_start", lambda target, *args: held.append(args))
+    _book_with_a_disc(config)
+    audiobook.finish(config)
+    held.clear()                                   # ... and the service went down
+
+    assert len(audiobook.resume_builds(config)) == 1
+    files = held[0][2]
+    assert [f.name for f in files] == ["01.flac"]

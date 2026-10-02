@@ -46,10 +46,10 @@ def encoded_files(job) -> list[Path]:
 #: What can sit in raw/<job>/ to be encoded: the MKVs MakeMKV writes, and a
 #: video file uploaded by hand (adr.imports), which is its own raw file. Not an
 #: ISO — that is ripped into MKVs first — and not an upload still arriving.
-_ENCODABLE = frozenset({
-    ".mkv", ".mp4", ".m4v", ".mov", ".avi", ".wmv", ".flv", ".ts", ".mpg",
-    ".mpeg", ".m2ts", ".mts", ".vob", ".webm", ".ogv", ".3gp", ".divx",
-})
+def _encodable() -> frozenset:
+    from adr.watcher import VIDEO_EXTENSIONS
+
+    return frozenset(VIDEO_EXTENSIONS) - {".iso"}
 
 
 def _raw_files(job, config) -> list[Path]:
@@ -60,7 +60,7 @@ def _raw_files(job, config) -> list[Path]:
     try:
         return sorted(
             p for p in raw_dir.iterdir()
-            if p.is_file() and p.suffix.lower() in _ENCODABLE
+            if p.is_file() and p.suffix.lower() in _encodable()
         )
     except OSError:
         return []

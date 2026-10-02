@@ -1592,6 +1592,8 @@ def _register_api_routes(app: Flask) -> None:
         on the container disk before anything can happen. The body is written
         straight to where the rip would have put it.
         """
+        from werkzeug.exceptions import ClientDisconnected
+
         from adr import imports
         from adr.preflight import destination_blocker
 
@@ -1628,12 +1630,16 @@ def _register_api_routes(app: Flask) -> None:
             if written != size:
                 raise OSError(f"received {written} of {size} bytes")
             partial.rename(target)
-        except OSError as exc:
+        except (OSError, ClientDisconnected) as exc:
+            # ClientDisconnected is what a closed tab or a dropped Wi-Fi
+            # looks like from here — not an OSError, and uncaught it left a
+            # PENDING job and gigabytes of .part on the container disk.
             with contextlib.suppress(OSError):
                 partial.unlink()
             imports.fail(job.id, f"The upload did not arrive whole: {exc}")
             return fail(f"The upload did not arrive whole: {exc}", 500)
 
+        imports.arrived(job.id, target)
         worker.submit(job.id, target)
         logger.info("Upload %s (%.1f GB) queued as job %s", target.name, size / 1024**3, job.id)
         return jsonify({"ok": True, "job_id": job.id})

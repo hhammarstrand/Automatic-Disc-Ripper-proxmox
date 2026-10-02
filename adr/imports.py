@@ -48,11 +48,18 @@ def allowed(filename: str) -> bool:
 
 
 def safe_name(filename: str) -> str:
-    """The upload's own name, reduced to something that cannot leave its folder."""
-    from werkzeug.utils import secure_filename
+    """The upload's own name, reduced to something that cannot leave its folder.
 
-    name = secure_filename(Path(filename or "").name)
-    return name or "upload"
+    Not werkzeug's secure_filename: it drops every non-ASCII character, so
+    'Фильм.mkv' became 'mkv' — no stem, no extension, nothing to encode — and
+    'Bröderna Lejonhjärta' lost its letters before TMDb ever saw it.
+    """
+    from adr.utils import sanitize_filename
+
+    name = Path(str(filename or "").replace("\\", "/")).name
+    suffix = Path(name).suffix.lower()
+    stem = sanitize_filename(Path(name).stem).strip(" .")
+    return f"{stem or 'upload'}{suffix}"
 
 
 _YEAR = re.compile(r"(?<!\d)(19\d\d|20\d\d)(?!\d)")
@@ -101,6 +108,25 @@ def create_job(config, filename: str) -> tuple[Job, Path]:
     target = Path(config.raw_path) / str(job.id) / name
     target.parent.mkdir(parents=True, exist_ok=True)
     return job, target
+
+
+def arrived(job_id: int, path: Path) -> None:
+    """Record that a video file is whole, before it waits in the queue.
+
+    A video file is its own finished rip. Recorded only when processing
+    began, a restart in between left a whole file in raw/ that retry took
+    for a rip killed half-way — "put the disc back in" — about an upload.
+    """
+    if path.suffix.lower() == ".iso":
+        return
+    session = get_session()
+    try:
+        job = session.get(Job, job_id)
+        if job is not None:
+            job.rip_completed_at = utcnow()
+            session.commit()
+    finally:
+        session.close()
 
 
 def fail(job_id: int, message: str) -> None:
@@ -218,7 +244,36 @@ class ImportWorker(threading.Thread):
         log.append("rip", "Reading the disc image with MakeMKV.")
         ripper = MakeMKVRipper(self._config, process_registry=process_registry)
         ripper.log_sink = lambda text: log.append("rip", text)
-        result = ripper.rip(f"iso:{iso}", job.id, _progress_committer(job, session, "rip"))
+        source = f"iso:{iso}"
+        # Whatever an interrupted run left half-written is not a title.
+        for stale in iso.parent.glob("*.mkv"):
+            with contextlib.suppress(OSError):
+                stale.unlink()
+        title_index = None
+        if self._config.main_feature_only:
+            # The same choice a disc gets. Ripping every title and encoding
+            # one left the rest in raw/ for good: the cleanup keeps surplus
+            # MKVs on purpose, for discs whose scan failed.
+            titles = ripper.scan_disc(source, job.id)
+            if titles:
+                from adr.naming import main_title_index
+                from adr.series import looks_like_series
+
+                verdict = looks_like_series(titles, self._config)
+                if verdict.get("is_series"):
+                    # A season has no main feature; every episode is wanted.
+                    job.content_type = "series"
+                    job.series_season = job.series_season or 1
+                    job.series_first_episode = job.series_first_episode or 1
+                    session.commit()
+                    log.append("rip", "The image looks like a TV season, so every "
+                                      "episode is ripped. Match fixes the show name.")
+                else:
+                    title_index = main_title_index(titles)
+                    log.append("rip", f"Ripping title {title_index + 1}, the longest of "
+                                      f"{len(titles)}; the rest are left out.")
+        result = ripper.rip(source, job.id, _progress_committer(job, session, "rip"),
+                            title_index=title_index)
         session.refresh(job)
         if job.status == JobStatus.CANCELLED:
             return False
@@ -228,12 +283,11 @@ class ImportWorker(threading.Thread):
 
         # An uploaded image has done its job, and an ISO left in raw/ is
         # several GB that nothing will ever read again. One picked off the
-        # share is somebody's file, and stays exactly where it was.
-        if iso.parent == Path(self._config.raw_path) / str(job.id):
-            try:
-                iso.unlink()
-            except OSError:
-                logger.warning("Could not delete %s", iso, exc_info=True)
+        # share is only linked here: the link goes, the image stays.
+        try:
+            iso.unlink()
+        except OSError:
+            logger.warning("Could not delete %s", iso, exc_info=True)
         job.rip_completed_at = utcnow()
         job.progress_rip = 1.0
         session.commit()
@@ -353,12 +407,55 @@ def import_in_place(config, raw: str, worker: "ImportWorker") -> int:
         raise ValueError("Only disc images (.iso) and video files can be added.")
 
     job, target = create_job(config, source.name)
-    if source.suffix.lower() == ".iso":
-        # MakeMKV reads the image where it is; nothing goes in raw/ but what
-        # it writes there.
-        worker.submit(job.id, source)
-    else:
-        target.symlink_to(source)
-        worker.submit(job.id, target)
+    # A link in raw/<job>/, for an image as much as a video: it is what a
+    # restart finds to resume from, and deleting the link once the image is
+    # ripped deletes nothing of the user's.
+    target.symlink_to(source)
+    arrived(job.id, target)
+    worker.submit(job.id, target)
     logger.info("Importing %s in place as job %s", source, job.id)
     return job.id
+
+
+def resume_pending(config, worker: ImportWorker) -> list[int]:
+    """Hand back to the worker every upload a restart caught before it ran.
+
+    The inbox is memory. An upload that had arrived whole and was waiting its
+    turn — or was being identified, or was an ISO mid-rip — is still sitting
+    in raw/<job>/, and is simply started again. One still arriving when the
+    service went down is not whole, and is failed and cleaned up.
+    """
+    session = get_session()
+    resumed = []
+    try:
+        waiting = (session.query(Job)
+                   .filter(Job.drive == UPLOAD_DRIVE)
+                   .filter(Job.status.in_([JobStatus.PENDING, JobStatus.IDENTIFYING,
+                                           JobStatus.RIPPING]))
+                   .all())
+        for job in waiting:
+            folder = Path(config.raw_path) / str(job.id)
+            whole = sorted(p for p in folder.glob("*")
+                           if allowed(p.name) and not p.name.endswith(".part")) \
+                if folder.is_dir() else []
+            for partial in folder.glob("*.part") if folder.is_dir() else []:
+                with contextlib.suppress(OSError):
+                    partial.unlink()
+            source = next((p for p in whole if p.suffix.lower() == ".iso"), None) \
+                or next(iter(whole), None)
+            if source is None or not source.exists():
+                job.status = JobStatus.ERROR
+                job.error_message = ("The upload was still arriving when the service "
+                                     "restarted, so it is not whole. Add the file again.")
+                job.completed_at = utcnow()
+                session.commit()
+                continue
+            job.status = JobStatus.PENDING
+            session.commit()
+            worker.submit(job.id, source)
+            resumed.append(job.id)
+    finally:
+        session.close()
+    if resumed:
+        logger.info("Resumed %d upload(s) a restart interrupted", len(resumed))
+    return resumed

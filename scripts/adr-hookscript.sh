@@ -27,8 +27,22 @@ PHASE="${2:-}"
 WAIT_SECONDS="${ADR_SHARE_WAIT:-300}"
 CONF="${ADR_LXC_CONF_DIR:-/etc/pve/lxc}/${VMID}.conf"
 FSTAB="${ADR_FSTAB:-/etc/fstab}"
+STORAGE_CFG="${ADR_STORAGE_CFG:-/etc/pve/storage.cfg}"
 
 say() { echo "adr-hookscript: $*" >&2; }
+
+# Whether Proxmox storage <id> is something mounted, from storage.cfg.
+storage_is_mounted() {
+    awk -v id="$1" '
+        /^[a-z]+:[[:space:]]/ { type = $1; sub(/:$/, "", type); name = $2; next }
+        name == id && $1 == "is_mountpoint" && $2 != "no" && $2 != "0" { mp = 1 }
+        name == id { seen = 1; t = type }
+        END {
+            if (!seen && t == "") { exit 1 }
+            if (t ~ /^(nfs|cifs|cephfs|glusterfs)$/ || mp) { exit 0 }
+            exit 1
+        }' "$STORAGE_CFG" 2>/dev/null
+}
 
 # What has to be mounted for *src* to be the real thing, as kind:storage:target.
 # Prints nothing for a path that is simply meant to be a directory on the host.
@@ -37,7 +51,13 @@ expected_mount() {
     if [[ "$src" == /mnt/pve/* ]]; then
         local id="${src#/mnt/pve/}"
         id="${id%%/*}"
-        echo "pve:${id}:/mnt/pve/${id}"
+        # Only a storage that is mounted is waited for: a network one, or a
+        # directory storage marked is_mountpoint. A plain directory storage
+        # under /mnt/pve never becomes a mount point, and waiting for it held
+        # the container for five minutes and then refused it, every boot.
+        if storage_is_mounted "$id"; then
+            echo "pve:${id}:/mnt/pve/${id}"
+        fi
         return
     fi
     # The longest fstab target that is src or a parent of it. "/" covers every
