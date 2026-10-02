@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.50.0
+
+**A container that started before its share no longer has to be found out by
+hand.** A bind-mount is captured when the container starts. After a power cut
+the host boots faster than the NAS, the `nofail` fstab entry gives up after 30
+seconds, and the guests start anyway — so the container binds the bare
+directory underneath the share and keeps it until somebody restarts it. Every
+disc was then refused with "not writable … on an NFS share, allow that uid on
+the export": advice about a problem nobody had, on an SMB share.
+
+The refusal now says what it is: the destination is on the host's own disk
+(`ext4 from /dev/mapper/pve-root`), not a network share, and the share was not
+mounted when the container started. The diagnostics show where every mount
+comes from. The advice that used to go with "not writable",
+`pct exec … adr-setup-nas`, could never have worked — that helper lives on the
+host — and now reads `adr-setup-nas <CTID>`.
+
+**`adr-doctor --fix` repairs it, and stops it happening again.** It mounts the
+share on the host if fstab has it and it is not mounted, restarts a container
+that is holding the directory underneath, and installs `adr-hookscript.sh` as
+the container's Proxmox hookscript. That runs before every start, mounts each
+bind-mount source that is meant to be a mount, waits up to five minutes for it,
+and refuses to start the container if it never comes — a container that did
+not start is noticed; one that started on the wrong directory was not, for
+eleven days. A container with a hookscript of its own is left alone.
+
 ## 1.49.0
 
 **A drive with its tray hanging out no longer claims to be empty.** The drive

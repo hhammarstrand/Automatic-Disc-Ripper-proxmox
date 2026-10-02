@@ -245,7 +245,8 @@ def _storage(config) -> str:
             else "container disk"
         )
         lines.append(
-            f"{name:10} {path}  [{where}, {info['fstype'] or '?'}] "
+            f"{name:10} {path}  [{where}, {info['fstype'] or '?'}"
+            f"{' from ' + info['source'] if info['source'] else ''}] "
             f"{'writable' if info['writable'] else 'NOT WRITABLE'}, "
             f"{info['free_gb']} GB free",
         )

@@ -205,6 +205,21 @@ class TestTheFixMatchesTheFault:
         assert "adr-setup-nas" in fix
         assert "pct reboot" not in fix
 
+    def test_the_setup_command_is_run_on_the_host(self):
+        """adr-setup-nas lives on the host; inside the container it does not exist."""
+        fix = preflight._destination_fix("Destination /mnt/media is not writable by uid 8420.")
+        assert "pct exec" not in fix
+        assert "adr-setup-nas {ctid}" in fix
+
+    def test_a_host_disk_under_the_mount_says_mount_the_share_and_reboot(self):
+        fix = preflight._destination_fix(
+            "Destination /mnt/media is not writable by the service user (uid 8420), "
+            "and it is on the host's local disk (ext4 from /dev/mapper/pve-root), "
+            "not a network share.",
+        )
+        assert "adr-doctor --fix {ctid}" in fix
+        assert "adr-setup-nas" not in fix
+
     def test_a_missing_folder_points_at_settings(self):
         assert "Settings" in preflight._destination_fix("Destination /x does not exist.")
 

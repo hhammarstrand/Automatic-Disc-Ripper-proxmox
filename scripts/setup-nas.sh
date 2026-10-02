@@ -453,4 +453,6 @@ echo "  ${YW}If the NAS is ever offline and remounted, restart the container:${C
 echo "      pct reboot ${CTID}"
 echo "  A bind-mount is captured at container start, so a share mounted"
 echo "  afterwards stays invisible inside a running container."
+echo "  To make the container wait for the share at every start instead:"
+echo "      adr-doctor --fix ${CTID}"
 echo

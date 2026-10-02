@@ -168,6 +168,21 @@ def check_destination(path: str | Path, require_mount: bool = False) -> tuple[bo
         )
 
     if not info["writable"]:
+        if info["on_separate_filesystem"] and info["fstype"] and not info["is_network"]:
+            # A bind-mount of a host directory on the host's own disk. When
+            # the NAS was meant to be there, this is the bare mountpoint under
+            # it: the share was not mounted when the container started, and
+            # adr-setup-nas made that directory immutable precisely so this
+            # would fail here instead of filling the host disk. Advice about
+            # NFS export uids sends the user after a problem they do not have.
+            return False, (
+                f"Destination {info['path']} is not writable by the service user "
+                f"(uid {SERVICE_UID}), and it is on the host's local disk "
+                f"({info['fstype']} from {info['source']}), not a network share. "
+                "If the library is on a NAS, the share was not mounted on the "
+                "Proxmox host when the container started, and this is the empty "
+                "directory underneath it."
+            )
         return False, (
             f"Destination {info['path']} is not writable by the service user "
             f"(uid {SERVICE_UID}). On an NFS share, allow that uid on the export."

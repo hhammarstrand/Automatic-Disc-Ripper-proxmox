@@ -32,7 +32,7 @@ set -euo pipefail
 # "nothing wrong found", which is worse than failing: it is a clean bill of
 # health from a script that never looked. Compared against the container's own
 # version below.
-ADR_DOCTOR_VERSION="1.49.0"
+ADR_DOCTOR_VERSION="1.50.0"
 
 CT_MEDIA_PATH="${CT_MEDIA_PATH:-/mnt/media}"
 # The user the service runs as inside the container.
@@ -542,6 +542,113 @@ EOF
             note_fixed "ordered pve-guests.service after ${DEV_UNIT}"
         else
             would_fix "order pve-guests.service after ${DEV_UNIT}"
+        fi
+    fi
+fi
+
+# ----------------------------------------------------------------------------- #
+# 4b. The media share — mounted on the host, and the same thing inside
+#
+# The same race as the drive, for the library. A bind-mount is captured when
+# the container starts; if the share was not mounted on the host by then, the
+# container holds the bare directory underneath it until it is restarted, and
+# every disc is refused as "not writable". adr-setup-nas orders pve-guests after
+# the mount, but its fstab entry is 'nofail' — a NAS slower to boot than the
+# host makes it give up, and the guests start anyway.
+# ----------------------------------------------------------------------------- #
+HOOK_NAME="adr-hookscript.sh"
+MEDIA_LINE="$(pct config "$CTID" | grep -E "^mp[0-9]+: [^,]+,(.*,)?mp=${CT_MEDIA_PATH}(,|$)" || true)"
+if [[ -z "$MEDIA_LINE" ]]; then
+    msg_ok "No media share is bind-mounted at ${CT_MEDIA_PATH} (films stay on the container disk)"
+else
+    MEDIA_SRC="${MEDIA_LINE#*: }"; MEDIA_SRC="${MEDIA_SRC%%,*}"
+
+    # The fstab entry meant to back the share, if there is one.
+    MEDIA_FSTAB="$(awk -v src="$MEDIA_SRC" '
+        $1 !~ /^#/ && $2 ~ /^\/./ {
+            t = $2; sub(/\/$/, "", t)
+            if ((src == t || index(src, t "/") == 1) && length(t) > length(best)) best = t
+        }
+        END { print best }' /etc/fstab 2>/dev/null)"
+
+    if [[ -n "$MEDIA_FSTAB" ]] && ! mountpoint -q "$MEDIA_FSTAB"; then
+        note_problem "${MEDIA_FSTAB} is in /etc/fstab but not mounted on the host."
+        if [[ "$FIX" -eq 1 ]]; then
+            if mount "$MEDIA_FSTAB" 2>/dev/null && mountpoint -q "$MEDIA_FSTAB"; then
+                note_fixed "mounted ${MEDIA_FSTAB}"
+            else
+                msg_error "        Could not mount it. Is the NAS up?  mount ${MEDIA_FSTAB}"
+            fi
+        else
+            would_fix "mount ${MEDIA_FSTAB}"
+        fi
+    fi
+
+    # What the host has there now, against what the running container holds.
+    if pct status "$CTID" | grep -q running; then
+        HOST_FS="$(findmnt -rn -o FSTYPE --target "$MEDIA_SRC" 2>/dev/null | head -1 || true)"
+        CT_FS="$(pct exec "$CTID" -- findmnt -rn -o FSTYPE --target "$CT_MEDIA_PATH" 2>/dev/null | head -1 || true)"
+        if [[ -n "$HOST_FS" && -n "$CT_FS" && "$HOST_FS" != "$CT_FS" ]]; then
+            note_problem "CT ${CTID} sees ${CT_MEDIA_PATH} as ${CT_FS}; on the host ${MEDIA_SRC} is ${HOST_FS}."
+            msg_warn "        The container started before the share was mounted and is"
+            msg_warn "        holding the empty directory underneath it. A restart re-binds it."
+            if [[ "$FIX" -eq 1 ]]; then
+                NEEDS_RESTART=1
+            else
+                would_fix "restart the container so it picks up the mounted share"
+            fi
+        else
+            msg_ok "CT ${CTID} sees the same ${CT_FS:-filesystem} at ${CT_MEDIA_PATH} as the host"
+        fi
+    fi
+
+    # And so that it does not happen at the next boot: refuse to start the
+    # container until the share is there.
+    HOOK_SET="$(pct config "$CTID" | sed -n 's/^hookscript: *//p')"
+    if [[ "$HOOK_SET" == *":snippets/${HOOK_NAME}" ]]; then
+        HOOK_PATH="$(pvesm path "$HOOK_SET" 2>/dev/null || true)"
+        if [[ "$FIX" -eq 1 && -n "$HOOK_PATH" ]] \
+                && pct pull "$CTID" "/opt/adr/scripts/${HOOK_NAME}" "${HOOK_PATH}.new" >/dev/null 2>&1 \
+                && ! cmp -s "${HOOK_PATH}.new" "$HOOK_PATH"; then
+            chmod 0755 "${HOOK_PATH}.new" && mv "${HOOK_PATH}.new" "$HOOK_PATH"
+            msg_ok "Refreshed ${HOOK_PATH} from the container"
+        fi
+        [[ -n "$HOOK_PATH" ]] && rm -f "${HOOK_PATH}.new"
+        msg_ok "CT ${CTID} waits for its share before starting (${HOOK_SET})"
+    elif [[ -n "$HOOK_SET" ]]; then
+        # Somebody's own hookscript. Proxmox allows only one; not ours to replace.
+        msg_warn "CT ${CTID} has its own hookscript (${HOOK_SET}), so adr-doctor leaves it."
+        msg_warn "        To have it wait for the share, call ${HOOK_NAME} from it at pre-start."
+    else
+        note_problem "CT ${CTID} can start before its share is mounted."
+        if [[ "$FIX" -eq 1 ]]; then
+            # A hookscript has to live on a storage that holds snippets. 'local'
+            # is a directory storage on every node; it just does not have the
+            # content type switched on by default.
+            HOOK_STORE="$(pvesm status --content snippets 2>/dev/null \
+                | awk 'NR > 1 && $3 == "active" { print $1; exit }' || true)"
+            if [[ -z "$HOOK_STORE" ]]; then
+                LOCAL_CONTENT="$(pvesh get /storage/local --output-format json 2>/dev/null \
+                    | grep -o '"content":"[^"]*"' | cut -d'"' -f4 || true)"
+                if [[ -n "$LOCAL_CONTENT" ]] \
+                        && pvesm set local --content "${LOCAL_CONTENT},snippets" >/dev/null 2>&1; then
+                    msg_ok "Enabled snippets on storage 'local' (keeping ${LOCAL_CONTENT})"
+                    HOOK_STORE=local
+                fi
+            fi
+            HOOK_PATH=""
+            [[ -n "$HOOK_STORE" ]] && HOOK_PATH="$(pvesm path "${HOOK_STORE}:snippets/${HOOK_NAME}" 2>/dev/null || true)"
+            if [[ -n "$HOOK_PATH" ]] && mkdir -p "$(dirname "$HOOK_PATH")" \
+                    && pct pull "$CTID" "/opt/adr/scripts/${HOOK_NAME}" "$HOOK_PATH" >/dev/null 2>&1 \
+                    && chmod 0755 "$HOOK_PATH" \
+                    && pct set "$CTID" --hookscript "${HOOK_STORE}:snippets/${HOOK_NAME}" >/dev/null 2>&1; then
+                note_fixed "CT ${CTID} now waits for its share before starting (${HOOK_PATH})"
+            else
+                msg_error "        Could not install the hookscript. Is ADR updated in CT ${CTID}?"
+                msg_error "        It needs /opt/adr/scripts/${HOOK_NAME}, from 1.50.0 on."
+            fi
+        else
+            would_fix "install a hookscript that waits for the share at container start"
         fi
     fi
 fi

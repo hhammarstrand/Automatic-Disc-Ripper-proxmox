@@ -176,6 +176,34 @@ class TestCheckDestination:
         assert "not writable" in msg
         assert str(SERVICE_UID) in msg
 
+    def _unwritable(self, monkeypatch, **overrides):
+        import adr.storage as s
+        info = {
+            "path": "/mnt/media", "exists": True, "is_mount": True,
+            "on_separate_filesystem": True, "source": "/dev/mapper/pve-root",
+            "fstype": "ext4", "is_network": False, "writable": False,
+            "free_gb": 63.4,
+        }
+        info.update(overrides)
+        monkeypatch.setattr(s, "describe_path", lambda p: info)
+        return s.check_destination("/mnt/media", require_mount=True)
+
+    def test_an_unmounted_share_bound_from_the_host_disk_says_so(self, monkeypatch):
+        """The bare host mountpoint is ext4 and not ours — not an NFS uid problem."""
+        ok, msg = self._unwritable(monkeypatch)
+        assert ok is False
+        assert "not a network share" in msg
+        assert "/dev/mapper/pve-root" in msg
+        assert "allow that uid on the export" not in msg
+
+    def test_an_unwritable_nfs_share_still_gets_the_uid_advice(self, monkeypatch):
+        ok, msg = self._unwritable(
+            monkeypatch, fstype="nfs4", is_network=True, source="nas:/media",
+        )
+        assert ok is False
+        assert "allow that uid on the export" in msg
+        assert "not a network share" not in msg
+
 
 def test_service_uid_matches_the_installer():
     """SERVICE_UID is what users allow on their NAS export — it must not drift."""

@@ -22,7 +22,7 @@ from __future__ import annotations
 import logging
 from dataclasses import asdict, dataclass, field
 
-from adr.storage import check_destination, should_stage
+from adr.storage import SERVICE_UID, check_destination, should_stage
 
 logger = logging.getLogger(__name__)
 
@@ -119,11 +119,21 @@ def _destination_fix(detail: str) -> str:
             "Settings → Completed folder at a local path, or turn off "
             "'Require the destination to be a mount point'."
         )
+    if "not a network share" in detail:
+        return (
+            "Run on the Proxmox host: adr-doctor --fix {ctid}. It mounts the share, "
+            "restarts the container so it binds the share instead of the directory "
+            "underneath, and makes the container wait for the share from then on. "
+            "If the library really is on a local disk, give uid "
+            f"{SERVICE_UID} write access to it on the host."
+        )
     if "not writable" in detail:
+        # adr-setup-nas runs on the host and needs the container id; it does
+        # not exist inside the container, so "pct exec … adr-setup-nas" fails.
         return (
             "The share is attached but the service user cannot write to it. "
-            "Re-run the NAS setup so the mount carries the right owner: "
-            "pct exec {ctid} -- adr-setup-nas"
+            "Re-run the NAS setup on the Proxmox host so the mount carries the "
+            "right owner: adr-setup-nas {ctid}"
         )
     if "does not exist" in detail:
         return "Settings → Completed folder, or the Storage page to attach a share."
