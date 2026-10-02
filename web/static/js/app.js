@@ -1867,7 +1867,7 @@ function uploadOne(file, row) {
             } else {
                 bar.classList.add('bg-danger');
                 state.textContent = 'failed';
-                notify(body.error || `Upload of ${file.name} failed (${xhr.status})`, 'danger');
+                notify(reasonFrom(body, `Upload of ${file.name} failed (${xhr.status})`), 'danger');
             }
             resolve();
         };
@@ -1883,3 +1883,86 @@ function uploadOne(file, row) {
 }
 
 document.addEventListener('DOMContentLoaded', initUpload);
+
+
+// ------------------------------------------------------------------ //
+// Pick from the share
+// ------------------------------------------------------------------ //
+
+let _browseParent = null;
+
+function openBrowser() {
+    browseTo('');
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('browseModal')).show();
+}
+
+function browseUp() {
+    browseTo(_browseParent || '');
+}
+
+function browseTo(path) {
+    const list = document.getElementById('browseList');
+    list.innerHTML = '<div class="list-group-item text-secondary small">'
+        + '<span class="spinner-border spinner-border-sm me-2"></span>Reading…</div>';
+    fetch('/api/browse?path=' + encodeURIComponent(path))
+        .then(r => r.json().then(body => ({ ok: r.ok, body })))
+        .then(({ ok, body }) => {
+            if (!ok) throw new Error(reasonFrom(body, 'Could not read that folder'));
+            renderBrowse(body);
+        })
+        .catch(err => {
+            list.innerHTML = `<div class="list-group-item text-danger small">${escapeHtml(err.message)}</div>`;
+        });
+}
+
+function renderBrowse(d) {
+    const atRoots = d.path === null;
+    _browseParent = d.parent;
+    // The mark keeps the leading slash where it belongs once the line is
+    // laid out right to left, which is what makes it cut at the start.
+    document.getElementById('browsePath').textContent = atRoots ? 'Storage this app can see' : '\u200e' + d.path;
+    document.getElementById('browseUp').disabled = atRoots;
+    const list = document.getElementById('browseList');
+    const join = name => atRoots ? name : `${d.path.replace(/\/$/, '')}/${name}`;
+    const gb = n => n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${Math.max(1, Math.round(n / 1024 ** 2))} MB`;
+
+    const rows = [];
+    d.dirs.forEach(name => rows.push(
+        `<button type="button" class="list-group-item list-group-item-action d-flex align-items-center gap-2"
+                 data-dir="${escapeHtml(join(name))}">
+            <i class="bi bi-folder text-secondary"></i><span class="text-truncate">${escapeHtml(name)}</span>
+         </button>`));
+    d.files.forEach(f => rows.push(
+        `<button type="button" class="list-group-item list-group-item-action d-flex align-items-center gap-2"
+                 data-file="${escapeHtml(join(f.name))}" data-name="${escapeHtml(f.name)}">
+            <i class="bi ${/\.iso$/i.test(f.name) ? 'bi-disc' : 'bi-film'} text-info"></i>
+            <span class="text-truncate flex-grow-1">${escapeHtml(f.name)}</span>
+            <small class="text-secondary text-nowrap">${gb(f.size)}</small>
+         </button>`));
+    list.innerHTML = rows.join('') || '<div class="list-group-item text-secondary small">'
+        + 'No folders here, and no ISO or video files.</div>';
+
+    list.querySelectorAll('[data-dir]').forEach(el =>
+        el.addEventListener('click', () => browseTo(el.dataset.dir)));
+    list.querySelectorAll('[data-file]').forEach(el =>
+        el.addEventListener('click', () => importFromShare(el.dataset.file, el.dataset.name, el)));
+}
+
+function importFromShare(path, name, row) {
+    row.disabled = true;
+    fetch('/api/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path }),
+    })
+        .then(r => r.json().then(body => ({ ok: r.ok, body })))
+        .then(({ ok, body }) => {
+            if (!ok) throw new Error(reasonFrom(body, 'The import did not start'));
+            row.classList.add('list-group-item-success');
+            notify(`${name} added as job #${body.job_id}`, 'success');
+        })
+        .catch(err => {
+            row.disabled = false;
+            notify(err.message, 'danger');
+        });
+}

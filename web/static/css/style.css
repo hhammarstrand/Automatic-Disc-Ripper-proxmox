@@ -1551,3 +1551,11 @@ input, select, textarea, .list-group-item-action {
     border-color: var(--adr-accent);
     color: inherit;
 }
+
+/* A deep path is cut at its start, not its end: the end is the folder you
+   are in, which is the part worth reading. */
+#browsePath {
+    direction: rtl;
+    text-align: left;
+    min-width: 0;
+}

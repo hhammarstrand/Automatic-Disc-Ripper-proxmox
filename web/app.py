@@ -1587,6 +1587,47 @@ def _register_api_routes(app: Flask) -> None:
         logger.info("Upload %s (%.1f GB) queued as job %s", target.name, size / 1024**3, job.id)
         return jsonify({"ok": True, "job_id": job.id})
 
+    @app.route("/api/browse")
+    def api_browse():
+        """Folders and importable files on the storage this app already sees.
+
+        Without ?path=, the roots: the folders configured in Settings, which
+        on a NAS install are the share. Nothing outside them can be listed.
+        """
+        from adr import imports
+
+        path = request.args.get("path", "")
+        if not path:
+            return jsonify({
+                "path": None, "parent": None, "files": [],
+                "dirs": [str(r) for r in imports.browse_roots(_config)],
+            })
+        try:
+            return jsonify(imports.list_dir(_config, path))
+        except ValueError as exc:
+            return fail(str(exc), 404)
+
+    @app.route("/api/import", methods=["POST"])
+    def api_import():
+        """Process a file on the share where it lies — no upload, no copy."""
+        from adr import imports
+        from adr.preflight import destination_blocker
+
+        worker = getattr(_pipeline_manager, "import_worker", None)
+        if worker is None:
+            return fail("The pipeline is not running.", 503)
+        blocker = destination_blocker(_config)
+        if blocker:
+            return fail(f"Finished films have nowhere to go: {blocker}", 409)
+        data = request.get_json(silent=True) or {}
+        try:
+            job_id = imports.import_in_place(_config, str(data.get("path", "")), worker)
+        except ValueError as exc:
+            return fail(str(exc), 400)
+        except OSError as exc:
+            return fail(f"Could not start the import: {exc}", 500)
+        return jsonify({"ok": True, "job_id": job_id})
+
     @app.route("/api/makemkv/refresh-key", methods=["POST"])
     def api_refresh_makemkv_key():
         """Fetch/refresh the MakeMKV registration key.

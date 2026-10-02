@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.53.0
+
+**Pick a film from the share instead of uploading it.** Most of the time the
+ISO or the MP4 is already on the NAS, and sending it to a laptop to send it
+back is two network copies of something that never needed to move. *Add a
+file* has a **Pick from the share** button: it browses the folders this app is
+configured with — the completed folder, the libraries, the watch folder, which
+on a NAS install is the share — and nothing outside them, so a link or a `..`
+cannot walk it out to the rest of the container. A picked ISO is read by
+MakeMKV where it lies; a picked video file is linked into `raw/<job>/` and read
+by the encoder from there. The original is never moved, renamed or deleted:
+the finished film is a new file in the library.
+
+**Passthrough keeps what a file is.** With transcoding off, a kept file was
+always named `.mkv`, which an uploaded MP4 is not; it keeps `.mp4` now. And a
+file linked from the share is copied into place rather than moved, because
+moving the link put a link in the library pointing at somebody's original.
+
 ## 1.52.0
 
 **Add a film that is already a file.** The dashboard has an *Add a file* card:

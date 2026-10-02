@@ -225,12 +225,14 @@ class ImportWorker(threading.Thread):
             fail(job.id, result.error or "MakeMKV could not read the disc image.")
             return False
 
-        # The image has done its job, and an ISO left in raw/ is several GB
-        # that nothing will ever read again.
-        try:
-            iso.unlink()
-        except OSError:
-            logger.warning("Could not delete %s", iso, exc_info=True)
+        # An uploaded image has done its job, and an ISO left in raw/ is
+        # several GB that nothing will ever read again. One picked off the
+        # share is somebody's file, and stays exactly where it was.
+        if iso.parent == Path(self._config.raw_path) / str(job.id):
+            try:
+                iso.unlink()
+            except OSError:
+                logger.warning("Could not delete %s", iso, exc_info=True)
         job.rip_completed_at = utcnow()
         job.progress_rip = 1.0
         session.commit()
@@ -242,3 +244,103 @@ def free_bytes(config) -> int:
         return shutil.disk_usage(config.raw_path).free
     except OSError:
         return 0
+
+
+# ------------------------------------------------------------------ #
+# Files already on the share
+#
+# Sending a film from the NAS to a laptop and back to the NAS is two network
+# copies of something that never needed to move. So the files the container
+# can already see can be picked where they lie: an ISO is read by MakeMKV
+# straight off the share, and a video file is linked into raw/<job>/ and read
+# by the encoder from there. The original is never moved, renamed or deleted.
+# ------------------------------------------------------------------ #
+
+def browse_roots(config) -> list[Path]:
+    """The folders that may be browsed: the ones this app was pointed at.
+
+    Not the whole filesystem. The page has no login, and a directory listing
+    of /etc is not something anybody on the LAN needs from a disc ripper. A
+    folder inside another (the film library inside the share) is covered by
+    the outer one and not listed twice.
+    """
+    candidates = []
+    for value in (config.completed_path, config.plex_path, config.tv_path,
+                  getattr(config, "watch_path", "")):
+        if not value:
+            continue
+        try:
+            path = Path(value).resolve()
+        except OSError:
+            continue
+        if path.is_dir() and path != Path("/"):
+            candidates.append(path)
+    roots = []
+    for path in sorted(set(candidates), key=lambda p: len(p.parts)):
+        if not any(path == r or r in path.parents for r in roots):
+            roots.append(path)
+    return roots
+
+
+def resolve_inside(config, raw: str) -> Path | None:
+    """*raw* as a real path, or None when it is not inside a browse root."""
+    if not raw:
+        return None
+    try:
+        path = Path(raw).resolve()
+    except OSError:
+        return None
+    for root in browse_roots(config):
+        if path == root or root in path.parents:
+            return path
+    return None
+
+
+def list_dir(config, raw: str) -> dict:
+    """One folder's sub-folders and the files in it that could be imported."""
+    path = resolve_inside(config, raw)
+    if path is None or not path.is_dir():
+        raise ValueError("That folder is not one this app can read.")
+    roots = browse_roots(config)
+    dirs, files = [], []
+    try:
+        entries = sorted(path.iterdir(), key=lambda p: p.name.lower())
+    except OSError as exc:
+        raise ValueError(f"Could not read {path}: {exc.strerror or exc}") from exc
+    for entry in entries:
+        if entry.name.startswith("."):
+            continue
+        try:
+            if entry.is_dir():
+                dirs.append(entry.name)
+            elif entry.is_file() and allowed(entry.name):
+                files.append({"name": entry.name, "size": entry.stat().st_size})
+        except OSError:
+            continue
+    parent = path.parent if path not in roots else None
+    return {
+        "path": str(path),
+        "parent": str(parent) if parent and resolve_inside(config, str(parent)) else None,
+        "dirs": dirs,
+        "files": files,
+    }
+
+
+def import_in_place(config, raw: str, worker: "ImportWorker") -> int:
+    """Start a job for a file on the share without copying it. Returns its id."""
+    source = resolve_inside(config, raw)
+    if source is None or not source.is_file():
+        raise ValueError("That file is not one this app can read.")
+    if not allowed(source.name):
+        raise ValueError("Only disc images (.iso) and video files can be added.")
+
+    job, target = create_job(config, source.name)
+    if source.suffix.lower() == ".iso":
+        # MakeMKV reads the image where it is; nothing goes in raw/ but what
+        # it writes there.
+        worker.submit(job.id, source)
+    else:
+        target.symlink_to(source)
+        worker.submit(job.id, target)
+    logger.info("Importing %s in place as job %s", source, job.id)
+    return job.id

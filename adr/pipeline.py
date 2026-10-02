@@ -1142,7 +1142,10 @@ class EncoderWorker(threading.Thread):
 
         result = EncodeResult()
         result.input_path = task.input_path
-        destination = task.output_dir / f"{task.output_filename}.mkv"
+        # The container it already is. An uploaded MP4 kept as it came is
+        # still an MP4, and naming it .mkv is a file that lies about itself.
+        suffix = ".mp4" if task.input_path.suffix.lower() in (".mp4", ".m4v") else ".mkv"
+        destination = task.output_dir / f"{task.output_filename}{suffix}"
         try:
             # The destination's parent, not the output directory. An extra's
             # filename is 'Other/Extra 1', so the two differ by exactly the
@@ -1151,7 +1154,15 @@ class EncoderWorker(threading.Thread):
             # HandBrake's own path has created it since extras existed; this
             # one never did, so turning transcoding off broke them.
             destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.move(str(task.input_path), str(destination))
+            if task.input_path.is_symlink():
+                # A file imported where it lies (adr.imports) is a link to
+                # somebody's original. Moving the link would put a link in
+                # the library, pointing at a file that is not the library's
+                # to keep — so the bytes are copied, and the original stays.
+                shutil.copy2(str(task.input_path), str(destination))
+                task.input_path.unlink()
+            else:
+                shutil.move(str(task.input_path), str(destination))
         except (OSError, shutil.Error) as exc:
             result.error = f"Could not move {task.input_path.name} into place: {exc}"
             logger.error("Passthrough failed for job %s: %s", task.job_id, exc)

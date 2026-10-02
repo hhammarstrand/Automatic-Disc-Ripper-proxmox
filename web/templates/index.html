@@ -389,6 +389,11 @@
                                 the library — the same as a disc.
                             </small>
                         </label>
+                        <!-- Usually the film is already on the share, and sending it
+                             to a laptop and back is two copies of nothing. -->
+                        <button type="button" class="btn btn-outline-info w-100 mt-2" onclick="openBrowser()">
+                            <i class="bi bi-hdd-network me-1"></i>Pick from the share
+                        </button>
                         <input type="file" id="uploadInput" class="d-none" multiple
                                accept=".iso,.mkv,.mp4,.m4v,.mov,.avi,.ts,.m2ts,.mts,.mpg,.mpeg,.vob,.webm,.wmv">
                         <div id="uploadList" class="mt-2"></div>
@@ -512,5 +517,30 @@
         </div>
     </div>
 
+</div>
+
+<!-- Files on the share, picked where they lie -->
+<div class="modal fade" id="browseModal" tabindex="-1" aria-labelledby="browseTitle" aria-hidden="true">
+    <div class="modal-dialog modal-dialog-scrollable modal-lg modal-fullscreen-md-down">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title" id="browseTitle"><i class="bi bi-hdd-network me-2"></i>Pick from the share</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body p-0">
+                <div class="d-flex align-items-center gap-2 px-3 py-2 border-bottom adr-browse-bar">
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="browseUp" onclick="browseUp()" title="Up one folder">
+                        <i class="bi bi-arrow-up"></i>
+                    </button>
+                    <code class="text-truncate small" id="browsePath">—</code>
+                </div>
+                <div class="list-group list-group-flush" id="browseList"></div>
+                <p class="small text-secondary px-3 py-2 mb-0">
+                    The file is read where it lies and never moved, renamed or
+                    deleted — the finished film is a new file in the library.
+                </p>
+            </div>
+        </div>
+    </div>
 </div>
 {% endblock %}
