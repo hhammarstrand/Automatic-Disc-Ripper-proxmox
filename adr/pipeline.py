@@ -2159,7 +2159,11 @@ class DrivePipeline:
 
     def _run_audio_cd(self, job, session, disc) -> None:
         """Rip an audio CD: identify at MusicBrainz, extract, encode, tag."""
-        if not self._config.audio_cd_enabled:
+        from adr import audiobook
+
+        # Audiobook mode was switched on by hand for exactly these discs, so
+        # it is not overruled by the switch for music CDs.
+        if not self._config.audio_cd_enabled and not audiobook.is_active(self._config):
             self._refuse(job, session, (
                 "This is an audio CD, and audio CD ripping is turned off under "
                 "Settings. The disc was left alone."
@@ -2177,6 +2181,9 @@ class DrivePipeline:
         log = JobLog(self._config, job.id)
         album = musicbrainz.lookup(toc)
         log.append("detect", f"MusicBrainz: {album.display}")
+        if audiobook.is_active(self._config) or album.is_audiobook:
+            self._run_audiobook_disc(job, session, toc, album, log)
+            return
         if album.identified:
             job.title = f"{album.artist} — {album.album}" if album.artist else album.album
             job.year = album.year
@@ -2278,6 +2285,101 @@ class DrivePipeline:
 
         self._release(log)
         Notifier(self._config).job_done(job, str(result.output_dir or ""))
+
+    def _run_audiobook_disc(self, job, session, toc, album, log) -> None:
+        """One disc of an audiobook: ripped losslessly into the book's folder.
+
+        Nothing is published per disc. The book is joined into one M4B once
+        every disc is in — known when MusicBrainz says how many the box has —
+        or when someone presses Finish.
+        """
+        from adr import audiobook
+
+        config = self._config
+        if not audiobook.is_active(config):
+            audiobook.start(
+                config, author=album.artist, title=album.album, year=album.year,
+                discs_total=album.disc_count, release_id=album.release_id,
+            )
+            log.append("detect", (
+                f"MusicBrainz files this as an audiobook, so audiobook mode is "
+                f"now on for {album.album}. Feed the rest of the discs."
+            ))
+        book = audiobook.state(config)
+        same_release = bool(album.release_id) and album.release_id == book["release_id"]
+        number = audiobook.claim_disc(config, album.disc_position if same_release else None)
+        if same_release:
+            with contextlib.suppress(Exception):
+                audiobook.fetch_cover(album.release_id, audiobook.work_dir(config) / "cover.jpg")
+
+        job.title = f"{book['author']} — {book['title']}" if book["author"] else book["title"]
+        job.content_type = "audiobook"
+        job.disc_label = job.disc_label or f"Disc {number}"
+        session.commit()
+        if _cancelled(session, job):
+            audiobook.release_disc(config, number)
+            log.append("rip", "Cancelled before the rip started.")
+            return
+        job.status = JobStatus.RIPPING
+        session.commit()
+        log.append("rip", f"Disc {number}"
+                   + (f" of {book['discs_total']}" if book["discs_total"] else "")
+                   + f" of {book['title']}.")
+
+        ripper = AudioCDRipper(config, process_registry=process_registry)
+        ripper.log_sink = log.sink("rip")
+        cancel_check = {"at": 0.0, "value": False}
+
+        def _book_cancelled() -> bool:
+            now = time.time()
+            if now - cancel_check["at"] >= 2.0:
+                cancel_check["at"] = now
+                cancel_check["value"] = process_registry.is_cancelled(job.id)
+            return cancel_check["value"]
+
+        try:
+            result = ripper.rip(
+                device=self.drive, job_id=job.id, toc=toc, album=album,
+                output_root=config.music_path,
+                progress_callback=_progress_committer(job, session, "ripping"),
+                should_cancel=_book_cancelled,
+                into=audiobook.disc_dir(config, number), extension="flac",
+            )
+        finally:
+            ripper.log_sink = None
+
+        if _cancelled(session, job):
+            audiobook.release_disc(config, number)
+            log.append("rip", "Cancelled while ripping the disc.")
+            return
+        if not result.success:
+            audiobook.release_disc(config, number)
+            job.status = JobStatus.ERROR
+            job.error_message = result.error
+            job.completed_at = utcnow()
+            session.commit()
+            log.append("rip", f"Disc {number} failed: {result.error}")
+            Notifier(config).job_failed(job)
+            return
+
+        job.progress_rip = job.progress_encode = 1.0
+        job.output_path = str(audiobook.disc_dir(config, number))
+        job.status = JobStatus.DONE
+        job.rip_completed_at = job.completed_at = utcnow()
+        job.error_message = result.error
+        session.commit()
+        self._release(log)
+
+        if audiobook.complete(config):
+            build = audiobook.finish(config)
+            log.append("done", f"Every disc is in. The book is being built as job #{build}.")
+        else:
+            book = audiobook.state(config)
+            left = (f"{len(book['discs_done'])} of {book['discs_total']} discs in."
+                    if book["discs_total"] else
+                    f"{len(book['discs_done'])} disc(s) in; press Finish book after the last.")
+            log.append("done", f"Disc {number} ripped. {left}")
+            Notifier(config).job_done(job, job.output_path)
 
     def _run_data_disc(self, job, session, disc) -> None:
         """Back a data disc up as an ISO image."""

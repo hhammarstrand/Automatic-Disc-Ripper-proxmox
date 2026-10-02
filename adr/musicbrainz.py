@@ -19,6 +19,7 @@ up filed under its disc ID instead of an artist and album.
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import logging
 from dataclasses import dataclass, field
@@ -100,6 +101,15 @@ class AlbumInfo:
     album: str = ""
     year: int | None = None
     tracks: list[AlbumTrack] = field(default_factory=list)
+    #: The release's MusicBrainz id, for its cover art.
+    release_id: str = ""
+    #: Which disc of the release this is, and how many it has. A box of
+    #: fifteen audiobook CDs goes into the drive in whatever order it comes
+    #: out of the box; this is the order it belongs in.
+    disc_position: int | None = None
+    disc_count: int | None = None
+    #: MusicBrainz files the release group as an audiobook.
+    is_audiobook: bool = False
 
     @property
     def identified(self) -> bool:
@@ -134,7 +144,7 @@ def lookup(toc: Toc, timeout: int = LOOKUP_TIMEOUT) -> AlbumInfo:
     try:
         response = requests.get(
             MUSICBRAINZ_URL.format(discid=disc_id),
-            params={"fmt": "json", "inc": "artists+recordings"},
+            params={"fmt": "json", "inc": "artists+recordings+release-groups"},
             headers={"User-Agent": USER_AGENT},
             timeout=timeout,
         )
@@ -183,6 +193,21 @@ def _parse(payload: dict, disc_id: str) -> AlbumInfo | None:
         info.year = int(date[:4])
 
     info.tracks = _tracks(release.get("media"), disc_id)
+    info.release_id = str(release.get("id") or "")
+    group = release.get("release-group") or {}
+    secondary = group.get("secondary-types") if isinstance(group, dict) else None
+    info.is_audiobook = isinstance(secondary, list) and any(
+        str(t).lower() in ("audiobook", "audio drama", "spokenword") for t in secondary)
+    media = release.get("media")
+    if isinstance(media, list) and media:
+        info.disc_count = len(media)
+        for medium in media:
+            discs = medium.get("discs") if isinstance(medium, dict) else None
+            if isinstance(discs, list) and any(
+                    isinstance(d, dict) and d.get("id") == disc_id for d in discs):
+                with contextlib.suppress(TypeError, ValueError):
+                    info.disc_position = int(medium.get("position"))
+                break
     return info if info.album else None
 
 

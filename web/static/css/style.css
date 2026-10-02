@@ -1559,3 +1559,5 @@ input, select, textarea, .list-group-item-action {
     text-align: left;
     min-width: 0;
 }
+
+.adr-modebuttons .btn { white-space: nowrap; }

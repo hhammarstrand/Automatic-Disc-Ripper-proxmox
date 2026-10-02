@@ -19,6 +19,7 @@ identified, and goes where a disc of the same film would go.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import queue
 import re
@@ -323,7 +324,24 @@ def list_dir(config, raw: str) -> dict:
         "parent": str(parent) if parent and resolve_inside(config, str(parent)) else None,
         "dirs": dirs,
         "files": files,
+        "audio_files": _audio_count(path),
     }
+
+
+def _audio_count(path: Path) -> int:
+    """Audio files here and one folder down — CD1/, CD2/ inside a book."""
+    from adr.audiobook import AUDIO_EXTENSIONS
+
+    count = 0
+    with contextlib.suppress(OSError):
+        for entry in path.iterdir():
+            if entry.is_file() and entry.suffix.lower() in AUDIO_EXTENSIONS:
+                count += 1
+            elif entry.is_dir() and not entry.name.startswith("."):
+                with contextlib.suppress(OSError):
+                    count += sum(1 for f in entry.iterdir()
+                                 if f.is_file() and f.suffix.lower() in AUDIO_EXTENSIONS)
+    return count
 
 
 def import_in_place(config, raw: str, worker: "ImportWorker") -> int:

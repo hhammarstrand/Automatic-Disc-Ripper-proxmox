@@ -501,6 +501,27 @@
                     <div class="form-text">Empty uses the folder shown.</div>
                 </div>
             </div>
+            <!-- Audiobooks: a box of CDs, or a folder from the share, made
+                 into one M4B with chapters for Audiobookshelf. -->
+            <h6 class="mt-2"><i class="bi bi-book-half me-1"></i>Audiobooks</h6>
+            <div class="row">
+                <div class="col-md-8 mb-3">
+                    <label class="form-label">Where audiobooks go</label>
+                    <input type="text" class="form-control" name="audiobook_path"
+                           value="{{ config.audiobook_path or '' }}"
+                           placeholder="{{ config.completed_path }}/Audiobooks">
+                    <div class="form-text">Point Audiobookshelf's library here. Books land as Author/Title/Title.m4b.</div>
+                </div>
+                <div class="col-md-4 mb-3">
+                    <label class="form-label">Bitrate</label>
+                    <select class="form-select" name="audiobook_bitrate">
+                        {% for rate in ['32k', '48k', '64k', '96k', '128k'] %}
+                        <option value="{{ rate }}" {% if (config.audiobook_bitrate or '64k') == rate %}selected{% endif %}>{{ rate }}{% if rate == '64k' %} (speech){% endif %}</option>
+                        {% endfor %}
+                    </select>
+                    <div class="form-text">AAC. 64k is plenty for a voice.</div>
+                </div>
+            </div>
         </div>
     </div>
     <!-- Data discs -->

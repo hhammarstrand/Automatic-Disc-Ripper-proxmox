@@ -61,12 +61,21 @@
             <h5 class="mb-0 text-nowrap"><i class="bi bi-hdd me-2"></i>Optical Drives</h5>
             <!-- Right here is where you stand when nothing is happening and you
                  cannot tell whether the drive is the problem. -->
-            <span class="d-flex gap-2">
+            <!-- Wraps as whole buttons: three labels squeezed onto one 390px
+                 row broke inside each button instead. -->
+            <span class="d-flex gap-2 flex-wrap adr-modebuttons">
                 {% if not (series_mode and series_mode.active) %}
                 <!-- For working through a box set: set the show once, then feed
                      discs. The episode number carries across them. -->
                 <button class="btn btn-sm btn-outline-info" onclick="startSeriesMode()">
                     <i class="bi bi-collection-play me-1"></i>Rip a TV series
+                </button>
+                {% endif %}
+                {% if not (audiobook_mode and audiobook_mode.active) %}
+                <!-- A box of audiobook CDs: name the book once, then feed the
+                     discs; they become one M4B with chapters. -->
+                <button class="btn btn-sm btn-outline-info" onclick="openAudiobook()">
+                    <i class="bi bi-book-half me-1"></i>Rip an audiobook
                 </button>
                 {% endif %}
                 <a class="btn btn-sm btn-outline-secondary" href="/doctor">
@@ -519,6 +528,52 @@
 
 </div>
 
+<!-- Start an audiobook -->
+<div class="modal fade" id="audiobookModal" tabindex="-1" aria-labelledby="audiobookTitle" aria-hidden="true">
+    <div class="modal-dialog modal-fullscreen-md-down">
+        <form class="modal-content" onsubmit="saveAudiobook(event)">
+            <div class="modal-header">
+                <h5 class="modal-title" id="audiobookTitle"><i class="bi bi-book-half me-2"></i>Rip an audiobook</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body">
+                <p class="small text-secondary">
+                    Every audio CD from now on is a disc of this book. Each is ripped
+                    losslessly; when the last one is in, they are joined into one M4B
+                    with a chapter per track, in <code>Author/Title/</code> for
+                    Audiobookshelf. A box MusicBrainz knows starts this on its own.
+                </p>
+                <div class="mb-3">
+                    <label class="form-label" for="abTitle">Title</label>
+                    <input class="form-control" id="abTitle" required>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label" for="abAuthor">Author</label>
+                    <input class="form-control" id="abAuthor">
+                </div>
+                <div class="row g-3">
+                    <div class="col-12 col-sm-6">
+                        <label class="form-label" for="abNarrator">Narrator <span class="text-secondary">(optional)</span></label>
+                        <input class="form-control" id="abNarrator">
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <label class="form-label" for="abYear">Year</label>
+                        <input class="form-control" id="abYear" inputmode="numeric" pattern="\d{4}">
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <label class="form-label" for="abDiscs">Discs</label>
+                        <input class="form-control" id="abDiscs" inputmode="numeric" pattern="\d{1,3}">
+                    </div>
+                </div>
+                <div class="form-text">With the number of discs, the book is built on its own after the last one; without it, press Finish book.</div>
+            </div>
+            <div class="modal-footer">
+                <button type="submit" class="btn btn-primary"><i class="bi bi-play-fill me-1"></i>Start</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <!-- Files on the share, picked where they lie -->
 <div class="modal fade" id="browseModal" tabindex="-1" aria-labelledby="browseTitle" aria-hidden="true">
     <div class="modal-dialog modal-dialog-scrollable modal-lg modal-fullscreen-md-down">
@@ -534,6 +589,7 @@
                     </button>
                     <code class="text-truncate small" id="browsePath">—</code>
                 </div>
+                <div id="browseBook" class="px-3 pt-2"></div>
                 <div class="list-group list-group-flush" id="browseList"></div>
                 <p class="small text-secondary px-3 py-2 mb-0">
                     The file is read where it lies and never moved, renamed or

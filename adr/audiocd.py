@@ -126,6 +126,8 @@ class AudioCDRipper:
         output_root: Path,
         progress_callback: Callable[[dict], None] | None = None,
         should_cancel: Callable[[], bool] | None = None,
+        into: Path | None = None,
+        extension: str | None = None,
     ) -> AudioRipResult:
         """Rip every audio track on *toc* into *output_root*.
 
@@ -148,7 +150,9 @@ class AudioCDRipper:
             result.error = "The disc's table of contents lists no audio tracks."
             return result
 
-        extension = self._config.audio_cd_format
+        # A disc of an audiobook goes into the book's working folder, always
+        # losslessly: it is an intermediate, encoded once more into the M4B.
+        extension = extension or self._config.audio_cd_format
         if extension not in SUPPORTED_FORMATS:
             result.error = (
                 f"audio_cd_format is '{extension}'; it must be one of "
@@ -156,7 +160,7 @@ class AudioCDRipper:
             )
             return result
 
-        output_dir = output_root / album_folder(album)
+        output_dir = into or (output_root / album_folder(album))
         scratch = self._config.raw_path / f"{job_id}-audio"
         try:
             output_dir.mkdir(parents=True, exist_ok=True)
@@ -212,6 +216,7 @@ class AudioCDRipper:
                 )
                 encoded = self._encode(
                     wav, output_dir, track.number, title, album, total, job_id,
+                    extension=extension,
                 )
                 if encoded is None:
                     result.failed_tracks.append(track.number)
@@ -297,9 +302,10 @@ class AudioCDRipper:
         album: AlbumInfo,
         total: int,
         job_id: int | None = None,
+        extension: str | None = None,
     ) -> Path | None:
         """Encode one WAV to the configured format with tags. Path on success."""
-        extension = self._config.audio_cd_format
+        extension = extension or self._config.audio_cd_format
         destination = output_dir / track_filename(number, title, extension)
 
         cmd = [self._config.ffmpeg_path, "-hide_banner", "-loglevel", "error", "-y", "-i", str(wav)]

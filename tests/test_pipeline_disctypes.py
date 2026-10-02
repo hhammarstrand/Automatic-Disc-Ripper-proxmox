@@ -549,3 +549,84 @@ class TestCancelIsNotOverwritten:
 
         source = inspect.getsource(DrivePipeline._run_pipeline)
         assert source.count("_cancelled(session, job)") >= 2
+
+
+# ------------------------------------------------------------------ #
+# Audiobook discs
+# ------------------------------------------------------------------ #
+
+class TestAudiobookDisc:
+    def _box(self, position):
+        return AlbumInfo(disc_id=f"d{position}", artist="Astrid Lindgren",
+                         album="Mio, min Mio", year=2004, release_id="rel-1",
+                         disc_position=position, disc_count=2, is_audiobook=True)
+
+    def _rip_into_book(self, monkeypatch, calls):
+        def fake(self, **kw):
+            calls.append(kw)
+            into = kw["into"]
+            into.mkdir(parents=True, exist_ok=True)
+            track = into / "01 - Track 01.flac"
+            track.write_bytes(b"x")
+            return _audio_result(True, [track], into)
+        monkeypatch.setattr(pipeline_mod.AudioCDRipper, "rip", fake)
+
+    def test_a_box_musicbrainz_knows_starts_the_mode_and_files_by_position(
+            self, drive, config, monkeypatch, no_notifications):
+        from adr import audiobook
+
+        monkeypatch.setattr(pipeline_mod.musicbrainz, "lookup", lambda toc: self._box(2))
+        monkeypatch.setattr(audiobook, "fetch_cover", lambda *a: False)
+        calls = []
+        self._rip_into_book(monkeypatch, calls)
+
+        session = get_session()
+        try:
+            job = _fresh_job(session)
+            drive._run_audio_cd(job, session, _audio_disc())
+            session.refresh(job)
+            assert job.status == JobStatus.DONE
+            assert job.content_type == "audiobook"
+        finally:
+            session.close()
+
+        state = audiobook.state(config)
+        assert state["active"] and state["title"] == "Mio, min Mio"
+        assert state["discs_done"] == [2], "disc two of the box, whatever order it came in"
+        assert calls[0]["extension"] == "flac"
+        assert calls[0]["into"] == audiobook.disc_dir(config, 2)
+
+    def test_the_last_disc_builds_the_book(self, drive, config, monkeypatch, no_notifications):
+        from adr import audiobook
+
+        built = []
+        monkeypatch.setattr(audiobook, "finish", lambda cfg: built.append(True) or 99)
+        monkeypatch.setattr(audiobook, "fetch_cover", lambda *a: False)
+        self._rip_into_book(monkeypatch, [])
+        for position in (1, 2):
+            monkeypatch.setattr(pipeline_mod.musicbrainz, "lookup",
+                                lambda toc, p=position: self._box(p))
+            session = get_session()
+            try:
+                drive._run_audio_cd(_fresh_job(session), session, _audio_disc())
+            finally:
+                session.close()
+        assert built == [True]
+
+    def test_music_cds_are_untouched_when_the_mode_is_off(
+            self, drive, config, monkeypatch, no_notifications):
+        from adr import audiobook
+
+        monkeypatch.setattr(pipeline_mod.musicbrainz, "lookup",
+                            lambda toc: AlbumInfo(disc_id="d", artist="Kent", album="Isola"))
+        calls = []
+        self._rip_into_book(monkeypatch, calls)
+        monkeypatch.setattr(pipeline_mod.AudioCDRipper, "rip",
+                            lambda self, **kw: calls.append(kw) or _audio_result(False, [], None))
+        session = get_session()
+        try:
+            drive._run_audio_cd(_fresh_job(session), session, _audio_disc())
+        finally:
+            session.close()
+        assert "into" not in calls[0] or calls[0]["into"] is None
+        assert not audiobook.is_active(config)

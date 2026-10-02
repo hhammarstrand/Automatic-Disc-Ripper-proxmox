@@ -285,7 +285,7 @@ def create_app(config: Config, pipeline_manager=None) -> Flask:
     # Make LAN IP available in all templates
     @app.context_processor
     def inject_globals():
-        from adr import __version__, seriesmode
+        from adr import __version__, audiobook, seriesmode
 
         return {
             "lan_ip": get_lan_ip(),
@@ -295,6 +295,7 @@ def create_app(config: Config, pipeline_manager=None) -> Flask:
             # wherever the user happens to be looking, not only where it was
             # turned on.
             "series_mode": seriesmode.state(_config) if _config else {"active": False},
+            "audiobook_mode": audiobook.state(_config) if _config else {"active": False},
         }
 
     return app
@@ -1061,6 +1062,56 @@ def _register_api_routes(app: Flask) -> None:
         except (TypeError, ValueError) as exc:
             return fail(str(exc), 400)
         return jsonify(result)
+
+    @app.route("/api/audiobook", methods=["GET", "POST"])
+    def api_audiobook():
+        """Read, start or stop audiobook mode.
+
+        POST ``active: true`` with a title (and author, narrator, year, how
+        many discs) starts it; ``active: false`` stops it, and with
+        ``discard: true`` throws away the discs ripped so far.
+        """
+        from adr import audiobook
+
+        if request.method == "GET":
+            return jsonify(audiobook.state(_config))
+        data = request.get_json(silent=True) or {}
+        if not data.get("active"):
+            return jsonify(audiobook.stop(_config, discard=bool(data.get("discard"))))
+        try:
+            return jsonify(audiobook.start(
+                _config,
+                author=str(data.get("author", "")),
+                title=str(data.get("title", "")),
+                narrator=str(data.get("narrator", "")),
+                year=int(data["year"]) if str(data.get("year") or "").isdigit() else None,
+                discs_total=int(data["discs_total"]) if str(data.get("discs_total") or "").isdigit() else None,
+            ))
+        except ValueError as exc:
+            return fail(str(exc), 400)
+
+    @app.route("/api/audiobook/finish", methods=["POST"])
+    def api_audiobook_finish():
+        """Join the discs ripped so far into the book, now."""
+        from adr import audiobook
+
+        try:
+            return jsonify({"ok": True, "job_id": audiobook.finish(_config)})
+        except ValueError as exc:
+            return fail(str(exc), 400)
+
+    @app.route("/api/audiobook/import", methods=["POST"])
+    def api_audiobook_import():
+        """Make a book of a folder of audio files on the share, where it lies."""
+        from adr import audiobook, imports
+
+        path = imports.resolve_inside(_config, str((request.get_json(silent=True) or {}).get("path", "")))
+        if path is None or not path.exists():
+            return fail("That folder is not one this app can read.", 400)
+        try:
+            return jsonify({"ok": True, "job_id": audiobook.import_folder(_config, path)})
+        except ValueError as exc:
+            return fail(str(exc), 400)
 
     @app.route("/api/series-mode/next-episode", methods=["POST"])
     def api_series_mode_next_episode():
@@ -2247,6 +2298,7 @@ def _register_api_routes(app: Flask) -> None:
         "require_completed_mount", "stage_locally", "staging_path",
         "audio_cd_enabled", "audio_cd_format", "audio_cd_mp3_bitrate",
         "music_path", "cdparanoia_path", "ffmpeg_path",
+        "audiobook_path", "audiobook_bitrate",
         "data_disc_enabled", "data_disc_path",
     })
 

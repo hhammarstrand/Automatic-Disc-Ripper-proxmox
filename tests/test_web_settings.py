@@ -18,7 +18,12 @@ from web.app import create_app
 #: Series mode has its own endpoints — it is a mode you switch on with state
 #: that advances by itself, not a form field — so it is deliberately not part
 #: of the settings form.
-SERIES_MODE_KEYS = {k for k in _DEFAULTS if k.startswith("series_mode")}
+# The sticky modes are state, changed through their own endpoints
+# (/api/series-mode, /api/audiobook), not settings someone saves from a form.
+SERIES_MODE_KEYS = {k for k in _DEFAULTS if k.startswith("series_mode")} | {
+    k for k in _DEFAULTS
+    if k.startswith("audiobook_") and k not in ("audiobook_path", "audiobook_bitrate")
+}
 
 
 def _allowed_keys() -> set[str]:

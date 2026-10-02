@@ -147,6 +147,33 @@
     </div>
     {% endif %}
 
+    <!-- Audiobook mode banner: every audio CD is a disc of this book until
+         it is finished or turned off, so it is said on every page. -->
+    {% if audiobook_mode and audiobook_mode.active %}
+    <div class="alert alert-info rounded-0 mb-0 py-2">
+        <div class="container-fluid d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <span>
+                <i class="bi bi-book-half me-2"></i>
+                <strong>Audiobook mode</strong> — every audio CD is a disc of
+                <strong>{{ audiobook_mode.title }}</strong>{% if audiobook_mode.author %} by {{ audiobook_mode.author }}{% endif %}.
+                <span class="text-secondary">
+                    {{ audiobook_mode.discs_done | length }}{% if audiobook_mode.discs_total %} of {{ audiobook_mode.discs_total }}{% endif %} disc(s) in{% if audiobook_mode.discs_done %}: {{ audiobook_mode.discs_done | join(', ') }}{% endif %}.
+                </span>
+            </span>
+            <span class="d-flex gap-2">
+                <button class="btn btn-sm btn-dark" onclick="finishAudiobook()"
+                        {% if not audiobook_mode.discs_done %}disabled{% endif %}
+                        title="Join the discs ripped so far into one M4B">
+                    <i class="bi bi-check2-circle me-1"></i>Finish book
+                </button>
+                <button class="btn btn-sm btn-outline-dark" onclick="stopAudiobook()">
+                    <i class="bi bi-x-circle me-1"></i>Cancel book
+                </button>
+            </span>
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Main content -->
     <main class="container-fluid py-4">
         {% block content %}{% endblock %}

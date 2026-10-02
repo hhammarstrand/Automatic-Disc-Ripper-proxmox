@@ -1,5 +1,31 @@
 # Changelog
 
+## 1.54.0
+
+**Audiobooks.** An audiobook is one long work cut into a few hundred CD-sized
+pieces across ten or fifteen discs, and filed as music it became fifteen
+albums nobody wants to see separately. Now it becomes one M4B with a chapter
+per track, in `Author/Title/Title.m4b` — the layout Audiobookshelf reads, with
+the author in the artist tags and the narrator in composer, where Audiobookshelf
+looks for them.
+
+* **A box of CDs.** *Rip an audiobook* on the dashboard names the book once;
+  every audio CD after that is a disc of it, ripped losslessly into a working
+  folder, with a banner on every page saying so. A box MusicBrainz knows as an
+  audiobook starts the mode on its own, files each disc by its real position
+  in the box rather than the order it came out in, fetches the cover, and
+  builds the book by itself after the last disc. Otherwise *Finish book* does.
+  A disc that fails is un-counted, so it can simply go in again.
+* **A folder on the share.** The share browser offers *Make an audiobook of
+  this folder* wherever there are audio files — directly, or in `CD1/`, `CD2/`
+  beneath. Author and title come from the files' tags, or from the folder's
+  name. The originals stay where they are.
+
+Books are built on local disk and copied into the library once, under a name
+no player reads until it is whole; an existing book of the same name is never
+overwritten. Speech is AAC at 64k by default — Settings → Discs has the
+library folder and the bitrate.
+
 ## 1.53.0
 
 **Pick a film from the share instead of uploading it.** Most of the time the

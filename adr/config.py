@@ -130,6 +130,19 @@ _DEFAULTS: dict[str, Any] = {
     "series_mode_season": 1,
     "series_mode_next_episode": 1,
     "series_mode_discs": 0,
+    # Audiobooks (adr.audiobook): where finished M4Bs go — empty means an
+    # Audiobooks folder beside the films — how hard to compress speech, and
+    # the sticky "every audio CD is this book" mode.
+    "audiobook_path": "",
+    "audiobook_bitrate": "64k",
+    "audiobook_mode": False,
+    "audiobook_author": "",
+    "audiobook_title": "",
+    "audiobook_narrator": "",
+    "audiobook_year": None,
+    "audiobook_discs_total": None,
+    "audiobook_discs_done": [],
+    "audiobook_release_id": "",
     "auto_move_to_plex": True,
     "drive_labels": {},
     # Notifications. The pipeline is meant to be unattended, so "it failed

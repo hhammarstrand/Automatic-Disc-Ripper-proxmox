@@ -163,6 +163,10 @@ RULES = {
     "plex_path": _path_or_empty,
     "tv_path": _path_or_empty,
     "music_path": _path_or_empty,
+    "audiobook_path": _path_or_empty,
+    # Speech: 64k AAC is transparent for a voice; music-grade rates only make
+    # a fifteen-hour book four times the size.
+    "audiobook_bitrate": lambda v: _one_of(v, ("32k", "48k", "64k", "96k", "128k")),
     "data_disc_path": _path_or_empty,
     "watch_path": _path_or_empty,
     "watch_output_path": _path_or_empty,

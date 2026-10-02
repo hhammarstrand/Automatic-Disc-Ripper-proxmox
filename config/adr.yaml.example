@@ -88,6 +88,16 @@ series_mode_discs: 0
 audio_cd_enabled: true
 audio_cd_format: flac                       # flac | mp3
 audio_cd_mp3_bitrate: 320k
+audiobook_path: ''                          # empty: an Audiobooks folder beside the films
+audiobook_bitrate: 64k                      # 32k | 48k | 64k | 96k | 128k
+audiobook_mode: false
+audiobook_author: ''
+audiobook_title: ''
+audiobook_narrator: ''
+audiobook_year: null
+audiobook_discs_total: null
+audiobook_discs_done: []
+audiobook_release_id: ''
 data_disc_enabled: true
 
 # --------------------------------------------------------------------------

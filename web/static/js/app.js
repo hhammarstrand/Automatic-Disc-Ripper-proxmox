@@ -1942,6 +1942,18 @@ function renderBrowse(d) {
     list.innerHTML = rows.join('') || '<div class="list-group-item text-secondary small">'
         + 'No folders here, and no ISO or video files.</div>';
 
+    // A folder of MP3s or M4As — or of CD1/, CD2/ holding them — is a book.
+    const book = document.getElementById('browseBook');
+    if (book) {
+        book.innerHTML = (!atRoots && d.audio_files)
+            ? `<button type="button" class="btn btn-sm btn-outline-info w-100 mb-2" id="browseBookBtn">
+                 <i class="bi bi-book-half me-1"></i>Make an audiobook of this folder (${d.audio_files} files)
+               </button>`
+            : '';
+        const btn = document.getElementById('browseBookBtn');
+        if (btn) btn.addEventListener('click', () => importAudiobook(d.path, btn));
+    }
+
     list.querySelectorAll('[data-dir]').forEach(el =>
         el.addEventListener('click', () => browseTo(el.dataset.dir)));
     list.querySelectorAll('[data-file]').forEach(el =>
@@ -1965,4 +1977,69 @@ function importFromShare(path, name, row) {
             row.disabled = false;
             notify(err.message, 'danger');
         });
+}
+
+
+// ------------------------------------------------------------------ //
+// Audiobooks
+// ------------------------------------------------------------------ //
+
+function postJson(url, body) {
+    return fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+    }).then(r => r.json().then(data => {
+        if (!r.ok) throw new Error(reasonFrom(data));
+        return data;
+    }));
+}
+
+function openAudiobook() {
+    bootstrap.Modal.getOrCreateInstance(document.getElementById('audiobookModal')).show();
+}
+
+function saveAudiobook(event) {
+    event.preventDefault();
+    const value = id => document.getElementById(id).value.trim();
+    postJson('/api/audiobook', {
+        active: true,
+        title: value('abTitle'),
+        author: value('abAuthor'),
+        narrator: value('abNarrator'),
+        year: value('abYear'),
+        discs_total: value('abDiscs'),
+    })
+        .then(() => {
+            bootstrap.Modal.getInstance(document.getElementById('audiobookModal')).hide();
+            location.reload();
+        })
+        .catch(err => notify(err.message, 'danger'));
+}
+
+function finishAudiobook() {
+    postJson('/api/audiobook/finish')
+        .then(d => { notify(`Building the book as job #${d.job_id}`, 'success'); setTimeout(() => location.reload(), 800); })
+        .catch(err => notify(err.message, 'danger'));
+}
+
+function stopAudiobook() {
+    confirmAction({
+        title: 'Cancel this book?',
+        body: 'Audiobook mode turns off, and the discs ripped for this book so far are thrown away.',
+        confirmLabel: 'Cancel book',
+        danger: true,
+    }).then(yes => {
+        if (!yes) return;
+        postJson('/api/audiobook', { active: false, discard: true })
+            .then(() => location.reload())
+            .catch(err => notify(err.message, 'danger'));
+    });
+}
+
+function importAudiobook(path, btn) {
+    btn.disabled = true;
+    postJson('/api/audiobook/import', { path })
+        .then(d => notify(`Building the book as job #${d.job_id}`, 'success'))
+        .catch(err => { btn.disabled = false; notify(err.message, 'danger'); });
 }
