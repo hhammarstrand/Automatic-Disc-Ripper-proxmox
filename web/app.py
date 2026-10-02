@@ -19,6 +19,7 @@ from flask import (
     send_file,
     send_from_directory,
 )
+from sqlalchemy import func
 from sqlalchemy.exc import SQLAlchemyError
 
 from adr import joblog
@@ -320,7 +321,9 @@ def _register_ui_routes(app: Flask) -> None:
             recent_jobs = (
                 session.query(Job)
                 .filter(Job.status.in_(TERMINAL_STATUSES))
-                .order_by(Job.completed_at.desc())
+                # A job that failed before it finished has no completed_at,
+                # and NULL sorted it to the bottom however recent it was.
+                .order_by(func.coalesce(Job.completed_at, Job.started_at).desc())
                 .limit(10)
                 .all()
             )
@@ -351,6 +354,16 @@ def _register_ui_routes(app: Flask) -> None:
                         "disabled": False,
                         "auto_eject": _config.should_eject(drive_letter),
                     })
+
+            # The job cards in the order of the drive rows above them: a disc
+            # being ripped belongs next to its drive, and the newest-first
+            # order put External's above Internal's. Encodes, which no longer
+            # hold a drive, follow, newest first.
+            drive_order = {d["letter"]: i for i, d in enumerate(drives)}
+            active_jobs.sort(key=lambda j: (
+                j.status not in RIP_PHASE_STATUSES,
+                drive_order.get(j.drive, len(drive_order)) if j.status in RIP_PHASE_STATUSES else 0,
+            ))
 
             return render_template(
                 "index.html",

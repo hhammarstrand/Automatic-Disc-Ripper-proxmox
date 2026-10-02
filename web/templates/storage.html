@@ -112,7 +112,7 @@
       <div class="position-relative">
         <pre id="commandText" style="background:#0d1117;border:1px solid var(--adr-border);border-radius:6px;padding:1rem;white-space:pre-wrap;word-break:break-all;color:#79c0ff;"></pre>
         <button class="btn btn-sm btn-outline-light position-absolute top-0 end-0 m-2" onclick="copyCommand(this)">
-          <i class="bi bi-clipboard"></i> Copy
+          <i class="bi bi-clipboard me-1"></i>Copy
         </button>
       </div>
       <div class="form-text" id="uidHint"></div>
@@ -225,10 +225,34 @@ function loadStorage() {
     if (data.ctid && !document.getElementById('nasCtid').value) {
       document.getElementById('nasCtid').value = data.ctid;
     }
+    prefillFromMount(data.paths.plex || data.paths.completed);
   }).catch(err => {
     document.getElementById('storageCards').innerHTML =
       `<div class="col-12 text-danger small">Could not read storage status: ${escapeHtml(err.message)}</div>`;
   });
+}
+
+// With a share already attached, the form starts from it rather than from
+// "NFS, 192.168.1.10": re-running the setup — new password, the share moved —
+// is the usual reason to be on this page once it works.
+function prefillFromMount(d) {
+  if (!d || !d.is_network || !d.source) return;
+  const host = document.getElementById('nasHost');
+  const share = document.getElementById('nasShare');
+  if (host.value || share.value) return;            // never over somebody's typing
+  let m;
+  if (/^cifs|^smb/.test(d.fstype || '') && (m = d.source.match(/^\/\/([^/]+)\/(.+)$/))) {
+    document.getElementById('nasKind').value = 'smb';
+    host.value = m[1];
+    share.value = m[2];
+  } else if (/^nfs/.test(d.fstype || '') && (m = d.source.match(/^([^:]+):(\/.*)$/))) {
+    document.getElementById('nasKind').value = 'nfs';
+    host.value = m[1];
+    share.value = m[2];
+  } else {
+    return;
+  }
+  onKindChange();
 }
 
 function testNas() {

@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.52.0
+
+**The log says what happened again.** Opening the Doctor page wrote
+"Auto-discovered preset file" twice, and the Doctor badge in the menu polls it
+once a minute on every page — so two identical lines a minute, all day. The
+Logs page, following, logged its own reading every five seconds. A preset file
+is announced the first time it is found; the polling is not logged at all.
+
+**History on a phone says what its buttons do.** Five outlined icons — play,
+terminal, two different circular arrows and a magnifier — each have their word
+underneath now, and Delete stands apart from the rest instead of one thumb
+from Match. A job still running shows when it started rather than two dashes
+for a completion and a total it does not have yet, and a path, its Plex badge
+and its copy button read as one line instead of three loose pieces.
+
+**The job card.** On a phone the icons in Match and Cancel sat against their
+words — a flex button drops the space between them — and the Plex switch
+wrapped into the middle of the card. At desk width the controls stand at the
+edge of the instrument instead of a screen-width away across an empty field.
+Job cards follow the drive rows above them: Internal's disc first.
+
+**Smaller things.** The dashboard said "no optical drive" twice when there was
+none. "Recent Completed Jobs" also lists failures, which is what it is for, so
+it is called Recent Jobs, and a job that failed before finishing is sorted by
+when it started rather than to the bottom. The Storage form starts from the
+share already attached instead of "NFS, 192.168.1.10". The Settings tab strip
+fades at its edge so it reads as one that scrolls. The two drive tests on
+Doctor are two buttons, not a switch with the amber half selected.
+
+**Drives typed into Settings are drives.** Settings asks for "comma-separated
+device paths" and saved the string as typed, so `/dev/sr0, /dev/sr1` was
+watched as one drive by that name, which does not exist — and neither real
+drive was watched.
+
 ## 1.51.0
 
 **A missing MakeMKV key is fetched, not reported.** The free beta key the

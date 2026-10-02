@@ -21,6 +21,18 @@ from adr.utils import BYTES_PER_MB, get_bundle_root
 
 logger = logging.getLogger(__name__)
 
+# Every encoder that is built rediscovers the preset — and the Doctor page
+# builds two each time it polls, once a minute. Logged at INFO every time,
+# that was two identical lines a minute, all day, burying whatever a disc did.
+# The first discovery of each file is worth saying; the rest are DEBUG.
+_announced_presets: set[str] = set()
+
+
+def _log_discovery(message: str, path) -> None:
+    level = logging.DEBUG if str(path) in _announced_presets else logging.INFO
+    _announced_presets.add(str(path))
+    logger.log(level, message, path)
+
 
 class EncodeResult:
     """Result of a single encode operation."""
@@ -211,10 +223,10 @@ class HandBrakeEncoder:
         # Prefer a file whose stem matches the configured preset name
         for f in json_files:
             if f.stem == self._preset:
-                logger.info("Auto-discovered preset file matching preset name: %s", f)
+                _log_discovery("Auto-discovered preset file matching preset name: %s", f)
                 return str(f)
         # Fall back to the first json file found
-        logger.info("Auto-discovered preset file from presets/: %s", json_files[0])
+        _log_discovery("Auto-discovered preset file from presets/: %s", json_files[0])
         return str(json_files[0])
 
     # ------------------------------------------------------------------ #

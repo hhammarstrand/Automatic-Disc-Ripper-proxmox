@@ -105,6 +105,10 @@ def configure(config, level: str | None = None) -> Path | None:
 POLLED_PATHS = (
     "/api/system", "/api/status", "/api/preflight", "/api/jobs/active",
     "/api/drives/health", "/static/",
+    # The Doctor badge in the menu asks once a minute on every page, and the
+    # Logs page asks every five seconds while it follows — a log page whose
+    # own reading filled the log it was showing.
+    "/api/doctor", "/api/logs",
     # In-browser playback is one person watching one film and twenty-five
     # range requests. The event is worth nothing to a diagnosis and the lines
     # push everything else off the end of the file.

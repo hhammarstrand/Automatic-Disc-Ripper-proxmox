@@ -404,7 +404,19 @@ class Config:
 
     @property
     def drives(self) -> list[str] | str:
-        return self._data["drives"]
+        """"auto", or the device paths to watch.
+
+        Settings asks for "comma-separated device paths" and saves what was
+        typed, so "/dev/sr0, /dev/sr1" arrives here as one string — which was
+        then watched as a single drive called "/dev/sr0, /dev/sr1" that never
+        existed, and neither real drive was watched at all.
+        """
+        val = self._data.get("drives", "auto")
+        if isinstance(val, str):
+            if val.strip().lower() in ("", "auto"):
+                return "auto"
+            return [d.strip() for d in val.split(",") if d.strip()]
+        return [str(d) for d in val] if isinstance(val, list) else "auto"
 
     @property
     def tmdb_api_key(self) -> str:

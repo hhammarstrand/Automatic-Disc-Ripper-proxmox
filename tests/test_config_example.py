@@ -8,6 +8,7 @@ silently does nothing.
 
 from pathlib import Path
 
+import pytest
 import yaml
 
 from adr.config import _DEFAULTS
@@ -86,3 +87,21 @@ def test_the_sections_are_in_the_same_order_as_the_tabs():
         for name in ("Library", "Encoding", "Discs", "Integrations", "Advanced")
     ]
     assert order == sorted(order), "the file and the page disagree on order"
+
+
+@pytest.mark.parametrize("value, expected", [
+    ("auto", "auto"),
+    ("", "auto"),
+    ("/dev/sr0", ["/dev/sr0"]),
+    ("/dev/sr0, /dev/sr1", ["/dev/sr0", "/dev/sr1"]),
+    (["/dev/sr0", "/dev/sr1"], ["/dev/sr0", "/dev/sr1"]),
+])
+def test_drives_typed_into_settings_are_separate_drives(tmp_path, value, expected):
+    """Settings asks for comma-separated paths and saves the string as typed."""
+    import yaml
+
+    from adr.config import Config
+
+    path = tmp_path / "adr.yaml"
+    path.write_text(yaml.safe_dump({"drives": value}))
+    assert Config(str(path)).drives == expected

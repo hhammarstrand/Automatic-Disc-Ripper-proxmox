@@ -1692,8 +1692,15 @@ function refreshDriveHealth() {
     return fetch('/api/drives/health')
         .then(r => r.json())
         .then(d => {
-            if (!d.problems || d.problems.length === 0) { box.innerHTML = ''; return; }
-            box.innerHTML = d.problems.map(p =>
+            // The banner at the top already says it when no drive is usable,
+            // in the same words: the second copy, two hand-spans below, read
+            // as a second problem.
+            const banner = document.getElementById('preflightBanner');
+            const said = banner ? banner.textContent.replace(/\s+/g, ' ') : '';
+            const problems = (d.problems || [])
+                .filter(p => !said.includes(String(p).replace(/\s+/g, ' ').trim()));
+            if (problems.length === 0) { box.innerHTML = ''; return; }
+            box.innerHTML = problems.map(p =>
                 `<div class="alert alert-danger d-flex align-items-start">
                    <i class="bi bi-exclamation-octagon-fill me-2 mt-1"></i>
                    <div>${escapeHtml(p)}</div>

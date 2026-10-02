@@ -1222,6 +1222,13 @@ input, select, textarea, .list-group-item-action {
     #settingsTabs::-webkit-scrollbar {
         display: none;
     }
+    /* The half-visible tab at the edge is the affordance, but a tab cut
+       cleanly at the border reads as a strip that simply ends ("In…").
+       Fading the last 2rem says there is more of it. */
+    #settingsTabs {
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent);
+        mask-image: linear-gradient(to right, #000 calc(100% - 2rem), transparent);
+    }
     #settingsTabs .nav-link {
         white-space: nowrap;
     }
@@ -1416,9 +1423,40 @@ input, select, textarea, .list-group-item-action {
         flex-wrap: wrap;
         word-break: break-all;
     }
+    #historyTable .job-path-body { min-width: 0; flex: 1; }
+    #historyTable .job-path-body .btn { min-height: 32px; min-width: 32px; vertical-align: middle; }
     #historyTable .job-actions-cell {
         padding-top: 0.6rem;
     }
+    /* Five outlined icons in a row were five guesses: play, terminal,
+       two different circular arrows and a magnifier. Each says what it
+       does underneath, and Delete stands apart from the rest — it sat
+       one thumb-width from Match. */
+    #historyTable .job-actions-cell > div { width: 100%; }
+    #historyTable .job-actions-cell .btn {
+        flex-direction: column;
+        gap: 0.1rem;
+        min-width: 52px;
+        padding: 0.3rem 0.4rem;
+    }
+    #historyTable .adr-btnword {
+        display: block;
+        font-size: 0.6875rem;
+        line-height: 1;
+    }
+    #historyTable .adr-btn-apart { margin-left: auto; }
+
+    /* The job card's controls: Match and Cancel on the left, the Plex
+       switch on the same line at the right, rather than a column of
+       right-aligned controls that wrapped into the middle of the card. */
+    .card[data-job-id] .row > .col-auto {
+        width: 100%;
+        flex-direction: row !important;
+        justify-content: space-between;
+        align-items: center !important;
+        margin-top: 0.75rem;
+    }
+    .card[data-job-id] .row > .col-auto .form-check { margin: 0; }
     /* The empty state has no columns to be a card of. */
     #historyTable td[colspan] {
         position: static;
@@ -1468,6 +1506,15 @@ input, select, textarea, .list-group-item-action {
     .card[data-job-id] .adr-detailrow {
         max-width: 720px;
     }
+    /* And the controls stand at the instrument's edge, not the card's.
+       At the card's edge they were a screen-width from the job they
+       act on, across an empty field. */
+    .card[data-job-id] > .card-body > .row {
+        justify-content: flex-start;
+    }
+    .card[data-job-id] > .card-body > .row > .col {
+        flex: 0 1 calc(720px + 1.5rem);
+    }
 }
 
 /* Under about 360px the middle counter is the one to lose: elapsed is
@@ -1481,3 +1528,7 @@ input, select, textarea, .list-group-item-action {
     :root { --adr-dur-fast: 1ms; --adr-dur-base: 1ms; }
     .spin { animation: none !important; }
 }
+
+/* Words under icon buttons are for the phone; the table has a header and
+   tooltips at desk width. */
+.adr-btnword { display: none; }

@@ -284,11 +284,13 @@ function loadDrives() {
               <div class="small text-secondary">${escapeHtml(drv.model)}${
                 drv.has_media ? ' · disc detected' : ' · tray empty'}</div>
             </div>
-            <div class="btn-group btn-group-sm">
-              <button class="btn btn-outline-primary" onclick="testDrive('${drv.device}', false, this)">
+            <!-- Two buttons, not a button group: joined, the amber one read as
+                 the selected half of a switch rather than the quicker test. -->
+            <div class="d-flex gap-2 flex-wrap">
+              <button class="btn btn-sm btn-outline-primary" onclick="testDrive('${drv.device}', false, this)">
                 <i class="bi bi-activity me-1"></i>Test
               </button>
-              <button class="btn btn-outline-secondary" onclick="testDrive('${drv.device}', true, this)"
+              <button class="btn btn-sm btn-outline-secondary" onclick="testDrive('${drv.device}', true, this)"
                       title="Also asks MakeMKV to open the disc — takes up to five minutes">
                 <i class="bi bi-disc me-1"></i>Test with MakeMKV
               </button>

@@ -125,7 +125,7 @@
                                      length of an encode. -->
                                 <button class="btn btn-outline-success btn-sm" onclick="ripNow('{{ d.letter }}')"
                                         title="Rip the disc that is already in this drive">
-                                    <i class="bi bi-play-fill"></i> Rip
+                                    <i class="bi bi-play-fill me-1"></i>Rip
                                 </button>
                                 {% endif %}
                                 <button class="btn btn-outline-info btn-sm" onclick="ejectDrive('{{ d.letter }}')" title="Eject disc">
@@ -334,10 +334,10 @@
                             <div class="col-auto d-flex flex-column gap-1 align-items-end">
                                 <div class="d-flex gap-1">
                                     <button class="btn btn-outline-info btn-sm" onclick='openRematchModal({{ job.id }}, {{ job.display_title | tojson }})' title="Change movie (TMDb)">
-                                        <i class="bi bi-search"></i> Match
+                                        <i class="bi bi-search me-1"></i>Match
                                     </button>
                                     <button class="btn btn-outline-danger btn-sm" onclick="cancelJob({{ job.id }})">
-                                        <i class="bi bi-x-circle"></i> Cancel
+                                        <i class="bi bi-x-circle me-1"></i>Cancel
                                     </button>
                                 </div>
                                 {% if plex_path and job.tmdb_id %}
@@ -421,7 +421,7 @@
             <div class="col-lg-8">
                 <div class="card h-100">
                     <div class="card-header d-flex justify-content-between align-items-center">
-                        <span><i class="bi bi-check-circle me-1"></i>Recent Completed Jobs</span>
+                        <span><i class="bi bi-check-circle me-1"></i>Recent Jobs</span>
                         <a href="/history" class="btn btn-sm btn-outline-light">View All</a>
                     </div>
                     <div class="card-body p-0 table-responsive">
@@ -431,7 +431,7 @@
                                     <th>#</th>
                                     <th>Title</th>
                                     <th>Status</th>
-                                    <th class="d-none d-sm-table-cell">Completed</th>
+                                    <th class="d-none d-sm-table-cell">Finished</th>
                                     <th></th>
                                 </tr>
                             </thead>
