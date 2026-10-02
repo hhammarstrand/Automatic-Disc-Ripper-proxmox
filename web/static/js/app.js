@@ -1860,6 +1860,10 @@ function uploadOne(file, row) {
         xhr.onload = () => {
             let body = {};
             try { body = JSON.parse(xhr.responseText); } catch (_) { /* not JSON */ }
+            if (xhr.status === 401) {
+                location.href = '/login?next=' + encodeURIComponent(location.pathname);
+                return resolve();
+            }
             if (xhr.status >= 200 && xhr.status < 300) {
                 bar.style.width = '100%';
                 bar.classList.add('bg-success');
@@ -2043,3 +2047,67 @@ function importAudiobook(path, btn) {
         .then(d => notify(`Building the book as job #${d.job_id}`, 'success'))
         .catch(err => { btn.disabled = false; notify(err.message, 'danger'); });
 }
+
+
+// ------------------------------------------------------------------ //
+// Password
+// ------------------------------------------------------------------ //
+
+// A session that has expired, or a password set from another browser: every
+// API call answers 401, and the page would otherwise sit there failing
+// quietly. The sign-in page brings the person back here afterwards.
+(function watchForSignOut() {
+    const original = window.fetch;
+    window.fetch = (...args) => original(...args).then(response => {
+        if (response.status === 401 && !location.pathname.startsWith('/login')) {
+            location.href = '/login?next=' + encodeURIComponent(location.pathname + location.search);
+        }
+        return response;
+    });
+})();
+
+function setPassword() {
+    const input = document.getElementById('newPassword');
+    postJson('/api/auth/password', { password: input.value })
+        .then(() => { notify('Password set. This browser stays signed in.', 'success'); setTimeout(() => location.reload(), 800); })
+        .catch(err => notify(err.message, 'danger'));
+}
+
+function clearPassword() {
+    confirmAction({
+        title: 'Remove the password?',
+        body: 'Anyone who can reach this page on the network can then use it again.',
+        confirmLabel: 'Remove password',
+        danger: true,
+    }).then(yes => {
+        if (!yes) return;
+        postJson('/api/auth/password', { clear: true })
+            .then(() => location.reload())
+            .catch(err => notify(err.message, 'danger'));
+    });
+}
+
+function signOut() {
+    fetch('/logout', { method: 'POST' }).then(() => { location.href = '/login'; });
+}
+
+
+// The book build banner moves on its own; when the last build ends the page
+// reloads, which shows the finished book in Recent Jobs.
+(function followBuilds() {
+    if (!document.getElementById('audiobookBuilds')) return;
+    setInterval(() => {
+        fetch('/api/audiobook').then(r => r.json()).then(d => {
+            const builds = d.builds || [];
+            if (!builds.length) { safeReload(); return; }
+            builds.forEach(b => {
+                const row = document.querySelector(`[data-build="${b.job_id}"]`);
+                if (!row) return;
+                const pct = Math.floor(b.progress * 100);
+                row.querySelector('.progress-bar').style.width = pct + '%';
+                row.querySelector('.progress').setAttribute('aria-valuenow', pct);
+                row.querySelector('[data-build-pct]').textContent = pct + '%';
+            });
+        }).catch(() => {});
+    }, 5000);
+})();

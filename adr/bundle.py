@@ -58,6 +58,9 @@ SAFE_KEYS = frozenset({
     "audio_cd_enabled", "audio_cd_format", "audio_cd_mp3_bitrate",
     "cdparanoia_path", "ffmpeg_path", "data_disc_enabled",
     "web_host", "web_port",
+    "audiobook_path", "audiobook_bitrate", "audiobook_mode", "audiobook_title",
+    "audiobook_author", "audiobook_discs_total", "audiobook_discs_done",
+    "audiobook_discs_ripping",
 })
 
 #: Shortest configured value worth hunting for in free text. Below this a

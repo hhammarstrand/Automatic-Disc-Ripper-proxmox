@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.56.0
+
+**A password, if you want one.** The dashboard was open to anyone who could
+reach it, which was a fair choice while it could only rip discs. It can now
+browse the share, start jobs on what is there and delete them, so Settings →
+Advanced → Password puts a password in front of it. It is off until set; only
+a salted hash is stored; a browser stays signed in for a year, because this is
+used from a phone at the drives; changing or removing the password signs every
+other browser out. Five wrong guesses from one address lock that address out
+for five minutes. The container itself is let through, so the health check
+after an update still answers. Forgotten it? On the Proxmox host:
+`pct exec <CTID> -- /opt/adr/.venv/bin/python -m adr.auth clear`.
+
+**A book being built says how far it has got.** Building an M4B is an hour of
+ffmpeg, during which audiobook mode is already off and its banner gone — so
+there was no sign anything was happening. A banner on every page now shows the
+book and a bar that moves, and the page shows the finished book when it is done.
+
 ## 1.55.0
 
 A hard look at everything since 1.49, and what it found.

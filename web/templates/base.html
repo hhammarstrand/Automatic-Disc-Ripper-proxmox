@@ -174,6 +174,24 @@
     </div>
     {% endif %}
 
+    {% if audiobook_builds %}
+    <div class="alert alert-secondary rounded-0 mb-0 py-2" id="audiobookBuilds">
+        <div class="container-fluid">
+            {% for build in audiobook_builds %}
+            <div class="d-flex align-items-center gap-3 flex-wrap" data-build="{{ build.job_id }}">
+                <span class="text-nowrap"><i class="bi bi-book-half me-2"></i>Building <strong>{{ build.title }}</strong></span>
+                <div class="progress flex-grow-1" style="height:6px; min-width:8rem" role="progressbar"
+                     aria-label="How far the book is built" aria-valuemin="0" aria-valuemax="100"
+                     aria-valuenow="{{ (build.progress * 100) | int }}">
+                    <div class="progress-bar bg-info" style="width: {{ (build.progress * 100) | int }}%"></div>
+                </div>
+                <span class="small text-secondary text-nowrap" data-build-pct>{{ (build.progress * 100) | int }}%</span>
+            </div>
+            {% endfor %}
+        </div>
+    </div>
+    {% endif %}
+
     <!-- Main content -->
     <main class="container-fluid py-4">
         {% block content %}{% endblock %}

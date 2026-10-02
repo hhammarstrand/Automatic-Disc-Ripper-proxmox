@@ -234,6 +234,44 @@ def create_app(config: Config, pipeline_manager=None) -> Flask:
     )
     # Template filter for time formatting
     app.jinja_env.filters["duration"] = lambda s: format_duration(s) if s else "–"
+
+    # Sessions, for the optional password (adr.auth). A year, because this is
+    # opened from a phone on the home screen, and signing in again every week
+    # at the drives is exactly the friction that gets a password removed.
+    from datetime import timedelta
+
+    from adr import auth as _auth
+    app.secret_key = _auth.secret_key(config)
+    app.config.update(
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SAMESITE="Lax",
+        PERMANENT_SESSION_LIFETIME=timedelta(days=365),
+    )
+
+    @app.before_request
+    def _require_login():
+        """Everything but the sign-in page and the static files needs the
+        password, once one is set.
+
+        The container itself is let through: update.sh checks /api/status on
+        127.0.0.1 after an update, and an update reported as failed because
+        the health check met a login page is a lie about the update.
+        """
+        from flask import redirect, session, url_for
+
+        if not _config or not _auth.password_set(_config):
+            return None
+        path = request.path
+        if (path in ("/login", "/favicon.ico") or path.startswith("/static/")
+                or request.remote_addr in ("127.0.0.1", "::1")):
+            return None
+        if session.get("auth") == _auth.fingerprint(_config):
+            return None
+        if path.startswith(("/api/", "/stream/")):
+            return jsonify({"ok": False, "error": "Sign in first.",
+                            "message": "Sign in first.", "login": True}), 401
+        return redirect(url_for("login", next=request.full_path.rstrip("?")))
+
     @app.before_request
     def _refuse_cross_site_writes():
         """Refuse a state-changing request that another site sent.
@@ -296,6 +334,9 @@ def create_app(config: Config, pipeline_manager=None) -> Flask:
             # turned on.
             "series_mode": seriesmode.state(_config) if _config else {"active": False},
             "audiobook_mode": audiobook.state(_config) if _config else {"active": False},
+            # A build is an hour of ffmpeg with the mode already off, so the
+            # mode's banner has gone; this one says the book is on its way.
+            "audiobook_builds": audiobook.builds() if _config else [],
         }
 
     return app
@@ -306,6 +347,43 @@ def create_app(config: Config, pipeline_manager=None) -> Flask:
 # ------------------------------------------------------------------ #
 
 def _register_ui_routes(app: Flask) -> None:
+
+    @app.route("/login", methods=["GET", "POST"])
+    def login():
+        from flask import redirect, session
+
+        from adr import auth
+
+        target = request.values.get("next") or "/"
+        # Only a path on this site: an open redirect after sign-in is a
+        # phishing link that starts on the real login page.
+        if not target.startswith("/") or target.startswith("//"):
+            target = "/"
+        if not auth.password_set(_config):
+            return redirect(target)
+        error = ""
+        if request.method == "POST":
+            address = request.remote_addr or "?"
+            if auth.locked_out(address):
+                error = "Too many wrong passwords. Wait five minutes and try again."
+            elif auth.check(_config, request.form.get("password", "")):
+                auth.clear_failures(address)
+                session.permanent = True
+                session["auth"] = auth.fingerprint(_config)
+                return redirect(target)
+            else:
+                auth.record_failure(address)
+                time.sleep(1)
+                error = "That is not the password."
+        return render_template("login.html", error=error, next=target), (401 if error else 200)
+
+    @app.route("/logout", methods=["POST"])
+    def logout():
+        from flask import redirect, session
+
+        session.pop("auth", None)
+        return redirect("/login")
+
 
     @app.route("/")
     def index():
@@ -1063,6 +1141,31 @@ def _register_api_routes(app: Flask) -> None:
             return fail(str(exc), 400)
         return jsonify(result)
 
+    @app.route("/api/auth/password", methods=["POST"])
+    def api_auth_password():
+        """Set, change or remove the web UI password.
+
+        Behind the login like everything else once a password exists, so only
+        someone signed in can change it. Setting the first one signs this
+        browser in, rather than locking out the person who just chose it.
+        """
+        from flask import session
+
+        from adr import auth
+
+        data = request.get_json(silent=True) or {}
+        if data.get("clear"):
+            auth.clear_password(_config)
+            session.pop("auth", None)
+            return jsonify({"ok": True, "password_set": False})
+        try:
+            auth.set_password(_config, str(data.get("password", "")))
+        except ValueError as exc:
+            return fail(str(exc), 400)
+        session.permanent = True
+        session["auth"] = auth.fingerprint(_config)
+        return jsonify({"ok": True, "password_set": True})
+
     @app.route("/api/audiobook", methods=["GET", "POST"])
     def api_audiobook():
         """Read, start or stop audiobook mode.
@@ -1074,7 +1177,7 @@ def _register_api_routes(app: Flask) -> None:
         from adr import audiobook
 
         if request.method == "GET":
-            return jsonify(audiobook.state(_config))
+            return jsonify({**audiobook.state(_config), "builds": audiobook.builds()})
         data = request.get_json(silent=True) or {}
         if not data.get("active"):
             return jsonify(audiobook.stop(_config, discard=bool(data.get("discard"))))

@@ -416,6 +416,23 @@ def build_m4b(config, files: list[Path], meta: dict, destination: Path,
 # A build, as a job the dashboard shows
 # ------------------------------------------------------------------ #
 
+def builds() -> list[dict]:
+    """Books being built right now, for the banner: what, and how far."""
+    from adr.models import Job, JobStatus, get_session
+
+    session = get_session()
+    try:
+        rows = (session.query(Job)
+                .filter(Job.drive == "audiobook", Job.status == JobStatus.ENCODING)
+                .order_by(Job.id).all())
+        return [{"job_id": j.id, "title": j.title or j.disc_label or "Audiobook",
+                 "progress": round(float(j.progress_encode or 0.0), 3)} for j in rows]
+    except Exception:                                   # noqa: BLE001 - a banner
+        return []
+    finally:
+        session.close()
+
+
 def _make_job(author: str, title: str, label: str):
     from adr.models import Job, JobStatus, get_session
 

@@ -1561,3 +1561,22 @@ input, select, textarea, .list-group-item-action {
 }
 
 .adr-modebuttons .btn { white-space: nowrap; }
+
+/* ---- Sign in ---- */
+body.adr-login {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+}
+.adr-login-box {
+    flex: 0 0 auto;
+    height: auto;
+    width: 100%;
+    max-width: 22rem;
+    padding: 1.75rem 1.5rem;
+    border: 1px solid var(--adr-border);
+    border-radius: 0.75rem;
+    background: var(--adr-card);
+}

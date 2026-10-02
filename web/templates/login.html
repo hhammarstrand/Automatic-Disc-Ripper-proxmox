@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Sign in – Automatic Disc Ripper</title>
+    <!-- Not base.html: that page polls the API every few seconds, and every
+         one of those answers 401 until the password is in. -->
+    <meta name="theme-color" content="#0d1117">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ADR">
+    <link rel="manifest" href="/static/manifest.json">
+    <link rel="apple-touch-icon" href="/static/icons/apple-touch-icon.png">
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <link href="/static/vendor/bootstrap.min.css" rel="stylesheet">
+    <link href="/static/vendor/bootstrap-icons.min.css" rel="stylesheet">
+    <link href="/static/css/style.css" rel="stylesheet">
+</head>
+<body class="adr-login">
+    <main class="adr-login-box">
+        <h1 class="h4 mb-1 d-flex align-items-center gap-2">
+            <img src="/static/favicon.svg" alt="" width="28" height="28">Automatic Disc Ripper
+        </h1>
+        <p class="text-secondary small mb-4">This dashboard has a password.</p>
+        <form method="post" action="/login">
+            <input type="hidden" name="next" value="{{ next }}">
+            <label class="form-label" for="password">Password</label>
+            <input class="form-control mb-3{% if error %} is-invalid{% endif %}" type="password"
+                   id="password" name="password" autocomplete="current-password" autofocus required>
+            {% if error %}<div class="text-danger small mb-3" role="alert">{{ error }}</div>{% endif %}
+            <button class="btn btn-primary w-100" type="submit">
+                <i class="bi bi-box-arrow-in-right me-1"></i>Sign in
+            </button>
+        </form>
+        <details class="small text-secondary mt-4">
+            <summary>Forgot it?</summary>
+            <p class="mt-2 mb-1">On the Proxmox host, remove it with:</p>
+            <code class="d-block text-break">pct exec &lt;CTID&gt; -- /opt/adr/.venv/bin/python -m adr.auth clear</code>
+        </details>
+    </main>
+</body>
+</html>

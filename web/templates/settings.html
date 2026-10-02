@@ -683,6 +683,44 @@
     </div>
         </div>
         <div class="tab-pane fade" id="pane-advanced" role="tabpanel" aria-labelledby="tab-advanced">
+    <!-- The password is not part of the settings form: no name attributes,
+         so Save never sends it, and it is set through its own endpoint,
+         stored only as a hash. -->
+    <div class="card mb-4">
+        <div class="card-header"><i class="bi bi-shield-lock me-1"></i>Password</div>
+        <div class="card-body">
+            <p class="small text-secondary">
+                {% if config.web_password_hash %}
+                The dashboard asks for a password. Anyone who can reach it on the
+                network can otherwise browse the share, start jobs and delete them.
+                {% else %}
+                No password: anyone who can reach this page on the network can browse
+                the share, start jobs and delete them. Set one to require it.
+                {% endif %}
+            </p>
+            <div class="row g-2 align-items-end">
+                <div class="col-sm-6">
+                    <label class="form-label" for="newPassword">{% if config.web_password_hash %}New password{% else %}Password{% endif %}</label>
+                    <input type="password" class="form-control" id="newPassword" autocomplete="new-password" minlength="6">
+                </div>
+                <div class="col-sm-auto d-flex gap-2 flex-wrap">
+                    <button type="button" class="btn btn-outline-info" onclick="setPassword()">
+                        <i class="bi bi-key me-1"></i>{% if config.web_password_hash %}Change{% else %}Set password{% endif %}
+                    </button>
+                    {% if config.web_password_hash %}
+                    <button type="button" class="btn btn-outline-danger" onclick="clearPassword()">
+                        <i class="bi bi-unlock me-1"></i>Remove
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+            {% if config.web_password_hash %}
+            <button type="button" class="btn btn-link btn-sm px-0 mt-2" onclick="signOut()">
+                <i class="bi bi-box-arrow-right me-1"></i>Sign out of this browser
+            </button>
+            {% endif %}
+        </div>
+    </div>
         <!-- Web UI -->
         <div class="card mb-4">
             <div class="card-header"><i class="bi bi-globe me-1"></i>Web interface</div>
