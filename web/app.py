@@ -4,6 +4,7 @@ Provides a dashboard UI and JSON API for monitoring/controlling
 the ripping pipeline.
 """
 
+import contextlib
 import logging
 import os
 import time
@@ -1529,6 +1530,62 @@ def _register_api_routes(app: Flask) -> None:
     def api_get_settings():
         """Get current settings as JSON."""
         return jsonify(_config.as_dict())
+
+    @app.route("/api/upload", methods=["PUT"])
+    def api_upload():
+        """Add a film by hand: an ISO, or a video file, sent as the raw body.
+
+        PUT with the file as the body and its name in ?name=, rather than a
+        multipart form: werkzeug spools a form upload to a temporary file and
+        only then hands it over, which for an 8 GB ISO is a second full copy
+        on the container disk before anything can happen. The body is written
+        straight to where the rip would have put it.
+        """
+        from adr import imports
+        from adr.preflight import destination_blocker
+
+        name = request.args.get("name", "")
+        if not imports.allowed(name):
+            return fail("Only disc images (.iso) and video files can be added.", 400)
+        size = request.content_length or 0
+        if size <= 0:
+            return fail("The upload was empty.", 400)
+        worker = getattr(_pipeline_manager, "import_worker", None)
+        if worker is None:
+            return fail("The pipeline is not running.", 503)
+        blocker = destination_blocker(_config)
+        if blocker:
+            return fail(f"Finished films have nowhere to go: {blocker}", 409)
+        free = imports.free_bytes(_config)
+        if free < size + imports.HEADROOM_BYTES:
+            return fail(
+                f"Not enough room on the container disk: the file is "
+                f"{size / 1024**3:.1f} GB and {free / 1024**3:.1f} GB is free, "
+                "and it needs room to be ripped and encoded beside itself.", 507)
+
+        job, target = imports.create_job(_config, name)
+        partial = target.with_name(target.name + ".part")
+        written = 0
+        try:
+            with open(partial, "wb") as out:
+                while True:
+                    chunk = request.stream.read(4 * 1024 * 1024)
+                    if not chunk:
+                        break
+                    out.write(chunk)
+                    written += len(chunk)
+            if written != size:
+                raise OSError(f"received {written} of {size} bytes")
+            partial.rename(target)
+        except OSError as exc:
+            with contextlib.suppress(OSError):
+                partial.unlink()
+            imports.fail(job.id, f"The upload did not arrive whole: {exc}")
+            return fail(f"The upload did not arrive whole: {exc}", 500)
+
+        worker.submit(job.id, target)
+        logger.info("Upload %s (%.1f GB) queued as job %s", target.name, size / 1024**3, job.id)
+        return jsonify({"ok": True, "job_id": job.id})
 
     @app.route("/api/makemkv/refresh-key", methods=["POST"])
     def api_refresh_makemkv_key():

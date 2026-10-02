@@ -43,13 +43,25 @@ def encoded_files(job) -> list[Path]:
     return finished_files(job.output_path)
 
 
+#: What can sit in raw/<job>/ to be encoded: the MKVs MakeMKV writes, and a
+#: video file uploaded by hand (adr.imports), which is its own raw file. Not an
+#: ISO — that is ripped into MKVs first — and not an upload still arriving.
+_ENCODABLE = frozenset({
+    ".mkv", ".mp4", ".m4v", ".mov", ".avi", ".wmv", ".flv", ".ts", ".mpg",
+    ".mpeg", ".m2ts", ".mts", ".vob", ".webm", ".ogv", ".3gp", ".divx",
+})
+
+
 def _raw_files(job, config) -> list[Path]:
-    """Raw MKVs from the rip, if the cleanup has not run."""
+    """Raw videos from the rip or the upload, if the cleanup has not run."""
     raw_dir = Path(config.raw_path) / str(job.id)
     if not raw_dir.is_dir():
         return []
     try:
-        return sorted(p for p in raw_dir.glob("*.mkv") if p.is_file())
+        return sorted(
+            p for p in raw_dir.iterdir()
+            if p.is_file() and p.suffix.lower() in _ENCODABLE
+        )
     except OSError:
         return []
 

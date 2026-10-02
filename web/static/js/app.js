@@ -253,9 +253,13 @@ const _inflight = new Set();
 // ------------------------------------------------------------------ //
 
 let _reloadPending = false;
+let _uploadsInFlight = 0;
 
 function uiIsBusy() {
-    return document.body.classList.contains('modal-open')
+    // An upload in flight dies with the page, and the job it creates is
+    // exactly the "new job" that triggers a reload.
+    return _uploadsInFlight > 0
+        || document.body.classList.contains('modal-open')
         || document.querySelector('.offcanvas.show') !== null
         || (document.activeElement !== null
             && typeof document.activeElement.matches === 'function'
@@ -1787,3 +1791,95 @@ document.addEventListener('DOMContentLoaded', () => {
     refreshDoctorBadge();
     setInterval(() => pollWithoutStacking('doctor', refreshDoctorBadge), 60000);
 });
+
+
+// ------------------------------------------------------------------ //
+// Add a file
+//
+// The file is PUT as the request body, one file at a time. XMLHttpRequest
+// rather than fetch, because fetch cannot say how far an upload has got, and
+// an 8 GB ISO over Wi-Fi is minutes that need a number on them.
+// ------------------------------------------------------------------ //
+
+function initUpload() {
+    const drop = document.getElementById('uploadDrop');
+    const input = document.getElementById('uploadInput');
+    if (!drop || !input) return;
+    input.addEventListener('change', () => {
+        queueUploads(Array.from(input.files));
+        input.value = '';
+    });
+    ['dragenter', 'dragover'].forEach(type => drop.addEventListener(type, e => {
+        e.preventDefault();
+        drop.classList.add('adr-dropzone-over');
+    }));
+    ['dragleave', 'drop'].forEach(type => drop.addEventListener(type, e => {
+        e.preventDefault();
+        drop.classList.remove('adr-dropzone-over');
+    }));
+    drop.addEventListener('drop', e => queueUploads(Array.from(e.dataTransfer.files)));
+    window.addEventListener('beforeunload', e => {
+        if (_uploadsInFlight > 0) { e.preventDefault(); e.returnValue = ''; }
+    });
+}
+
+let _uploadChain = Promise.resolve();
+
+function queueUploads(files) {
+    const list = document.getElementById('uploadList');
+    files.forEach(file => {
+        const row = document.createElement('div');
+        row.className = 'adr-upload small mb-2';
+        row.innerHTML = `
+            <div class="d-flex justify-content-between gap-2">
+              <span class="text-truncate">${escapeHtml(file.name)}</span>
+              <span class="text-secondary text-nowrap" data-upload-state>waiting</span>
+            </div>
+            <div class="progress mt-1" style="height:6px"><div class="progress-bar" style="width:0%"></div></div>`;
+        list.appendChild(row);
+        _uploadsInFlight++;
+        _uploadChain = _uploadChain.then(() => uploadOne(file, row)).finally(() => {
+            _uploadsInFlight--;
+        });
+    });
+    _uploadChain.then(() => { if (_uploadsInFlight === 0) safeReload(); });
+}
+
+function uploadOne(file, row) {
+    const state = row.querySelector('[data-upload-state]');
+    const bar = row.querySelector('.progress-bar');
+    return new Promise(resolve => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('PUT', '/api/upload?name=' + encodeURIComponent(file.name));
+        xhr.upload.onprogress = e => {
+            if (!e.lengthComputable) return;
+            const pct = Math.floor(e.loaded / e.total * 100);
+            bar.style.width = pct + '%';
+            state.textContent = `${pct}% of ${(e.total / 1024 ** 3).toFixed(1)} GB`;
+        };
+        xhr.onload = () => {
+            let body = {};
+            try { body = JSON.parse(xhr.responseText); } catch (_) { /* not JSON */ }
+            if (xhr.status >= 200 && xhr.status < 300) {
+                bar.style.width = '100%';
+                bar.classList.add('bg-success');
+                state.textContent = `job #${body.job_id}`;
+            } else {
+                bar.classList.add('bg-danger');
+                state.textContent = 'failed';
+                notify(body.error || `Upload of ${file.name} failed (${xhr.status})`, 'danger');
+            }
+            resolve();
+        };
+        xhr.onerror = () => {
+            bar.classList.add('bg-danger');
+            state.textContent = 'failed';
+            notify(`Upload of ${file.name} was interrupted`, 'danger');
+            resolve();
+        };
+        state.textContent = 'starting';
+        xhr.send(file);
+    });
+}
+
+document.addEventListener('DOMContentLoaded', initUpload);

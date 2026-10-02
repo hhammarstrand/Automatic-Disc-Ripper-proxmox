@@ -1532,3 +1532,22 @@ input, select, textarea, .list-group-item-action {
 /* Words under icon buttons are for the phone; the table has a header and
    tooltips at desk width. */
 .adr-btnword { display: none; }
+
+/* ---- Add a file ----
+   A label for the hidden file input, so a tap anywhere on it opens the
+   picker on a phone, where there is nothing to drag from. */
+.adr-dropzone {
+    display: block;
+    padding: 1.1rem 1rem;
+    border: 1px dashed var(--adr-border);
+    border-radius: 0.5rem;
+    text-align: center;
+    cursor: pointer;
+    color: var(--adr-text-muted);
+    transition: border-color var(--adr-dur-fast), color var(--adr-dur-fast);
+}
+.adr-dropzone:hover,
+.adr-dropzone-over {
+    border-color: var(--adr-accent);
+    color: inherit;
+}

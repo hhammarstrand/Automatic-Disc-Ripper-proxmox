@@ -136,6 +136,9 @@ class MakeMKVRipper:
         d = (drive or "").strip()
         if d.startswith("/dev/"):
             return f"dev:{d}"
+        # A disc image added by hand (adr.imports) is already a source.
+        if d.startswith("iso:"):
+            return d
         # Legacy Windows drive-letter form.
         d = d.rstrip("\\")
         if not d.endswith(":"):

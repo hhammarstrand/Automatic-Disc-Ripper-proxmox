@@ -2397,6 +2397,7 @@ class PipelineManager:
         self.drive_pipelines: dict[str, DrivePipeline] = {}
         self.encoder_workers: list[EncoderWorker] = []
         self.folder_watcher: FolderWatcher | None = None
+        self.import_worker = None   # adr.imports.ImportWorker, once started
 
     def start(self) -> None:
         """Initialise database and start all background threads."""
@@ -2470,6 +2471,11 @@ class PipelineManager:
             logger.info("FolderWatcher enabled: %s", self.config.watch_path)
         else:
             logger.info("FolderWatcher disabled (no watch_path configured)")
+
+        # Files added by hand in the web UI.
+        from adr.imports import ImportWorker
+        self.import_worker = ImportWorker(self.config, self.encode_queue)
+        self.import_worker.start()
 
         logger.info("PipelineManager started: %d drives, %d encoder workers", len(drives), num_workers)
 
@@ -2597,6 +2603,8 @@ class PipelineManager:
         self.disc_watcher.stop()
         if self.folder_watcher:
             self.folder_watcher.stop()
+        if self.import_worker:
+            self.import_worker.stop()
         for worker in self.encoder_workers:
             worker.stop()
         for worker in self.encoder_workers:

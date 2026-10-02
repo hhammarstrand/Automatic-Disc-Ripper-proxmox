@@ -373,6 +373,28 @@
         <div class="row g-4">
             <!-- Left column: Queue + Watch -->
             <div class="col-lg-4 d-flex flex-column gap-4">
+                <!-- A film that is already a file: an ISO, an MP4. It joins the
+                     pipeline where a ripped disc does, so it is identified,
+                     encoded and filed exactly like one. -->
+                <div class="card" id="uploadCard">
+                    <div class="card-header">
+                        <i class="bi bi-cloud-arrow-up me-1"></i>Add a file
+                    </div>
+                    <div class="card-body">
+                        <label class="adr-dropzone" id="uploadDrop" for="uploadInput">
+                            <i class="bi bi-file-earmark-play fs-3 d-block mb-1"></i>
+                            <span class="d-block">Drop an ISO or a video file here, or tap to choose</span>
+                            <small class="text-secondary d-block mt-1">
+                                Named from TMDb, encoded with your preset and filed in
+                                the library — the same as a disc.
+                            </small>
+                        </label>
+                        <input type="file" id="uploadInput" class="d-none" multiple
+                               accept=".iso,.mkv,.mp4,.m4v,.mov,.avi,.ts,.m2ts,.mts,.mpg,.mpeg,.vob,.webm,.wmv">
+                        <div id="uploadList" class="mt-2"></div>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="card-header">
                         <i class="bi bi-collection-play me-1"></i>Encode Queue

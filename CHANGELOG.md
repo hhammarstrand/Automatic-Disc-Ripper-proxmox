@@ -2,6 +2,19 @@
 
 ## 1.52.0
 
+**Add a film that is already a file.** The dashboard has an *Add a file* card:
+drop an ISO or a video file on it, or tap it on a phone to pick one. It joins
+the pipeline exactly where a ripped disc does. The file is written straight
+into `raw/<job>/` — sent as the request body, not a form, so an 8 GB image is
+not first spooled to a temporary file and copied a second time — named from
+TMDb the way a disc label is (`The.Matrix.1999.1080p.BluRay.x264` is searched
+as *The Matrix 1999*), and handed to the same code that plans, encodes, names
+and files a disc. An ISO is read by MakeMKV from an `iso:` source and deleted
+once it has been ripped. The upload is refused before it is sent when the
+container disk has no room for it, or when finished films have nowhere to go;
+the dashboard does not reload under an upload in progress, and leaving the
+page asks first.
+
 **The log says what happened again.** Opening the Doctor page wrote
 "Auto-discovered preset file" twice, and the Doctor badge in the menu polls it
 once a minute on every page — so two identical lines a minute, all day. The
