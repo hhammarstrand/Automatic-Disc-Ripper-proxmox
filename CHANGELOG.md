@@ -1,5 +1,26 @@
 # Changelog
 
+## 1.51.0
+
+**A missing MakeMKV key is fetched, not reported.** The free beta key the
+forum posts was fetched once, by the installer, and after that only when
+somebody pressed the button in Settings. Now the service fetches it at startup
+when there is none, and again before every scan and rip — so a container
+installed without network, or a settings.conf that went missing, sorts itself
+out before the next disc.
+
+**An expired key is replaced.** The beta key rotates about monthly, and an old
+one sits in settings.conf looking like any other key. When MakeMKV refuses it
+during the disc scan, the current key is fetched and the scan's second attempt
+— which happened anyway — runs with it. The job log says so.
+
+**"Refresh MakeMKV key" refreshes.** It called the same function the installer
+does, which keeps a stored key by design — so with an expired key in place the
+button reported success and changed nothing.
+
+The forum is asked at most once every ten minutes, whatever happens; a drive
+that keeps failing does not become a request per disc.
+
 ## 1.50.0
 
 **A container that started before its share no longer has to be found out by

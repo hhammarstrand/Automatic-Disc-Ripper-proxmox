@@ -51,3 +51,21 @@ def isolated_database(tmp_path, monkeypatch):
     engine = getattr(models, "_engine", None)
     if engine is not None:
         engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def no_makemkv_forum(monkeypatch):
+    """Every scan and rip now makes sure a MakeMKV key is stored, fetching one
+    from the forum when there is none — which on a test machine is always. A
+    suite that reaches out to somebody's forum on every ripper test is slow,
+    flaky offline, and rude. Tests that exercise the fetch patch it themselves.
+    """
+    import requests
+
+    from adr import makemkv_key
+
+    def _offline(*_a, **_k):
+        raise requests.ConnectionError("network disabled in tests")
+
+    monkeypatch.setattr(makemkv_key.requests, "get", _offline)
+    monkeypatch.setattr(makemkv_key, "_last_fetch", 0.0)

@@ -65,6 +65,15 @@ SCAN_RETRY_DELAY = 5
 # DRV:index,vis,enabled,flags,"drive_name","disc_name"
 
 
+def _ensure_makemkv_key() -> None:
+    """Fetch a key if there is none. Never stops a rip: MakeMKV says why."""
+    try:
+        from adr import makemkv_key
+        makemkv_key.ensure_present()
+    except Exception:                                   # noqa: BLE001 - logged
+        logger.warning("Could not make sure a MakeMKV key is stored", exc_info=True)
+
+
 class RipResult:
     """Result of a ripping operation."""
 
@@ -100,6 +109,8 @@ class MakeMKVRipper:
         #: has none — and that is how a cancelled job went on to rip all of
         #: them.
         self.scan_cancelled: bool = False
+        #: Whether MakeMKV refused its registration key during the last scan.
+        self.scan_key_rejected: bool = False
 
         if not os.path.isfile(self._exe):
             logger.warning("MakeMKV not found at %s", self._exe)
@@ -149,6 +160,8 @@ class MakeMKVRipper:
         """
         self.last_scan_error = ""
         self.scan_cancelled = False
+        self.scan_key_rejected = False
+        _ensure_makemkv_key()
         for attempt in (1, 2):
             titles = self._scan_once(drive_letter, attempt, job_id)
             if titles:
@@ -156,6 +169,17 @@ class MakeMKVRipper:
                 return titles
             if self.scan_cancelled:
                 return {}
+            if attempt == 1 and self.scan_key_rejected:
+                # The beta key rotates monthly and an expired one still looks
+                # like a key. The second attempt is going to happen anyway; it
+                # might as well happen with the current one.
+                from adr import makemkv_key
+                old = makemkv_key.read_existing_key()
+                if makemkv_key.refresh_key() not in (None, old):
+                    logger.info("MakeMKV rejected its key; fetched the current one")
+                    if self.log_sink:
+                        self.log_sink("MakeMKV rejected its registration key; "
+                                      "fetched the current beta key and retrying.")
             if attempt == 1:
                 logger.info("Retrying the disc scan of %s once", drive_letter)
                 time.sleep(SCAN_RETRY_DELAY)
@@ -186,6 +210,8 @@ class MakeMKVRipper:
                 return {}
             logger.debug("Scan exit code: %d, stdout lines: %d",
                          result.returncode, len(result.stdout.splitlines()))
+            from adr.makemkv_key import key_rejected
+            self.scan_key_rejected = key_rejected(result.stdout)
             last_error = ""
             for line in result.stdout.splitlines():
                 if line.startswith("TINFO:"):
@@ -287,6 +313,7 @@ class MakeMKVRipper:
         """
         result = RipResult()
         self.last_message_error = ""     # this rip's, not the previous one's
+        _ensure_makemkv_key()
         source = self._make_dev_source(drive_letter)
 
         # Prepare output directory

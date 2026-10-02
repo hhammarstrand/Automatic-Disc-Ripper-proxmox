@@ -347,7 +347,8 @@ def _makemkv_scan(device: str, has_disc: bool, timeout: int | None = None) -> di
 
     output = "\n".join(lines)
     titles = output.count("TINFO:")
-    if "registration key" in output.lower() or "app_KeyExpired" in output:
+    from adr.makemkv_key import key_rejected
+    if key_rejected(output):
         return _step(
             "MakeMKV scan", "fail",
             "MakeMKV rejected its registration key. Refresh it under Settings.",

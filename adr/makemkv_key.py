@@ -24,6 +24,8 @@ import logging
 import os
 import re
 import sys
+import threading
+import time
 from pathlib import Path
 
 import requests
@@ -124,6 +126,89 @@ def ensure_key(explicit_key: str | None = None, path: Path = SETTINGS_FILE) -> s
         write_key(fetched, path)
         return fetched
     return None
+
+
+# The forum is somebody else's server. A drive that keeps rejecting discs must
+# not turn into a request per disc, so a fetch that has just been tried is not
+# tried again for a while — whether it worked or not.
+FETCH_INTERVAL = 600
+_fetch_lock = threading.Lock()
+_last_fetch = 0.0
+
+
+def _fetch_throttled() -> str | None:
+    global _last_fetch
+    with _fetch_lock:
+        now = time.monotonic()
+        if _last_fetch and now - _last_fetch < FETCH_INTERVAL:
+            logger.info("MakeMKV key fetched %ds ago; not asking the forum again yet",
+                        now - _last_fetch)
+            return None
+        _last_fetch = now
+    key = fetch_latest_key()
+    return key if key and is_valid_key(key) else None
+
+
+def ensure_present(path: Path = SETTINGS_FILE) -> str | None:
+    """Make sure *some* key is stored, fetching one only when there is none.
+
+    Called before every scan and rip. Without a key MakeMKV refuses the disc,
+    and the fix — the free beta key the forum posts — needs nobody to press
+    anything.
+    """
+    existing = read_existing_key(path)
+    if existing:
+        return existing
+    explicit = (os.environ.get("ADR_MAKEMKV_KEY") or "").strip()
+    if is_valid_key(explicit):
+        write_key(explicit, path)
+        return explicit
+    logger.warning("No MakeMKV key stored; fetching the current beta key")
+    fetched = _fetch_throttled()
+    if fetched:
+        write_key(fetched, path)
+    return fetched
+
+
+def refresh_key(path: Path = SETTINGS_FILE, throttle: bool = True) -> str | None:
+    """Replace the stored key with the forum's current one.
+
+    For a key MakeMKV has rejected: the beta key rotates about monthly, and an
+    old one stays in settings.conf looking perfectly valid. ensure_key keeps an
+    existing key by design, which is why it cannot be the answer to an expired
+    one. A key from ADR_MAKEMKV_KEY was chosen on purpose and is left alone.
+
+    Returns the key now stored — the new one, or the old one when the forum
+    could not be reached.
+    """
+    if is_valid_key((os.environ.get("ADR_MAKEMKV_KEY") or "").strip()):
+        return ensure_key(path=path)
+    fetched = _fetch_throttled() if throttle else fetch_latest_key()
+    if fetched and is_valid_key(fetched):
+        if fetched != read_existing_key(path):
+            logger.info("MakeMKV key replaced with the current beta key")
+        write_key(fetched, path)
+        return fetched
+    return read_existing_key(path)
+
+
+def key_rejected(output: str) -> bool:
+    """Whether MakeMKV's output says its registration key was refused."""
+    return "registration key" in output.lower() or "app_KeyExpired" in output
+
+
+def ensure_in_background() -> None:
+    """Fetch a missing key without holding up startup on the network."""
+    threading.Thread(target=_ensure_quietly, name="MakeMKVKey", daemon=True).start()
+
+
+def _ensure_quietly() -> None:
+    try:
+        if not ensure_present():
+            logger.warning("No MakeMKV key, and none could be fetched; "
+                           "retrying before the next disc")
+    except Exception:                                   # noqa: BLE001 - logged
+        logger.exception("Could not ensure a MakeMKV key")
 
 
 def main(argv: list[str] | None = None) -> int:

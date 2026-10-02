@@ -214,7 +214,9 @@ def check_makemkv_key() -> dict:
         return _check("makemkv_key", "MakeMKV key", "ok", "A registration key is stored.")
     return _check(
         "makemkv_key", "MakeMKV key", "fail",
-        "No registration key. MakeMKV will refuse to open a disc.",
+        "No registration key, and the free beta key could not be fetched from "
+        "the MakeMKV forum. It is tried again before every disc; until it "
+        "works, MakeMKV will refuse to open one.",
         "Settings → Refresh MakeMKV key",
     )
 

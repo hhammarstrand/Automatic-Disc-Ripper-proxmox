@@ -1532,7 +1532,10 @@ def _register_api_routes(app: Flask) -> None:
         if explicit and not makemkv_key.is_valid_key(explicit):
             return fail("Key is malformed (expected T-...)", 400)
         try:
-            key = makemkv_key.ensure_key(explicit)
+            # Without an explicit key this is "get me the current one", and
+            # ensure_key would hand back the stored key however expired it is.
+            key = (makemkv_key.ensure_key(explicit) if explicit
+                   else makemkv_key.refresh_key(throttle=False))
         except Exception as exc:  # noqa: BLE001 — surface any fetch/IO failure to the UI
             logger.warning("MakeMKV key refresh failed: %s", exc)
             return fail(str(exc), 500)

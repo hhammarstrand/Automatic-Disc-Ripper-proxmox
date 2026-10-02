@@ -58,6 +58,9 @@ def main() -> None:
     init_db()
     logger.info("Database initialised")
 
+    from adr import makemkv_key
+    makemkv_key.ensure_in_background()
+
     # Start pipeline manager (disc watcher + encoder workers)
     pipeline = PipelineManager(config)
     pipeline.start()
